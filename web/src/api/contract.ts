@@ -579,7 +579,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/desktop/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["DesktopClientHeartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/desktop/clients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["DesktopClientList"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/client-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/health/live": {
         parameters: {
             query?: never;
             header?: never;
@@ -830,7 +928,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Device"][];
+                    };
                 };
             };
         };
@@ -848,12 +948,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Created */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Device"];
+                    };
                 };
             };
         };
@@ -886,7 +988,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Device"];
+                    };
                 };
             };
         };
@@ -910,7 +1014,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Device"];
+                    };
                 };
             };
         };
@@ -926,8 +1032,8 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description OK */
-                200: {
+                /** @description No Content */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -969,7 +1075,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["DeviceProbeResult"];
+                    };
                 };
             };
         };
@@ -1006,7 +1114,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["DeviceProbeResult"];
+                    };
                 };
             };
         };
@@ -3678,7 +3788,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Tag"][];
+                    };
                 };
             };
         };
@@ -3696,12 +3808,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Created */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Tag"];
+                    };
                 };
             };
         };
@@ -3734,7 +3848,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Tag"];
+                    };
                 };
             };
         };
@@ -3758,7 +3874,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["Tag"];
+                    };
                 };
             };
         };
@@ -3774,8 +3892,8 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description OK */
-                200: {
+                /** @description No Content */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -3783,6 +3901,84 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tags/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TagUsageView"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tags/{id}/rebind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TagRebindRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TagRebindResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3815,7 +4011,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["TagBatchCreated"];
+                    };
                 };
             };
         };
@@ -3887,7 +4085,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ImportResult"];
+                    };
                 };
             };
         };
@@ -5642,7 +5842,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AlarmRule"][];
+                    };
                 };
             };
         };
@@ -5660,12 +5862,14 @@ export interface paths {
                 };
             };
             responses: {
-                /** @description OK */
-                200: {
+                /** @description Created */
+                201: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AlarmRule"];
+                    };
                 };
             };
         };
@@ -5703,7 +5907,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AlarmRule"];
+                    };
                 };
             };
         };
@@ -5719,8 +5925,8 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description OK */
-                200: {
+                /** @description No Content */
+                204: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5762,7 +5968,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AlarmRule"];
+                    };
                 };
             };
         };
@@ -5801,7 +6009,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AlarmShelve"];
+                    };
                 };
             };
         };
@@ -5915,7 +6125,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AlarmRuleImportResult"];
+                    };
                 };
             };
         };
@@ -10261,6 +10473,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/screens/{id}/thumbnail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    draft?: boolean;
+                };
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/screens/validate": {
         parameters: {
             query?: never;
@@ -10469,6 +10718,45 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": components["schemas"]["ScreenRollbackRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/screens/{id}/runtime-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScreenRuntimeReportRequest"];
                 };
             };
             responses: {
@@ -13237,10 +13525,7 @@ export interface components {
             /** Format: int64 */
             dataAsOf: number | string;
         };
-        /**
-         * @default On
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         AlarmActiveWhen: "On" | "Off" | "Change";
         AlarmAnalyticsThresholds: {
             /** Format: int32 */
@@ -13280,15 +13565,9 @@ export interface components {
             /** Format: int32 */
             topN?: number | string;
         };
-        /**
-         * @default Process
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         AlarmCategory: "Process" | "Equipment" | "Safety" | "Diagnostic";
-        /**
-         * @default Major
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         AlarmConsequence: "Minor" | "Major" | "Severe" | "Safety";
         /**
          * @default Info
@@ -13354,6 +13633,15 @@ export interface components {
             outOfService?: boolean;
             outOfServiceReason?: null | string;
         };
+        AlarmRuleImportResult: {
+            /** Format: int32 */
+            created: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            skipped: number | string;
+            errors: string[];
+        };
         AlarmRuleRequest: {
             /** Format: int32 */
             tagId: number | string;
@@ -13409,15 +13697,27 @@ export interface components {
         };
         /** @enum {unknown} */
         AlarmRuleType: "High" | "HighHigh" | "Low" | "LowLow" | "StateChange" | "Discrete" | "BadQuality" | "Expression";
+        AlarmShelve: {
+            /** Format: int32 */
+            id?: number | string;
+            /** Format: int32 */
+            ruleId?: number | string;
+            reason?: string;
+            user?: string;
+            /** Format: int64 */
+            startTs?: number | string;
+            /** Format: int64 */
+            untilTs?: number | string;
+            /** Format: int64 */
+            clearedTs?: null | number | string;
+            clearedBy?: null | string;
+        };
         AlarmShelveRequest: {
             /** Format: int32 */
             minutes: number | string;
             reason: null | string;
         };
-        /**
-         * @default None
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         AlarmSuppressMode: "None" | "WhenOn" | "WhenOff";
         AlarmThresholdsRequest: {
             thresholds: components["schemas"]["AlarmAnalyticsThresholds"];
@@ -13845,9 +14145,128 @@ export interface components {
             trace: string[];
             spans: components["schemas"]["ScriptDiagnostic"][];
             inputs: components["schemas"]["ScriptPreviewSample"][];
+            errorDetail?: null | components["schemas"]["ScriptError"];
         };
         DecisionRequest: {
             comment: null | string;
+        };
+        DesktopClientHeartbeatRequest: {
+            clientId?: null | string;
+            machineName?: null | string;
+            windowsUser?: null | string;
+            appVersion?: null | string;
+            webView2Version?: null | string;
+            bootId?: null | string;
+            targetKind?: null | string;
+            /** Format: int32 */
+            targetId?: null | number | string;
+            targetName?: null | string;
+            configScope?: null | string;
+            blockedReason?: null | string;
+        };
+        DesktopClientHeartbeatResponse: {
+            ok: boolean;
+            /** Format: int64 */
+            serverTs: number | string;
+            node: string;
+            haRole: string;
+            policy: components["schemas"]["DesktopClientPolicyView"];
+            /** Format: int32 */
+            heartbeatSeconds: number | string;
+        };
+        DesktopClientPolicyView: {
+            minimumVersion: null | string;
+            latestVersion: null | string;
+            downloadUrl: null | string;
+            updateRequired: boolean;
+            updateAvailable: boolean;
+        };
+        DesktopClientSnapshot: {
+            node: string;
+            haRole: string;
+            /** Format: int32 */
+            onlineThresholdSeconds: number | string;
+            /** Format: int32 */
+            total: number | string;
+            /** Format: int32 */
+            online: number | string;
+            /** Format: int32 */
+            blocked: number | string;
+            /** Format: int32 */
+            outdated: number | string;
+            truncated: boolean;
+            policy: components["schemas"]["DesktopClientPolicyView"];
+            clients: components["schemas"]["DesktopClientView"][];
+        };
+        DesktopClientView: {
+            clientId: string;
+            machineName: string;
+            windowsUser: string;
+            /** Format: int32 */
+            userId: null | number | string;
+            userName: null | string;
+            targetKind: null | string;
+            /** Format: int32 */
+            targetId: null | number | string;
+            targetName: null | string;
+            appVersion: string;
+            webView2Version: string;
+            configScope: null | string;
+            nodeId: string;
+            remoteAddress: null | string;
+            /** Format: int64 */
+            firstSeenTs: number | string;
+            /** Format: int64 */
+            lastSeenTs: number | string;
+            online: boolean;
+            blockedReason: null | string;
+            conflict: boolean;
+            previousMachineName: null | string;
+        };
+        Device: {
+            /** Format: int32 */
+            id?: number | string;
+            name?: string;
+            protocol?: components["schemas"]["ProtocolType"];
+            host?: string;
+            /** Format: int32 */
+            port?: number | string;
+            /** Format: uint8 */
+            stationNumber?: number | string;
+            byteOrder?: components["schemas"]["ByteOrder"];
+            /** Format: int32 */
+            pollIntervalMs?: number | string;
+            /** Format: int32 */
+            timeoutMs?: number | string;
+            enabled?: boolean;
+            /** Format: int32 */
+            gatewayId?: null | number | string;
+            /** Format: int32 */
+            channelId?: null | number | string;
+            /** Format: int32 */
+            areaId?: number | string;
+            /** Format: int64 */
+            disabledSinceTs?: number | string;
+            serialPort?: string;
+            /** Format: int32 */
+            baudRate?: number | string;
+            /** Format: int32 */
+            dataBits?: number | string;
+            parity?: components["schemas"]["SerialParity"];
+            stopBits?: components["schemas"]["SerialStopBits"];
+            cpu?: components["schemas"]["S7Cpu"];
+            /** Format: int16 */
+            rack?: number | string;
+            /** Format: int16 */
+            slot?: number | string;
+            opcEndpointUrl?: string;
+            opcSecurityMode?: components["schemas"]["OpcSecurityMode"];
+            opcSecurityPolicy?: components["schemas"]["OpcSecurityPolicy"];
+            opcUserName?: string;
+            protocolOptions?: string;
+            simulationEnabled?: boolean;
+            simulationOptions?: string;
+            hasOpcPassword?: boolean;
         };
         /** @enum {unknown} */
         DeviceControlMode: "Remote" | "Local";
@@ -13883,6 +14302,17 @@ export interface components {
              * @default 0
              */
             textLength: number | string;
+        };
+        DeviceProbeResult: {
+            connected: boolean;
+            area?: null | string;
+            /** Format: int32 */
+            address?: null | number | string;
+            dataType?: null | string;
+            /** Format: double */
+            value?: null | number | string;
+            quality?: null | components["schemas"]["TagQuality"];
+            message?: null | string;
         };
         DeviceRequest: {
             name: string;
@@ -14073,6 +14503,7 @@ export interface components {
             message: string;
             /** Format: double */
             readBack?: null | number | string;
+            readBackText?: null | string;
         };
         GatewayCreateRequest: {
             name: string;
@@ -14236,6 +14667,15 @@ export interface components {
         };
         /** Format: binary */
         IFormFile: string;
+        ImportResult: {
+            /** Format: int32 */
+            created: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            skipped: number | string;
+            errors: string[];
+        };
         JsonElement: unknown;
         JsonObject: Record<string, never>;
         LicenseActivateRequest: {
@@ -14311,6 +14751,7 @@ export interface components {
             deviceId: number | string;
             /** Format: int32 */
             baseAddress: number | string;
+            startAddress?: null | string;
         };
         ObjectTagDefinition: {
             key?: string;
@@ -14412,15 +14853,9 @@ export interface components {
         OpcImportRequest: {
             items: components["schemas"]["OpcImportItem"][];
         };
-        /**
-         * @default SignAndEncrypt
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         OpcSecurityMode: "None" | "Sign" | "SignAndEncrypt";
-        /**
-         * @default Basic256Sha256
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         OpcSecurityPolicy: "Basic256Sha256" | "Aes128Sha256RsaOaep" | "Aes256Sha256RsaPss" | "None";
         OutboxAcknowledgeRequest: {
             ids: null | (number | string)[];
@@ -14431,6 +14866,14 @@ export interface components {
         };
         PasswordResetRequest: {
             password: string;
+        };
+        ProblemDetails: {
+            type?: null | string;
+            title?: null | string;
+            /** Format: int32 */
+            status?: null | number | string;
+            detail?: null | string;
+            instance?: null | string;
         };
         ProductionLineRequest: {
             name: string;
@@ -14669,10 +15112,7 @@ export interface components {
              */
             revision: number | string;
         };
-        /**
-         * @default S71200
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         S7Cpu: "S7200" | "S7300" | "S7400" | "S71200" | "S71500";
         ScreenAction: {
             type?: string;
@@ -14730,6 +15170,8 @@ export interface components {
         };
         ScreenCreateRequest: {
             name: string;
+            /** Format: int32 */
+            areaId?: null | number | string;
         };
         ScreenDocument: {
             /** Format: int32 */
@@ -14743,6 +15185,7 @@ export interface components {
             symbolAssets?: null | {
                 [key: string]: string;
             };
+            allowExternalImages?: null | boolean;
         };
         ScreenGaugeBand: {
             /** Format: double */
@@ -14865,11 +15308,21 @@ export interface components {
             targetRevision: number | string;
             note: null | string;
         };
+        ScreenRuntimeReportRequest: {
+            kind: string;
+            message?: null | string;
+            /** Format: int32 */
+            publishedRevision?: null | number | string;
+        };
         ScreenSaveRequest: {
             name: string;
             /** Format: int32 */
             revision: number | string;
             document: components["schemas"]["ScreenDocument"];
+            /** Format: int32 */
+            areaId?: null | number | string;
+            /** @default false */
+            updateArea: boolean;
         };
         ScreenState: {
             /** Format: double */
@@ -14894,6 +15347,15 @@ export interface components {
             endLine: number | string;
             /** Format: int32 */
             endColumn: number | string;
+        };
+        ScriptError: {
+            code: string;
+            message: string;
+            file?: null | string;
+            /** Format: int32 */
+            line?: null | number | string;
+            /** Format: int32 */
+            column?: null | number | string;
         };
         ScriptLibraryCompileRequest: {
             source: null | string;
@@ -14940,10 +15402,7 @@ export interface components {
         SequenceStartRequest: {
             confirmed: boolean;
         };
-        /**
-         * @default None
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         SerialParity: "None" | "Odd" | "Even";
         SerialProfileListResponse: {
             items: components["schemas"]["SerialProfileResponse"][];
@@ -15011,10 +15470,7 @@ export interface components {
             /** Format: double */
             lastElapsedMs?: null | number | string;
         };
-        /**
-         * @default One
-         * @enum {unknown}
-         */
+        /** @enum {unknown} */
         SerialStopBits: "One" | "Two";
         SessionResponse: {
             token: string;
@@ -15177,6 +15633,10 @@ export interface components {
         };
         /** @enum {unknown} */
         TagArea: "Coil" | "DiscreteInput" | "HoldingRegister" | "InputRegister" | "DataBlock" | "Memory" | "Input" | "Output" | "OpcNode" | "Address" | null;
+        TagBatchCreated: {
+            /** Format: int32 */
+            created: number | string;
+        };
         TagBatchItem: {
             name: string;
             area: components["schemas"]["TagArea"];
@@ -15243,6 +15703,25 @@ export interface components {
         TagKind: "Physical" | "Calculated" | "Derived";
         /** @enum {unknown} */
         TagQuality: "Good" | "Bad" | "CommFailure" | "Uncertain" | null;
+        TagRebindRequest: {
+            /** Format: int32 */
+            targetTagId: number | string;
+        };
+        TagRebindResult: {
+            /** Format: int32 */
+            screens: number | string;
+            /** Format: int32 */
+            templates: number | string;
+            /** Format: int32 */
+            alarmRules: number | string;
+            /** Format: int32 */
+            sequences: number | string;
+            /** Format: int32 */
+            recipes: number | string;
+            publishedScreens: components["schemas"]["TagUsageRef"][];
+            /** Format: int32 */
+            replaced?: number | string;
+        };
         TagRequest: {
             /** Format: int32 */
             deviceId: number | string;
@@ -15286,6 +15765,23 @@ export interface components {
              * @default 0
              */
             textLength: number | string;
+        };
+        TagUsageRef: {
+            category: string;
+            /** Format: int32 */
+            id: number | string;
+            name: string;
+            detail: null | string;
+            editable: boolean;
+            /** @default false */
+            requiresRepublish: boolean;
+        };
+        TagUsageView: {
+            /** Format: int32 */
+            tagId: number | string;
+            tagName: string;
+            references: components["schemas"]["TagUsageRef"][];
+            unreadable: boolean;
         };
         TraceabilityField: {
             name: string;
@@ -15450,6 +15946,73 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    DesktopClientHeartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DesktopClientHeartbeatRequest"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesktopClientHeartbeatResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    DesktopClientList: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DesktopClientSnapshot"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     GetSiteInfo: {
         parameters: {
             query?: never;

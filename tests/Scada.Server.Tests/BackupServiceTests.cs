@@ -257,7 +257,7 @@ public sealed class BackupServiceTests
 
         public void Dispose()
         {
-            try { if (Directory.Exists(Root)) Directory.Delete(Root, true); } catch { }
+            TestSqlite.TryDeleteDirectory(Root);
         }
     }
 }

@@ -27,8 +27,43 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
       - name: 还原
         run: dotnet restore Scada.sln
+      - name: 覆盖率基线棘轮
+        # 门禁只校验「不低于基线」，顺手把基线改低就能让 CI 静默变绿（Collector 曾 77.09 → 64.14）。
+        # 这里对比本次改动的 base 提交：任何下降都必须在 tools/coverage/coverage-drops.json 写明原因。
+        shell: pwsh
+        env:
+          SCADA_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SCADA_BEFORE_SHA: ${{ github.event.before }}
+          SCADA_EVENT: ${{ github.event_name }}
+        run: |
+          $ref = if ($env:SCADA_EVENT -eq 'pull_request') { $env:SCADA_BASE_SHA } else { $env:SCADA_BEFORE_SHA }
+          if (-not $ref -or $ref -match '^0{40}$') { Write-Host '没有可比较的 base 提交，跳过棘轮检查'; exit 0 }
+          git fetch --no-tags --depth=1 origin $ref
+          if ($LASTEXITCODE -ne 0) {
+            git fetch --no-tags --depth=1 origin main
+            if ($LASTEXITCODE -ne 0) { Write-Error "无法获取 base 提交 $ref，棘轮检查无法完成"; exit 1 }
+          }
+          node tools/coverage/coverage-gate.mjs --check-ratchet --base-ref FETCH_HEAD
       - name: 构建
         run: dotnet build Scada.sln -c Release --no-restore --nologo
+      - name: EF 模型漂移检查
+        # 改了实体却忘记 dotnet ef migrations add 时，构建与单测都可能是绿的，
+        # 直到现场升级才在 DatabaseInitializer 里炸。这里对比实体模型与 ModelSnapshot，
+        # 有差异直接失败。两个 DbContext 都要查——它们各自有独立的迁移链。
+        shell: pwsh
+        run: |
+          dotnet tool install --global dotnet-ef --version 10.0.13
+          $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          foreach ($context in @("ConfigDbContext", "RuntimeDbContext")) {
+            dotnet ef migrations has-pending-model-changes --project src/Scada.Data --startup-project src/Scada.Data --context $context -c Release --no-build
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "模型已变更但缺少迁移（$context）：请运行 dotnet ef migrations add <Name> --context $context"
+              exit $LASTEXITCODE
+            }
+          }
+      - name: 配置文档一致性
+        # 配置项清单由 ScadaSettings.cs 生成；改了配置却忘记重新生成，文档就会与代码脱节。
+        run: python tools/config-doc/generate.py --check
       - name: 安装覆盖率采集器
         run: dotnet tool install --global dotnet-coverage
       - name: 测试与覆盖率采集
@@ -40,7 +75,7 @@ jobs:
           $env:DOTNET_COVERAGE_NOLOGO = "1"
           # 与 Scada.sln 中的测试项目严格一致：--no-build 要求每个项目都有编译产物，
           # 未在 sln 里的项目（例如尚在开发中的独立测试工程）不能出现在这份清单里。
-          foreach ($project in @("Scada.Core.Tests", "Scada.Server.Tests", "Scada.Engine.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests", "Scada.Data.Tests", "Scada.Desktop.Tests")) {
+          foreach ($project in @("Scada.Core.Tests", "Scada.Server.Tests", "Scada.Engine.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests", "Scada.Data.Tests", "Scada.Desktop.Tests", "Scada.Protocols.Tests")) {
             $out = "TestResults/$project/coverage.cobertura.xml"
             dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --results-directory TestResults/$project"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -161,6 +196,33 @@ jobs:
           path: |
             scada-server-win-x64-*.zip
             scada-server-win-x64-*.zip.sha256
+          retention-days: 30
+
+  desktop-package:
+    name: 桌面客户端包
+    needs: [backend]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.401
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 构建桌面客户端包
+        shell: pwsh
+        run: ./tools/deployment/desktop/Build-DesktopPackage.ps1 -OutputPath "${{ runner.temp }}/scada-desktop" -Version "${{ github.run_number }}"
+      - name: 验证安装、升级、回滚、卸载
+        shell: pwsh
+        run: ./tools/deployment/desktop/Test-DesktopDeployment.ps1 -PackagePath "${{ runner.temp }}/scada-desktop" -Version "${{ github.run_number }}"
+      - name: 上传桌面客户端包
+        uses: actions/upload-artifact@v4
+        with:
+          name: scada-desktop-win-x64-${{ github.run_number }}
+          path: |
+            ${{ runner.temp }}/scada-desktop.zip
+            ${{ runner.temp }}/scada-desktop.zip.sha256
           retention-days: 30
 
   e2e:

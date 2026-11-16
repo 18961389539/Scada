@@ -33,6 +33,13 @@ public sealed class TargetUrlTests
         Assert.Equal("http://localhost:5080/console", TargetUrl.Build(settings));
     }
 
+    [Fact]
+    public void BuildsWorkspaceUrl()
+    {
+        var settings = Settings("workspace");
+        Assert.Equal("http://localhost:5080/workspace", TargetUrl.Build(settings));
+    }
+
     [Theory]
     [InlineData("/login", true)]
     [InlineData("/login/", true)]

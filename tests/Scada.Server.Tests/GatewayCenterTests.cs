@@ -341,15 +341,14 @@ public partial class GatewayCenterTests
         public Task<GatewayAcknowledgement> AcceptAsync(GatewayTelemetry packet)
         { var payload = JsonSerializer.Serialize(packet, GatewayProtocol.Json); return Service.AcceptAsync(Caller, Session.SessionId, payload, GatewayCenterService.TokenHash(payload), default); }
         public async Task<IReadOnlyList<HistoryPoint>> ReadHistoryAsync() => (await History.QueryRawAsync([TagId], Clock.Now - 7200000, Clock.Now + 10000, default)).SelectMany(x => x.Points).ToList();
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
             Service.Dispose(); _local.Dispose(); Bus.Dispose();
-            // 连接池会持有 config.db / runtime.db 的句柄：不清池，Windows 上删临时目录直接报"文件被占用"，
-            // 整个测试类会因为清理失败而变红（业务断言其实是通过的）。
+            // 连接池会持有 config.db / runtime.db 的句柄：不清池，Windows 上删临时目录直接报"文件被占用"。
+            // 而且关闭是异步的（并行跑时更慢），所以用带等待窗口的版本，删不掉再交给进程退出兜底。
             var path = Path.GetFullPath(_root); var parent = Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar);
             if (string.Equals(Path.GetDirectoryName(path), parent, StringComparison.OrdinalIgnoreCase) && Path.GetFileName(path).StartsWith("scada-center-test-"))
-                TestSqlite.TryDeleteDirectory(path);
-            return ValueTask.CompletedTask;
+                await TestSqlite.TryDeleteDirectoryAsync(path);
         }
     }
     private sealed class AlarmNotifications : IAlarmNotifier

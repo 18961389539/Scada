@@ -78,4 +78,64 @@ public class ScadaSettingsValidationTests
 
         Assert.Contains(ScadaSettingsValidation.Validate(settings), x => x.Code == "settings.NotificationRetryMaxSec");
     }
+
+    [Fact]
+    public void DesktopClientRangesAndVersionFormatAreValidated()
+    {
+        var settings = new ScadaSettings
+        {
+            DesktopClient = new DesktopClientOptions
+            {
+                HeartbeatSeconds = 1,
+                OnlineThresholdSeconds = 5,
+                MinimumVersion = "not-a-version",
+                LatestVersion = "1.0.0",
+                DownloadUrl = "javascript:alert(1)"
+            }
+        };
+
+        var codes = ScadaSettingsValidation.Validate(settings).Select(x => x.Code).ToArray();
+
+        Assert.Contains("settings.DesktopClient.HeartbeatSeconds", codes);
+        Assert.Contains("settings.DesktopClient.OnlineThresholdSeconds", codes);
+        Assert.Contains("settings.desktopClient.minimumVersion", codes);
+        Assert.Contains("settings.desktopClient.downloadUrl", codes);
+    }
+
+    [Fact]
+    public void LatestDesktopVersionCannotBeBelowMinimum()
+    {
+        var settings = new ScadaSettings
+        {
+            DesktopClient = new DesktopClientOptions { MinimumVersion = "2.0.0", LatestVersion = "1.9.0" }
+        };
+
+        Assert.Contains(ScadaSettingsValidation.Validate(settings), x => x.Code == "settings.desktopClient.versionOrder");
+    }
+    [Fact]
+    public void ReverseProxyRequiresTrustedProxies()
+    {
+        var settings = new ScadaSettings { ReverseProxy = new ReverseProxyOptions { Enabled = true } };
+        Assert.Contains(ScadaSettingsValidation.Validate(settings), x => x.Code == "settings.reverseProxy.knownProxies");
+    }
+
+    [Fact]
+    public void ReverseProxyRejectsUnparsableAddress()
+    {
+        var settings = new ScadaSettings
+        {
+            ReverseProxy = new ReverseProxyOptions { Enabled = true, KnownProxies = ["not-an-ip"] }
+        };
+        Assert.Contains(ScadaSettingsValidation.Validate(settings), x => x.Code == "settings.reverseProxy.knownProxies");
+    }
+
+    [Fact]
+    public void ReverseProxyAcceptsExplicitAddresses()
+    {
+        var settings = new ScadaSettings
+        {
+            ReverseProxy = new ReverseProxyOptions { Enabled = true, KnownProxies = ["10.0.0.5", "127.0.0.1"] }
+        };
+        Assert.Empty(ScadaSettingsValidation.Validate(settings));
+    }
 }

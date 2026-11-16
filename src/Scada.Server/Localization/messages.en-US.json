@@ -820,6 +820,7 @@
   "配方控件不支持画面动作": "Recipe controls do not support screen actions",
   "顺控动作必须选择顺控流程": "Sequence actions must select a control sequence",
   "配方动作必须选择配方": "Recipe actions must select a recipe",
+  "请求无效": "Invalid request",
   "请至少生成一个测点": "Select at least one tag to generate",
   "单次批量建点最多 500 个": "A batch can create at most 500 tags",
   "第 {0} 个测点“{1}”：{2}": "Tag {0} \"{1}\": {2}",
@@ -1172,5 +1173,11 @@
   "图片使用外部地址；请上传本地图片，或在画布设置中允许外部图片": "The image uses an external URL. Upload a local image or allow external images in the canvas settings",
   "运行端上报类型无效": "Invalid runtime report type",
   "上报内容最多 500 个字符": "Runtime report messages must not exceed 500 characters",
-  "运行端异常：{0}（{1}）": "Runtime error: {0} ({1})"
+  "运行端异常：{0}（{1}）": "Runtime error: {0} ({1})",
+  "最低版本号无法识别：{0}": "Minimum client version is invalid: {0}",
+  "最新版本号无法识别：{0}": "Latest client version is invalid: {0}",
+  "最新版本不能低于最低版本": "The latest version must not be lower than the minimum version",
+  "下载地址须为 http/https 绝对地址": "The download URL must be an absolute http/https URL",
+  "启用反向代理时至少要列出一个可信代理 IP": "At least one trusted proxy IP must be listed when a reverse proxy is enabled",
+  "可信代理地址无法识别：{0}": "Trusted proxy address is invalid: {0}"
 }

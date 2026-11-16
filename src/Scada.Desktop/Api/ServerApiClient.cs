@@ -11,7 +11,7 @@ namespace Scada.Desktop.Api;
 /// 桌面客户端只调用现有只读接口：站点信息、登录、已发布画面/布局、工作站。
 /// 所有错误都转换成中文可操作提示，不把原始 HTML 或堆栈抛到界面上。
 /// </summary>
-internal sealed class ServerApiClient : IDisposable
+internal sealed class ServerApiClient : IHeartbeatClient, IDisposable
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly HttpClient _http;
@@ -19,13 +19,25 @@ internal sealed class ServerApiClient : IDisposable
     public ServerApiClient(string serverUrl, HttpMessageHandler? handler = null)
     {
         var baseUri = new Uri(serverUrl.TrimEnd('/') + "/", UriKind.Absolute);
-        _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        _http = handler is null ? new HttpClient(CreateHandler()) : new HttpClient(handler, disposeHandler: false);
         _http.BaseAddress = baseUri;
         _http.Timeout = TimeSpan.FromSeconds(20);
         _http.DefaultRequestHeaders.Add("X-Scada-Locale", "zh-CN");
     }
 
     public Uri BaseAddress => _http.BaseAddress!;
+
+    /// <summary>
+    /// 终端只连一个内网服务端，不经过系统代理。企业镜像里常见的 HTTP_PROXY / WinINET 代理
+    /// 会把 127.0.0.1 和车间网段的请求也转给代理，表现为"浏览器能打开、客户端连不上"；
+    /// 网关侧此前也踩过同一个坑（回环地址绕开系统代理）。确需经代理访问服务端属于未支持的部署形态。
+    /// </summary>
+    internal static SocketsHttpHandler CreateHandler() => new()
+    {
+        UseProxy = false,
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(10)
+    };
 
     public async Task<SiteInfo> GetSiteInfoAsync(CancellationToken cancellationToken = default)
     {
@@ -63,11 +75,13 @@ internal sealed class ServerApiClient : IDisposable
             }
             if ((int)response.StatusCode >= 500)
             {
-                return new LoginResult(LoginStatus.Server, null, ErrorMessage(body, "服务端暂时不可用"));
+                return new LoginResult(LoginStatus.Server, null, ErrorMessage(body, "服务端暂时不可用"),
+                    PrimaryUrl: PrimaryFrom(response, body));
             }
             if (!response.IsSuccessStatusCode)
             {
-                return new LoginResult(LoginStatus.Protocol, null, ErrorMessage(body, $"登录失败（HTTP {(int)response.StatusCode}）"));
+                return new LoginResult(LoginStatus.Protocol, null, ErrorMessage(body, $"登录失败（HTTP {(int)response.StatusCode}）"),
+                    PrimaryUrl: PrimaryFrom(response, body));
             }
             var session = SessionData.Parse(body);
             if (session is null) return new LoginResult(LoginStatus.Protocol, null, "登录响应格式无法识别");
@@ -105,6 +119,52 @@ internal sealed class ServerApiClient : IDisposable
         return await GetAsync<ResolvedWorkstation>($"api/hmi/workstations/resolve?id={id}", token, cancellationToken).ConfigureAwait(false);
     }
 
+    public async Task<HeartbeatResult> HeartbeatAsync(string token, HeartbeatPayload payload, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/desktop/heartbeat")
+            {
+                Content = JsonContent.Create(payload, options: Json)
+            };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new ApiException(
+                    ErrorMessage(body, $"心跳失败（HTTP {(int)response.StatusCode}）"),
+                    (int)response.StatusCode,
+                    PrimaryFrom(response, body));
+            }
+            var result = JsonSerializer.Deserialize<HeartbeatResult>(body, Json);
+            if (result is null) throw new ApiException("心跳响应格式无法识别");
+            return result;
+        }
+        catch (ApiException) { throw; }
+        catch (JsonException) { throw new ApiException("心跳响应格式无法识别"); }
+        catch (Exception exception) when (IsNetworkFailure(exception, cancellationToken))
+        {
+            throw new ApiException(DescribeNetworkFailure(exception));
+        }
+    }
+
+    /// <summary>匿名读取 HA 角色；不可达时返回 null，由调用方按“未知”处理。</summary>
+    public async Task<HaRoleInfo?> GetHaRoleAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var response = await _http.GetAsync("api/ha/role", cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return null;
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            return JsonSerializer.Deserialize<HaRoleInfo>(body, Json);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private async Task<T> GetAsync<T>(string path, string token, CancellationToken cancellationToken)
     {
         try
@@ -114,7 +174,13 @@ internal sealed class ServerApiClient : IDisposable
             using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
             var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == HttpStatusCode.Unauthorized) throw new ApiException("登录会话已失效，请重新登录", 401);
-            if (!response.IsSuccessStatusCode) throw new ApiException(ErrorMessage(body, $"读取数据失败（HTTP {(int)response.StatusCode}）"), (int)response.StatusCode);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new ApiException(
+                    ErrorMessage(body, $"读取数据失败（HTTP {(int)response.StatusCode}）"),
+                    (int)response.StatusCode,
+                    PrimaryFrom(response, body));
+            }
             var value = JsonSerializer.Deserialize<T>(body, Json);
             if (value is null) throw new ApiException("服务器返回内容为空");
             return value;
@@ -151,6 +217,31 @@ internal sealed class ServerApiClient : IDisposable
             current = current.InnerException;
         }
         return "无法连接服务器，请检查地址、端口和网络";
+    }
+
+    private static string? PrimaryFrom(HttpResponseMessage response, string body)
+    {
+        if (response.Headers.TryGetValues("X-Scada-Primary", out var values))
+        {
+            var header = values.FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(header)) return header.Trim();
+        }
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("primaryUrl", out var primary)
+                && primary.ValueKind == JsonValueKind.String)
+            {
+                var value = primary.GetString();
+                if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+            }
+        }
+        catch (JsonException)
+        {
+            // 非 JSON 响应没有可用的主机地址。
+        }
+        return null;
     }
 
     private static string ErrorMessage(string body, string fallback)

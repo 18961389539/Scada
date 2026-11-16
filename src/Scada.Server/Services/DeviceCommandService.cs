@@ -17,7 +17,7 @@ namespace Scada.Server.Services;
 /// （配置库 → 审计 → 重载）。
 ///
 /// 之前这两条路径各自把校验抄了一遍，顺序还不同：端点先查重名再校验协议，MCP 反过来。
-/// 通道端点下发（<see cref="ApplyChannelEndpointAsync"/>）必须在校验之前跑——设备的
+/// 通道端点下发（<see cref="ApplyChannelEndpointIssuesAsync"/>）必须在校验之前跑——设备的
 /// Host/Port/串口参数由通道覆盖后，协议校验才有意义。
 /// </summary>
 public sealed class DeviceCommandService(
@@ -32,14 +32,17 @@ public sealed class DeviceCommandService(
         ConfigDbContext db, Device device, CancellationToken cancellationToken)
     {
         if (!await db.Areas.AnyAsync(x => x.Id == device.AreaId, cancellationToken))
-            return DeviceCommandResult.Failed(DeviceCommandError.Validation, "区域不存在");
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation,
+                [new ValidationIssue("device.area.notFound", nameof(Device.AreaId), "区域不存在")]);
 
         SoftElementByteOrder.Normalize(device);
-        if (await ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
-            return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelError);
+        var channelIssues = await ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
+        if (channelIssues.Count > 0)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelIssues);
 
-        if (await InspectAsync(db, device, null, cancellationToken) is string invalid)
-            return DeviceCommandResult.Failed(DeviceCommandError.Validation, invalid);
+        var issues = await InspectIssuesAsync(db, device, null, cancellationToken);
+        if (issues.Count > 0)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation, issues);
 
         db.Devices.Add(device);
         try
@@ -48,7 +51,8 @@ public sealed class DeviceCommandService(
         }
         catch (DbUpdateException)
         {
-            return DeviceCommandResult.Failed(DeviceCommandError.DuplicateName, DuplicateNameMessage);
+            return DeviceCommandResult.Failed(DeviceCommandError.DuplicateName,
+                [new ValidationIssue("device.name.duplicate", nameof(Device.Name), DuplicateNameMessage)]);
         }
 
         await ReloadAsync(cancellationToken);
@@ -63,17 +67,24 @@ public sealed class DeviceCommandService(
         ConfigDbContext db, Device device, CancellationToken cancellationToken)
     {
         SoftElementByteOrder.Normalize(device);
-        if (await ApplyChannelEndpointAsync(db, device, cancellationToken) is string channelError)
-            return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelError);
+        var channelIssues = await ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
+        if (channelIssues.Count > 0)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelIssues);
 
-        if (await InspectAsync(db, device, device.Id, cancellationToken) is string invalid)
-            return DeviceCommandResult.Failed(DeviceCommandError.Validation, invalid);
+        var issues = await InspectIssuesAsync(db, device, device.Id, cancellationToken);
+        if (issues.Count > 0)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation, issues);
 
         // 切换协议/地址后，设备上已有的测点必须仍然合法，否则会留下静默采不到的坏点。
         foreach (var tag in await db.Tags.AsNoTracking().Where(x => x.DeviceId == device.Id).ToListAsync(cancellationToken))
         {
-            if (ConfigurationValidator.Tag(tag, device) is string tagError)
-                return DeviceCommandResult.Failed(DeviceCommandError.Validation, $"已有测点“{tag.Name}”：{tagError}；请先调整测点再切换协议");
+            var tagIssues = ConfigurationValidator.TagIssues(tag, device);
+            if (tagIssues.Count > 0)
+                return DeviceCommandResult.Failed(DeviceCommandError.Validation,
+                [
+                    new ValidationIssue($"device.tag.{tagIssues[0].Code}", "tags",
+                        $"已有测点“{tag.Name}”：{tagIssues[0].Message}；请先调整测点再切换协议")
+                ]);
         }
 
         try
@@ -82,7 +93,8 @@ public sealed class DeviceCommandService(
         }
         catch (DbUpdateException)
         {
-            return DeviceCommandResult.Failed(DeviceCommandError.DuplicateName, DuplicateNameMessage);
+            return DeviceCommandResult.Failed(DeviceCommandError.DuplicateName,
+                [new ValidationIssue("device.name.duplicate", nameof(Device.Name), DuplicateNameMessage)]);
         }
 
         await ReloadAsync(cancellationToken);
@@ -116,36 +128,44 @@ public sealed class DeviceCommandService(
     }
 
     /// <summary>校验顺序固定，两条入口共用。</summary>
-    public async Task<string?> InspectAsync(
+    public async Task<IReadOnlyList<ValidationIssue>> InspectIssuesAsync(
         ConfigDbContext db, Device device, int? excludeDeviceId, CancellationToken cancellationToken)
     {
-        if (ConfigurationValidator.Device(device, settings.Value, drivers) is string invalid) return invalid;
-        if (await ValidateChannelStationAsync(db, device, cancellationToken) is string station) return station;
-        if (await ValidateSerialBusAsync(db, device, cancellationToken) is string bus) return bus;
+        var issues = ConfigurationValidator.DeviceIssues(device, settings.Value, drivers);
+        if (issues.Count > 0) return issues;
+        if (await ValidateChannelStationAsync(db, device, cancellationToken) is { } station) return [station];
+        if (await ValidateSerialBusAsync(db, device, cancellationToken) is { } bus) return [bus];
 
         var duplicate = excludeDeviceId is int exclude
             ? await db.Devices.AnyAsync(x => x.Id != exclude && x.Name == device.Name, cancellationToken)
             : await db.Devices.AnyAsync(x => x.Name == device.Name, cancellationToken);
-        return duplicate ? DuplicateNameMessage : null;
+        return duplicate
+            ? [new ValidationIssue("device.name.duplicate", nameof(Device.Name), DuplicateNameMessage)]
+            : [];
     }
 
     /// <summary>
     /// 通道是端点权威：绑定后把通道的端点参数下发到设备，写点、诊断、出站白名单、
     /// 工程导出等既有路径因此不需要理解"通道"。通道改端点时由通道接口统一回写。
     /// </summary>
-    public static async Task<string?> ApplyChannelEndpointAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    public static async Task<IReadOnlyList<ValidationIssue>> ApplyChannelEndpointIssuesAsync(
+        ConfigDbContext db, Device device, CancellationToken ct)
     {
-        if (device.ChannelId is not int channelId) return null;
+        if (device.ChannelId is not int channelId) return [];
         // 先判协议能否共享链路：OpcUa/S7 这类会话说协议绑通道本身就没有意义，
         // 报"协议不一致"会让人以为是选错了通道，而不是选错了做法。
         if (!ChannelProtocols.Supports(device.Protocol))
-            return "该协议无法共享物理通道；只有 Modbus，以及汇川、信捷、台达的 RTU，支持绑定通道";
+            return [new ValidationIssue("device.channel.protocol", nameof(Device.ChannelId),
+                "该协议无法共享物理通道；只有 Modbus，以及汇川、信捷、台达的 RTU，支持绑定通道")];
         if (SoftElementByteOrder.Applies(device.Protocol) && !SoftElementByteOrder.IsRtu(device))
-            return "汇川、信捷、台达只有 RTU 可以绑定通道，TCP 保持一设备一条连接";
+            return [new ValidationIssue("device.channel.serialOnly", nameof(Device.ChannelId),
+                "汇川、信捷、台达只有 RTU 可以绑定通道，TCP 保持一设备一条连接")];
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, ct);
-        if (channel is null) return "通道不存在";
+        if (channel is null)
+            return [new ValidationIssue("device.channel.notFound", nameof(Device.ChannelId), "通道不存在")];
         if (channel.Protocol != device.Protocol)
-            return $"通道「{channel.Name}」使用 {channel.Protocol}，与设备协议 {device.Protocol} 不一致";
+            return [new ValidationIssue("device.channel.mismatch", nameof(Device.ChannelId),
+                $"通道「{channel.Name}」使用 {channel.Protocol}，与设备协议 {device.Protocol} 不一致")];
         if (ChannelProtocols.UsesSerial(channel.Protocol))
         {
             device.SerialPort = channel.SerialPort;
@@ -161,13 +181,13 @@ public sealed class DeviceCommandService(
         }
         // 一条物理链路只有一个超时：成员设备的超时由通道统一决定。
         device.TimeoutMs = channel.TimeoutMs;
-        return null;
+        return [];
     }
 
     // 串口是独占资源：没有通道时，驱动为每台设备各打开一次 SerialPort，同一 COM 口上的
     // 第二台设备会在 Open() 失败后永久停留在重连退避（现场表现为"其中一台一直离线"）。
     // 绑定同一通道的设备共用一条链路（一次 Open、站号区分），因此只有"不同归属"才算冲突。
-    private static async Task<string?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    private static async Task<ValidationIssue?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.SimulationEnabled || !device.Enabled || !SoftElementByteOrder.OccupiesSerialPort(device)) return null;
         var port = device.SerialPort.Trim();
@@ -180,17 +200,18 @@ public sealed class DeviceCommandService(
             && !SharesChannel(device, x));
         if (conflict is null) return null;
         var owner = conflict.Name;
-        if (conflict.Protocol != device.Protocol)
-            return $"串口 {port} 已被启用设备「{owner}」占用。不同协议不能共用同一条串口，请改用其它串口。";
-        if (device.ChannelId is null)
-            return $"串口 {port} 已被启用设备「{owner}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。";
-        if (conflict.ChannelId is null)
-            return $"串口 {port} 已被启用设备「{owner}」独占。请把该设备也绑定到同一通道，或改用其它串口。";
-        return $"串口 {port} 已被另一条通道上的设备「{owner}」占用。同一串口只能由一个通道独占，请改用其它串口。";
+        var message = conflict.Protocol != device.Protocol
+            ? $"串口 {port} 已被启用设备「{owner}」占用。不同协议不能共用同一条串口，请改用其它串口。"
+            : device.ChannelId is null
+                ? $"串口 {port} 已被启用设备「{owner}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。"
+                : conflict.ChannelId is null
+                    ? $"串口 {port} 已被启用设备「{owner}」独占。请把该设备也绑定到同一通道，或改用其它串口。"
+                    : $"串口 {port} 已被另一条通道上的设备「{owner}」占用。同一串口只能由一个通道独占，请改用其它串口。";
+        return new ValidationIssue("device.serial.portConflict", nameof(Device.SerialPort), message);
     }
 
     // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。
-    private static async Task<string?> ValidateChannelStationAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    private static async Task<ValidationIssue?> ValidateChannelStationAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.ChannelId is not int channelId || !device.Enabled || !ChannelProtocols.Supports(device.Protocol)) return null;
         var others = await db.Devices.AsNoTracking()
@@ -198,7 +219,10 @@ public sealed class DeviceCommandService(
             .Select(x => new { x.Name, x.StationNumber })
             .ToListAsync(ct);
         var clash = others.FirstOrDefault(x => x.StationNumber == device.StationNumber);
-        return clash is null ? null : $"站号 {device.StationNumber} 已被同一通道上的设备「{clash.Name}」占用，请改用其它站号";
+        return clash is null
+            ? null
+            : new ValidationIssue("device.station.duplicate", nameof(Device.StationNumber),
+                $"站号 {device.StationNumber} 已被同一通道上的设备「{clash.Name}」占用，请改用其它站号");
     }
 
     private static bool SharesChannel(Device left, Device right) =>
@@ -217,8 +241,25 @@ public enum DeviceCommandError
     Conflict
 }
 
-public sealed record DeviceCommandResult(bool Success, DeviceCommandError Error, string Message, Device? Device)
+public sealed record DeviceCommandResult(
+    bool Success, DeviceCommandError Error, string Message, Device? Device,
+    IReadOnlyList<ValidationIssue> Issues)
 {
-    public static DeviceCommandResult Succeeded(Device device) => new(true, DeviceCommandError.None, string.Empty, device);
-    public static DeviceCommandResult Failed(DeviceCommandError error, string message) => new(false, error, message, null);
+    public static DeviceCommandResult Succeeded(Device device) =>
+        new(true, DeviceCommandError.None, string.Empty, device, []);
+
+    public static DeviceCommandResult Failed(DeviceCommandError error, IReadOnlyList<ValidationIssue> issues) =>
+        new(false, error, issues.Count > 0 ? issues[0].Message : string.Empty, null, issues);
+
+    public static DeviceCommandResult Failed(DeviceCommandError error, string message) =>
+        Failed(error, [new ValidationIssue(CodeFor(error), null, message)]);
+
+    private static string CodeFor(DeviceCommandError error) => error switch
+    {
+        DeviceCommandError.Validation => "device.validation",
+        DeviceCommandError.DuplicateName => "device.name.duplicate",
+        DeviceCommandError.Referenced => "device.referenced",
+        DeviceCommandError.Conflict => "device.conflict",
+        _ => "device.request"
+    };
 }

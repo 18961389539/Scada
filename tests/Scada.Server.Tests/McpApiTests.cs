@@ -499,7 +499,10 @@ public sealed class McpMissingSettingTests : IClassFixture<McpMissingSettingTest
                 var settings = configuration.Build().AsEnumerable()
                     .Where(x => !string.Equals(x.Key, "Mcp:Enabled", StringComparison.OrdinalIgnoreCase)).ToArray();
                 configuration.Sources.Clear();
-                configuration.AddInMemoryCollection(settings);
+                // TestServer 没有 RemoteIpAddress。来源校验在拿不到地址时默认 fail-closed，
+                // 只有显式写出 "*" 才放行；本用例测的是「缺 Enabled 配置」而不是「来源被拒」。
+                configuration.AddInMemoryCollection(settings.Append(
+                    new KeyValuePair<string, string?>("Mcp:AllowedCidrs:0", "*")));
             });
     }
 

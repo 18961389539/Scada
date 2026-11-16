@@ -37,9 +37,11 @@ public static class HmiLayoutEndpoints
         layouts.MapGet("/published-meta", async (IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
+            // 先排序再投影：EF 无法翻译投影记录构造后的 OrderBy(x => x.Name)。
             return Results.Ok(await db.HmiLayouts.AsNoTracking().Where(x => x.PublishedJson != null)
+                .OrderBy(x => x.PublishedName)
                 .Select(x => new HmiLayoutMetaView(x.Id, x.PublishedName, x.PublishedRevision, x.PublishedTs))
-                .OrderBy(x => x.Name).ToListAsync(ct));
+                .ToListAsync(ct));
         }).Produces<IReadOnlyList<HmiLayoutMetaView>>();
         layouts.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {

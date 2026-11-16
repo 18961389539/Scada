@@ -171,6 +171,29 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
     }
 
     [Fact]
+    public async Task ConcurrentApprovalsExecuteControlOnlyOnce()
+    {
+        var admin = await _site.ClientAsync("admin"); var op = await _site.ClientAsync("opA"); var second = await _site.ClientAsync("watchA");
+        var tag = await TagAsync(admin, "并发阀"); Set(tag, 0);
+        await Ok(await admin.PutAsJsonAsync($"/api/control/points/{tag}", Point(dual: true, max: 100)));
+        var id = (await WriteAsync(op, tag, 40)).GetProperty("approvalId").GetGuid();
+
+        // 两个复核请求同时到达：旧实现是无条件更新状态，两人都能通过 Pending 检查，控制会下发两次。
+        // 现在用条件更新抢占（Pending → Executing），只有一个复核人能继续执行。
+        var responses = await Task.WhenAll(
+            second.PostAsJsonAsync($"/api/control/requests/{id}/approve", new { comment = "并发 A" }),
+            second.PostAsJsonAsync($"/api/control/requests/{id}/approve", new { comment = "并发 B" }));
+
+        Assert.Equal(1, responses.Count(x => x.IsSuccessStatusCode));
+        Assert.Equal(1, responses.Count(x => x.StatusCode == HttpStatusCode.Conflict));
+        Assert.Equal(1, Collector.Count(tag));
+
+        await using var runtime = await Runtime().CreateDbContextAsync();
+        var stored = await runtime.ControlRequests.AsNoTracking().SingleAsync(x => x.Id == id);
+        Assert.Equal(ControlRequestStatus.Executed, stored.Status);
+    }
+
+    [Fact]
     public async Task RequestCancellationStopsFeedbackWaitAndMarksResultUnknown()
     {
         var admin = await _site.ClientAsync("admin");

@@ -29,7 +29,9 @@ public sealed class SingleInstanceGuardTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            // 锁文件句柄在 Dispose 后由内核延迟释放，直接 Delete 偶发 IOException；
+            // 清理失败不该让业务断言变红。
+            TestSqlite.TryDeleteDirectory(root);
         }
     }
 
@@ -49,8 +51,8 @@ public sealed class SingleInstanceGuardTests
         }
         finally
         {
-            Directory.Delete(rootA, recursive: true);
-            Directory.Delete(rootB, recursive: true);
+            TestSqlite.TryDeleteDirectory(rootA);
+            TestSqlite.TryDeleteDirectory(rootB);
         }
     }
 }

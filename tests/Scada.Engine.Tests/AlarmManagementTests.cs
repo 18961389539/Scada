@@ -86,8 +86,15 @@ public class AlarmManagementTests
         var settings = Options.Create(new ScadaSettings { AlarmChatterCount = 3, AlarmChatterWindowSec = 60 });
         using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance, null, settings);
         await engine.StartAsync(default);
-        foreach (var v in new[] { 15.0, 5, 15, 5, 15 }) { var value = new TagValue(1, v, TagQuality.Good, ScadaTime.NowMs()); cache.Set(value); bus.Publish(value); await Task.Delay(300); }
-        await notifier.WaitCountAsync("raise", 3);
+        // 引擎按 250ms 周期评估；取值间隔必须大于一个周期，否则连续翻转会被合并成一次扫描。
+        var raises = 0; var recovers = 0;
+        foreach (var v in new[] { 15.0, 5, 15, 5, 15 })
+        {
+            var value = new TagValue(1, v, TagQuality.Good, ScadaTime.NowMs());
+            cache.Set(value); bus.Publish(value);
+            if (v > 10) await notifier.WaitCountAsync("raise", ++raises);
+            else await notifier.WaitCountAsync("recover", ++recovers);
+        }
         await engine.StopAsync(default);
         await using var check = runtime.CreateDbContext();
         var flags = await check.AlarmEvents.OrderBy(x => x.Id).Select(x => x.Chattering).ToListAsync();
@@ -325,11 +332,14 @@ public class AlarmManagementTests
     [Fact]
     public async Task ConcurrentEscalationScansAndTriggersSendOnlyOnce()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"outbox-{Guid.NewGuid():N}.db");
-        var factory = new Factory(path);
-        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
-        try { await RunConcurrentAsync(factory, runtime); }
-        finally { SqliteConnection.ClearAllPools(); try { File.Delete(path); } catch { } }
+        // 并发场景必须用文件库。原先 runtime 用的是 :memory:（同一个 SqliteConnection 被多个
+        // DbContext 共用），而 SQLite 单连接不支持并行命令：两个实例同时写发件箱时会撞上
+        // 「连接正在使用」/ SQLITE_BUSY，表现为全量跑偶发红灯、单跑必过。生产环境本来就是
+        // 文件库 + 每个上下文独立连接，用文件库才测到真实路径。
+        using var temp = new TempDir("scada-outbox-");
+        var factory = new Factory(Path.Combine(temp.Path, "config.db"));
+        var runtime = TestRuntime.Factory(Path.Combine(temp.Path, "runtime.db"));
+        await RunConcurrentAsync(factory, runtime);
     }
 
     private static async Task RunConcurrentAsync(Factory factory, IDbContextFactory<RuntimeDbContext> runtime)

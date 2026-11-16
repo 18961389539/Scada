@@ -11,7 +11,11 @@ internal sealed class SettingsForm : Form
 {
     private readonly DesktopPaths _paths;
     private readonly SettingsStore _store;
+    private readonly string[] _lockedFields;
+    private readonly bool _managedAutostart;
     private readonly string? _existingCipher;
+    private readonly string? _existingClientId;
+    private readonly string? _existingScope;
     private readonly string _originalServerUrl;
     private readonly string? _originalUserName;
     private readonly string _originalKind;
@@ -30,6 +34,7 @@ internal sealed class SettingsForm : Form
     private readonly RadioButton _kindScreen = new() { Text = "单个组态画面", AutoSize = true, Checked = true };
     private readonly RadioButton _kindLayout = new() { Text = "运行布局", AutoSize = true };
     private readonly RadioButton _kindWorkstation = new() { Text = "按工作站自动加载", AutoSize = true };
+    private readonly RadioButton _kindWorkspace = new() { Text = "多页面工作台", AutoSize = true };
     private readonly ComboBox _screenCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly ComboBox _layoutCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly ComboBox _workstationCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
@@ -38,6 +43,9 @@ internal sealed class SettingsForm : Form
     private readonly ComboBox _monitorCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly CheckBox _autoStart = new() { Text = "Windows 登录后自动启动", AutoSize = true };
     private readonly CheckBox _keepAwake = new() { Text = "阻止系统休眠和关闭显示器", AutoSize = true, Checked = true };
+    private readonly CheckBox _allowDownloads = new() { Text = "允许下载报表/导出文件", AutoSize = true };
+    private readonly TextBox _downloadDirectory = new();
+    private readonly Button _browseDirectory = new() { Text = "浏览…", AutoSize = true };
     private readonly Button _saveButton = new() { Text = "保存并启动", AutoSize = true };
     private readonly Button _cancelButton = new() { Text = "取消", AutoSize = true };
     private readonly Button _logsButton = new() { Text = "打开日志目录", AutoSize = true };
@@ -54,11 +62,15 @@ internal sealed class SettingsForm : Form
     private IReadOnlyList<LayoutSummary> _layouts = [];
     private IReadOnlyList<WorkstationSummary> _workstations = [];
 
-    public SettingsForm(DesktopPaths paths, SettingsStore store, DesktopSettings? existing, string? initialError)
+    public SettingsForm(DesktopPaths paths, SettingsStore store, DesktopSettings? existing, string? initialError, MachineSettings? machine = null)
     {
         _paths = paths;
         _store = store;
+        _lockedFields = existing?.LockedFields ?? [];
+        _managedAutostart = existing?.ManagedAutostart ?? false;
         _existingCipher = existing?.PasswordCipher;
+        _existingClientId = existing?.ClientId;
+        _existingScope = existing?.ConfigScope;
         _originalServerUrl = existing?.ServerUrl ?? "http://localhost:5080";
         _originalUserName = existing?.UserName;
         _originalKind = existing?.Target.Kind ?? "screen";
@@ -75,7 +87,7 @@ internal sealed class SettingsForm : Form
         MinimizeBox = false;
         ShowInTaskbar = true;
         TopMost = true;
-        ClientSize = new Size(760, 850);
+        ClientSize = new Size(760, 930);
 
         BuildUi(existing, initialError);
         PopulateMonitors(existing?.Display.MonitorDeviceName);
@@ -90,9 +102,11 @@ internal sealed class SettingsForm : Form
         _saveButton.Click += SaveButton_Click;
         _cancelButton.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
         _logsButton.Click += (_, _) => OpenLogsDirectory();
+        _browseDirectory.Click += (_, _) => BrowseDownloadDirectory();
         _kindScreen.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindLayout.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindWorkstation.CheckedChanged += (_, _) => UpdateTargetControls();
+        _kindWorkspace.CheckedChanged += (_, _) => UpdateTargetControls();
         _serverUrl.TextChanged += (_, _) => MarkConnectionDirty();
         _userName.TextChanged += (_, _) => MarkConnectionDirty();
         _password.TextChanged += (_, _) => MarkConnectionDirty();
@@ -100,6 +114,7 @@ internal sealed class SettingsForm : Form
 
         UpdateTargetControls();
         UpdateButtons();
+        ApplyLocks();
     }
 
     public DesktopSettings? SavedSettings { get; private set; }
@@ -131,14 +146,15 @@ internal sealed class SettingsForm : Form
             AutoSize = true
         };
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-        for (var i = 0; i < 6; i++) root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var i = 0; i < 7; i++) root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         root.Controls.Add(BuildNotice(initialError), 0, 0);
         root.Controls.Add(BuildConnectionGroup(), 0, 1);
         root.Controls.Add(BuildAccountGroup(), 0, 2);
         root.Controls.Add(BuildTargetGroup(), 0, 3);
         root.Controls.Add(BuildOptionsGroup(), 0, 4);
-        root.Controls.Add(BuildButtons(), 0, 5);
+        root.Controls.Add(BuildDownloadGroup(), 0, 5);
+        root.Controls.Add(BuildButtons(), 0, 6);
         Controls.Add(root);
     }
 
@@ -159,6 +175,16 @@ internal sealed class SettingsForm : Form
             Text = "自动登录使用专用账号，建议只授予查看权限。密码只以 Windows DPAPI 加密保存在本机，不会写入日志。"
         };
         panel.Controls.Add(hint);
+        if (_lockedFields.Length > 0 || _managedAutostart)
+        {
+            panel.Controls.Add(new Label
+            {
+                AutoSize = true,
+                MaximumSize = new Size(660, 0),
+                ForeColor = Color.FromArgb(170, 110, 20),
+                Text = "部分选项由管理员统一配置，已锁定，不能在此修改。"
+            });
+        }
         if (!string.IsNullOrWhiteSpace(initialError))
         {
             panel.Controls.Add(new Label
@@ -218,6 +244,7 @@ internal sealed class SettingsForm : Form
         kinds.Controls.Add(_kindScreen);
         kinds.Controls.Add(_kindLayout);
         kinds.Controls.Add(_kindWorkstation);
+        kinds.Controls.Add(_kindWorkspace);
         table.Controls.Add(kinds, 0, 0);
         table.SetColumnSpan(kinds, 3);
 
@@ -245,6 +272,21 @@ internal sealed class SettingsForm : Form
         table.SetColumnSpan(_autoStart, 2);
         table.Controls.Add(_keepAwake, 0, 3);
         table.SetColumnSpan(_keepAwake, 2);
+        group.Controls.Add(table);
+        return group;
+    }
+
+    private Control BuildDownloadGroup()
+    {
+        var group = NewGroup("导出与下载");
+        var table = NewGrid(3);
+        table.Controls.Add(_allowDownloads, 0, 0);
+        table.SetColumnSpan(_allowDownloads, 3);
+        table.Controls.Add(NewLabel("下载目录"), 0, 1);
+        table.Controls.Add(_downloadDirectory, 1, 1);
+        _downloadDirectory.Dock = DockStyle.Fill;
+        _downloadDirectory.PlaceholderText = "留空使用用户下载目录";
+        table.Controls.Add(_browseDirectory, 2, 1);
         group.Controls.Add(table);
         return group;
     }
@@ -325,6 +367,7 @@ internal sealed class SettingsForm : Form
         {
             case "layout": _kindLayout.Checked = true; break;
             case "workstation": _kindWorkstation.Checked = true; break;
+            case "workspace": _kindWorkspace.Checked = true; break;
             default: _kindScreen.Checked = true; break;
         }
         _monitorOnly.Checked = existing.Target.MonitorOnly;
@@ -332,6 +375,8 @@ internal sealed class SettingsForm : Form
         _keepAwake.Checked = existing.KeepAwake;
         _autoStart.Checked = existing.AutoStart;
         _savePassword.Checked = existing.SavePassword;
+        _allowDownloads.Checked = existing.AllowDownloads;
+        _downloadDirectory.Text = existing.DownloadDirectory ?? string.Empty;
         _serverUrl.Text = existing.ServerUrl;
         _userName.Text = existing.UserName ?? string.Empty;
 
@@ -349,14 +394,56 @@ internal sealed class SettingsForm : Form
     private void UpdateTargetControls()
     {
         var kind = CurrentKind();
-        _screenCombo.Enabled = kind == "screen";
-        _monitorOnly.Enabled = kind == "screen";
-        _layoutCombo.Enabled = kind == "layout";
-        _workstationCombo.Enabled = kind == "workstation";
+        var locked = IsLocked("target");
+        _screenCombo.Enabled = !locked && kind == "screen";
+        _monitorOnly.Enabled = !locked && kind == "screen";
+        _layoutCombo.Enabled = !locked && kind == "layout";
+        _workstationCombo.Enabled = !locked && kind == "workstation";
+    }
+
+    private bool IsLocked(string field) =>
+        _lockedFields.Contains(field, StringComparer.OrdinalIgnoreCase);
+
+    private void ApplyLocks()
+    {
+        if (_lockedFields.Length == 0 && !_managedAutostart) return;
+        if (IsLocked("serverUrl")) _serverUrl.Enabled = false;
+        if (IsLocked("userName")) _userName.Enabled = false;
+        if (IsLocked("target"))
+        {
+            _kindScreen.Enabled = false;
+            _kindLayout.Enabled = false;
+            _kindWorkstation.Enabled = false;
+            _kindWorkspace.Enabled = false;
+        }
+        if (IsLocked("display"))
+        {
+            _fullScreen.Enabled = false;
+            _monitorCombo.Enabled = false;
+        }
+        if (IsLocked("autoStart") || _managedAutostart)
+        {
+            _autoStart.Enabled = false;
+            if (_managedAutostart) _autoStart.Text = "Windows 登录后自动启动（由安装程序管理）";
+        }
+        if (IsLocked("allowDownloads")) _allowDownloads.Enabled = false;
+        if (IsLocked("downloadDirectory"))
+        {
+            _downloadDirectory.Enabled = false;
+            _browseDirectory.Enabled = false;
+        }
+    }
+
+    private void BrowseDownloadDirectory()
+    {
+        if (IsLocked("downloadDirectory")) return;
+        using var dialog = new FolderBrowserDialog { Description = "选择下载目录", ShowNewFolderButton = true };
+        if (!string.IsNullOrWhiteSpace(_downloadDirectory.Text)) dialog.SelectedPath = _downloadDirectory.Text;
+        if (dialog.ShowDialog(this) == DialogResult.OK) _downloadDirectory.Text = dialog.SelectedPath;
     }
 
     private string CurrentKind() =>
-        _kindLayout.Checked ? "layout" : _kindWorkstation.Checked ? "workstation" : "screen";
+        _kindLayout.Checked ? "layout" : _kindWorkstation.Checked ? "workstation" : _kindWorkspace.Checked ? "workspace" : "screen";
 
     private void MarkConnectionDirty()
     {
@@ -601,6 +688,7 @@ internal sealed class SettingsForm : Form
                     LayoutId = kind == "layout" ? layoutId : null,
                     WorkstationId = kind == "workstation" ? station!.Id : null,
                     WorkstationName = kind == "workstation" ? station!.Name : null,
+                    TargetName = kind == "workspace" ? "多页面工作台" : null,
                     MonitorOnly = kind == "screen" && _monitorOnly.Checked
                 },
                 Display = new DesktopDisplay
@@ -609,7 +697,13 @@ internal sealed class SettingsForm : Form
                     MonitorDeviceName = (_monitorCombo.SelectedItem as MonitorOption)?.DeviceName
                 },
                 KeepAwake = _keepAwake.Checked,
-                AutoStart = _autoStart.Checked
+                AutoStart = _autoStart.Checked,
+                AllowDownloads = _allowDownloads.Checked,
+                DownloadDirectory = string.IsNullOrWhiteSpace(_downloadDirectory.Text) ? null : _downloadDirectory.Text.Trim(),
+                ClientId = _existingClientId,
+                ManagedAutostart = _managedAutostart,
+                ConfigScope = _existingScope,
+                LockedFields = _lockedFields
             };
 
             var validation = SettingsValidator.Validate(settings, requirePassword: true);
@@ -619,9 +713,20 @@ internal sealed class SettingsForm : Form
                 return;
             }
 
-            _store.Save(settings);
-            AutostartRegistration.Apply(settings.AutoStart, out var warning);
-            if (!string.IsNullOrWhiteSpace(warning))
+            // 机器锁定的字段保留用户层原值：界面显示的是合并结果，整份保存会让管理员
+            // 下发的 serverUrl/target 沉淀成用户自己的设置（撤掉策略后终端仍按旧目标跑）。
+            var userLayer = _store.Load(out _);
+            if (userLayer is null)
+            {
+                _store.Save(settings);
+            }
+            else
+            {
+                DesktopConfigLayers.ApplyEditableFields(userLayer, settings, _lockedFields);
+                _store.Save(userLayer);
+            }
+            var autostart = AutostartRegistration.Apply(settings.AutoStart, settings.ManagedAutostart);
+            if (autostart.Warning is { Length: > 0 } warning)
             {
                 MessageBox.Show(this, warning, "开机自启", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
@@ -661,8 +766,8 @@ internal sealed class SettingsForm : Form
         if (_closing || IsDisposed) return;
         _busy = busy;
         UseWaitCursor = busy;
-        _serverUrl.Enabled = !busy;
-        _userName.Enabled = !busy;
+        _serverUrl.Enabled = !busy && !IsLocked("serverUrl");
+        _userName.Enabled = !busy && !IsLocked("userName");
         _password.Enabled = !busy;
         _savePassword.Enabled = !busy;
         UpdateButtons();

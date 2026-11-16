@@ -22,7 +22,7 @@ public sealed class LicenseTests : IDisposable
     public void Dispose()
     {
         _signingKey.Dispose();
-        try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
+        TestSqlite.TryDeleteDirectory(_root);
     }
 
     [Fact]

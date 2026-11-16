@@ -137,14 +137,14 @@ public sealed class AiAuditFilter(IDbContextFactory<ConfigDbContext> factory, ID
                 Action = $"{http.Request.Method} {http.Request.Path}",
                 TargetType = "AiApi",
                 TargetId = key?.Id.ToString() ?? http.User.GetUserId()?.ToString(),
-                Details = JsonSerializer.Serialize(new { key = key?.Name, prefix = key?.KeyPrefix, query = http.Request.QueryString.Value }),
+                Details = JsonSerializer.Serialize(new { key = key?.Name, prefix = key?.KeyPrefix, query = AuditQuery.Scrub(http.Request.QueryString.Value) }),
                 Result = status is >= 200 and < 400 ? "成功" : status == 429 ? "拒绝：限流" : status == 401 ? "拒绝：未认证" : status == 403 ? "拒绝：权限不足" : $"HTTP {status}"
             });
             await db.SaveChangesAsync(CancellationToken.None);
             await runtime.SaveChangesAsync(CancellationToken.None);
         }
-        // 审计写失败不影响响应：调用方已经拿到结果，这次调用会在日志里缺失。
-        catch { }
+        // 写失败不影响响应，但必须留下可见的错误日志与计数，不能静默丢审计。
+        catch (Exception ex) { AuditFailures.Report(http.RequestServices, "ai-api", ex); }
         return result;
     }
 }

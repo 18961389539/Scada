@@ -51,14 +51,15 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
         var secret = created.GetProperty("secret").GetString()!;
         var keyId = created.GetProperty("key").GetProperty("id").GetInt32();
 
-        var root = Path.Combine(Path.GetTempPath(), "scada-ext-opc-client-" + Guid.NewGuid().ToString("N"));
+        // OPC UA 客户端会在这里生成 PKI 证书目录；不清理的话每个用例都会在系统临时目录留一份。
+        using var root = new TempDir("scada-ext-opc-client-");
         var services = new ServiceCollection().AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
         services.AddOpcUa().AddClient(options =>
         {
             options.ApplicationName = "ScadaExternalOpcTestClient";
             options.ApplicationUri = "urn:localhost:scada:external-opc-test";
             options.ProductUri = "urn:scada:external-opc-test";
-            options.PkiRoot = root;
+            options.PkiRoot = root.Path;
             options.AutoAcceptUntrustedCertificates = true;
         });
         services.AddSingleton<IDeviceCredentials, PlainCredentials>();

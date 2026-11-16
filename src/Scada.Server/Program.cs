@@ -96,9 +96,14 @@ builder.Host.UseSerilog((_, _, configuration) =>
         .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
         .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
         .Enrich.FromLogContext()
+        // TraceId/SpanId 与 OTel 的 trace 对应：慢请求可以在日志里按 TraceId 反查全部业务日志。
+        .Enrich.With<Scada.Server.Logging.ActivityLogEnricher>()
         .WriteTo.Console()
         .WriteTo.File(
             Path.Combine(logRoot, "log-.txt"),
+            // 模板显式带 TraceId：不配 outputTemplate 时 Serilog 只写 Message，
+            // 结构化属性丢在文件里，日志平台也索引不到 trace 关联键。
+            outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{TraceId}] {Message:lj}{NewLine}{Exception}",
             rollingInterval: RollingInterval.Day,
             retainedFileCountLimit: Math.Clamp(scadaOptions.LogRetainedFiles, 1, 3650),
             fileSizeLimitBytes: Math.Clamp(scadaOptions.LogFileSizeLimitMb, 1, 10240) * 1024L * 1024L,
@@ -111,6 +116,10 @@ builder.AddScadaResilience(scadaOptions);
 var security = builder.AddScadaSecurity(scadaOptions, externalRest);
 
 var app = builder.Build();
+
+// 让"这台机器和那台机器行为不同"有据可查：只记录与默认值不同的标量配置（敏感项跳过）。
+// 必须放在 Build() 之后：Serilog 在 Build 时才接管 ILogger，之前的 Console 输出在服务模式下会丢。
+ScadaStartupLog.NonDefaultSettings(app.Logger, scadaOptions);
 
 await DatabaseInitializer.InitializeAsync(app.Services);
 

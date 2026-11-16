@@ -66,5 +66,6 @@ internal static class ScadaWiring
         services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());
         services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Engine.Maintenance.BackupScheduler>());
         services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Server.Projects.ProjectService>());
+        services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Engine.Maintenance.ClockSkewMonitor>());
     }
 }

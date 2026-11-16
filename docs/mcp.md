@@ -447,7 +447,10 @@ not execute queries, call an LLM or pretend an analysis has already run.
   requests are limited per source connection IP, including initialization and
   listing. An unavailable IP shares one `unknown` bucket; clients behind a proxy
   share its budget. Untrusted `X-Forwarded-For` headers do not change this
-  identity.
+  identity. Enabling `Scada:ReverseProxy` with explicit `KnownProxies` is the
+  only way to restore the real client address: with a trusted proxy listed, MCP
+  limits and CIDR allowlists evaluate that address instead of the proxy's;
+  forwarding headers from any other source are still ignored.
 - Heavy alarm summary/analysis, history, OEE and aggregate-report queries share four concurrent slots
   and a 30-second cooperative cancellation budget. Busy (`query_busy`) and timeout
   (`query_timeout`) conditions are explicit errors; reduce the range or retry later.

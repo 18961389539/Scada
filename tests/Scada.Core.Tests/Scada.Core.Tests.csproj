@@ -20,4 +20,10 @@
     <ProjectReference Include="..\..\src\Scada.Core\Scada.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- 仓库根在编译期固化：指定 artifacts 输出目录时 bin 会落在临时路径，测试宿主的 cwd 也不是仓库根，
+         运行时向上找 Scada.sln 会失败（架构测试与夹具比对测试误报）。 -->
+    <AssemblyMetadata Include="RepoRoot" Value="$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../..'))" />
+  </ItemGroup>
+
 </Project>

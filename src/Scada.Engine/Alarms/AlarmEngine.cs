@@ -68,7 +68,8 @@ public sealed class AlarmEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var reader = _bus.Subscribe();
+        // 租约随 ExecuteAsync 结束释放：服务重启后旧队列必须摘掉，否则会留下一个没人读的满队列。
+        using var subscription = _bus.Subscribe(out var reader);
         ReloadConfigIfNeeded();
         await RestoreActiveAlarmsAsync(stoppingToken);
         try { await _shelf.EnsureLoadedAsync(stoppingToken); }

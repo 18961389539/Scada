@@ -44,7 +44,7 @@ public sealed class SignalRRealtimeBroadcaster : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var reader = _bus.Subscribe();
+        using var subscription = _bus.Subscribe(out var reader);
         var buffer = new List<TagValue>();
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Max(_settings.PushIntervalMs, 100)));
 

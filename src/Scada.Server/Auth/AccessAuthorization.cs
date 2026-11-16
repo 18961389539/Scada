@@ -66,8 +66,8 @@ public sealed class AuditingAuthorizationResultHandler : IAuthorizationMiddlewar
                 var factory = context.RequestServices.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
                 await Audit.DeniedAsync(factory, context, $"{context.Request.Method} {context.Request.Path}", reason, CancellationToken.None);
             }
-            // 审计库不可用时仍要返回 403：这里吞掉异常，代价是这次拒绝没有审计记录。
-            catch { }
+            // 审计库不可用时仍要返回 403，但失败本身要可见：记错误日志并计数。
+            catch (Exception ex) { AuditFailures.Report(context.RequestServices, "authorization-middleware", ex); }
         }
 
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -181,8 +181,8 @@ public static class Audit
                 var factory = http.RequestServices.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
                 await Audit.DeniedAsync(factory, http, action, reason, CancellationToken.None, targetType, targetId);
             }
-            // 同上：写审计失败不能把 403 变成 500，该次拒绝会缺少审计记录。
-            catch { }
+            // 同上：写审计失败不能把 403 变成 500，但失败本身要可见。
+            catch (Exception ex) { AuditFailures.Report(http.RequestServices, "authorization-result", ex); }
         }
 
         return Results.Json(new { message = reason }, statusCode: StatusCodes.Status403Forbidden);

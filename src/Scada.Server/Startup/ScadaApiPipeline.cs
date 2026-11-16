@@ -16,6 +16,17 @@ internal static class ScadaApiPipeline
             app.Logger.LogWarning("Jwt:Key 未配置，本次使用临时签名密钥，重启后已签发的令牌全部失效");
         }
 
+        // 反向代理必须先还原真实来源：限流分区、IP 白名单、审计与日志都读 RemoteIpAddress。
+        // 未启用时只做一次提示——如果前面其实有代理，配额的合并不会静默发生。
+        if (scadaSettings.ReverseProxy.Enabled)
+        {
+            app.UseForwardedHeaders();
+        }
+        else
+        {
+            app.UseMiddleware<Scada.Server.Middleware.ReverseProxyWarning>();
+        }
+
         app.UseSerilogRequestLogging();
         // 安全头紧随其后：静态资源、API 与异常响应都要带上同一套，晚于静态文件就漏掉了首屏。
         app.UseMiddleware<Scada.Server.Middleware.SecurityHeaders>();

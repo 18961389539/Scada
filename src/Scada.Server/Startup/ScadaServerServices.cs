@@ -45,6 +45,8 @@ internal static class ScadaServerServices
         builder.Services.AddHostedService(sp => sp.GetRequiredService<OpcCatalogService>());
         builder.Services.AddScadaEngine();
         builder.Services.AddSingleton<Scada.Server.Services.HealthSnapshotService>();
+        builder.Services.AddSingleton<Scada.Server.Desktop.DesktopClientRegistry>();
+        builder.Services.AddHostedService<Scada.Server.Desktop.DesktopClientMonitor>();
         builder.Services.AddOptions<GatewaySettings>().Bind(builder.Configuration.GetSection("Gateway"))
             .Validate(x => x.LeaseSeconds is >= 15 and <= 120 && x.MaxInboxPendingBytes >= 1024 && x.CommandTimeoutMs is >= 100 and <= 120000
                 && x.DeviceOfflineDelayMs is >= 0 and <= 300000 && x.DeviceStateGraceMs is >= 1000 and <= 300000

@@ -23,4 +23,26 @@ public interface IRealtimeBus
     ChannelReader<TagValue> Subscribe();
     // 历史写入使用更大的队列，满了先等一拍再拒收，不和界面订阅互相挤掉。
     ChannelReader<TagValue> SubscribeHistory() => Subscribe();
+
+    // 带租约的订阅：Dispose 后从总线移除。短生命周期消费者（按需聚合器、测试替身）必须用这个，
+    // 否则每次订阅都会永久留下一个没人读的队列——缓冲满后每次发布都多一次失败写入，
+    // 还会把 DroppedTotal 一起污染，掩盖真正的丢数。
+    IDisposable Subscribe(out ChannelReader<TagValue> reader)
+    {
+        reader = Subscribe();
+        return EmptySubscription.Instance;
+    }
+
+    IDisposable SubscribeHistory(out ChannelReader<TagValue> reader)
+    {
+        reader = SubscribeHistory();
+        return EmptySubscription.Instance;
+    }
+}
+
+// 接口默认实现用的空句柄：替身只实现无租约订阅时，租约退化为"不可退订"。
+internal sealed class EmptySubscription : IDisposable
+{
+    public static readonly EmptySubscription Instance = new();
+    public void Dispose() { }
 }

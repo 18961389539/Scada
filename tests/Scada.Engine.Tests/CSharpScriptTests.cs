@@ -15,7 +15,8 @@ namespace Scada.Engine.Tests;
 
 public sealed class CSharpScriptTests
 {
-    private static CSharpScriptHost Host(int timeoutMs = 1000, bool enabled = true)
+    // 首次启动脚本工作进程要编译临时工程，并行跑全量时 1s 会偶发超时；超时行为由显式传 200ms 的用例覆盖。
+    private static CSharpScriptHost Host(int timeoutMs = 5000, bool enabled = true)
     {
         var worker = Path.Combine(AppContext.BaseDirectory, "ScriptWorker", "Scada.ScriptWorker.dll");
         return new(Options.Create(new CSharpScriptOptions { Enabled = enabled, WorkerPath = worker, TimeoutMs = timeoutMs, WorkerCount = 1 }));

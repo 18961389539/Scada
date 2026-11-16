@@ -96,7 +96,8 @@ export default {
     alarmNoTag: 'No tag'
   },
   tagsUx: {
-    batchCreatedFiltered: 'Created {0} tags; the list now shows {1}'
+    batchCreatedFiltered: 'Created {0} tags; the list now shows {1}',
+    batchRowError: 'Row {0}: {1}'
   },
   loginUx: {
     capsLockOn: 'Caps Lock is on',

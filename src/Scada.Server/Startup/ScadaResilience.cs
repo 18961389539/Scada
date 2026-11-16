@@ -1,6 +1,10 @@
 using System.Globalization;
+using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using OpenTelemetry;
 using OpenTelemetry.Resources;
@@ -8,6 +12,7 @@ using OpenTelemetry.Trace;
 using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Server.Auth;
+using Scada.Server.External;
 using Scada.Server.Mcp;
 
 namespace Scada.Server.Startup;
@@ -29,15 +34,35 @@ internal static class ScadaResilience
         builder.WebHost.ConfigureKestrel(options =>
             options.Limits.MaxRequestBodySize = Math.Clamp(scada.MaxUploadMb, 1, 4096) * 1024L * 1024L);
 
+        AddForwardedHeaders(builder, scada);
         AddRateLimiting(builder, scada);
         AddRequestTimeouts(builder, scada);
         AddTelemetry(builder);
     }
 
+    // ── 反向代理 ────────────────────────────────────────────────────────────
+    // TLS 终结在 nginx/IIS 时 RemoteIpAddress 是代理地址；限流按「身份 + 终端地址」分区，
+    // 不还原真实地址就会把所有终端合并成一个桶。只信任显式列出的代理，避免伪造 XFF 绕过限流。
+    private static void AddForwardedHeaders(WebApplicationBuilder builder, ScadaSettings scada)
+    {
+        if (!scada.ReverseProxy.Enabled) return;
+        builder.Services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            options.ForwardLimit = 1;
+            options.KnownProxies.Clear();
+            options.KnownIPNetworks.Clear();
+            foreach (var value in scada.ReverseProxy.KnownProxies)
+            {
+                if (IPAddress.TryParse(value.Trim(), out var address)) options.KnownProxies.Add(address);
+            }
+        });
+    }
+
     // ── 限流 ────────────────────────────────────────────────────────────────
     // 此前只有登录、MCP 与对外 REST 有限流，内部 /api 完全没有：一个已登录脚本反复打 OEE 或
     // 报警分析这类聚合查询，就能把 SQLite 的读连接占满。这里按身份分两档：
-    // 已登录按 userId 发令牌桶（跨标签页、跨设备共享配额），未登录按来源 IP 固定窗口。
+    // 有凭据（JWT / API 密钥 / 网关）按「身份 + 终端」发令牌桶，匿名按来源 IP 固定窗口。
     private static void AddRateLimiting(WebApplicationBuilder builder, ScadaSettings scada)
     {
         var perUser = Math.Max(0, scada.ApiRateLimitPerMinute);
@@ -102,8 +127,18 @@ internal static class ScadaResilience
                 if (BypassesRateLimit(http.Request.Path))
                     return RateLimitPartition.GetNoLimiter("static");
 
-                if (perUser > 0 && http.User.Identity?.IsAuthenticated == true && http.User.GetUserId() is int userId)
-                    return RateLimitPartition.GetTokenBucketLimiter($"user:{userId}", _ => new TokenBucketRateLimiterOptions
+                // 令牌桶按「账号 + 终端地址」分区，不是只按账号：控制室里几十台操作台
+                // 常用同一个只读账号自动登录（客户端设置页也建议"专用账号、只授查看权限"），
+                // 只按 userId 时它们的固定轮询会合用一个桶——单台报警条 2 请求/3s、
+                // 版本检查 6/min，25 台就能把 1200/min 打满，之后操作员的确认、趋势、
+                // 配置请求全部 429。加上来源地址后每台终端各有配额；同一台机器上的
+                // 多标签页仍共享一个桶，脚本刷接口的放大幅度没有变化。
+                // API 密钥与网关凭据只在 authorization policy 里求值（UseAuthorization 阶段），
+                // 而限流在认证之后、授权之前：只看 http.User 会把它们全归进匿名 IP 桶。
+                // 单台网关 250ms 轮询约 480/min，足以打满 120/min 的匿名配额，命令与遥测持续 429。
+                // 这里直接从请求头提取凭据指纹做分区，不改变任何鉴权结果。
+                if (perUser > 0 && CredentialPartitionKey(http) is { } identity)
+                    return RateLimitPartition.GetTokenBucketLimiter(PartitionKey(http, identity), _ => new TokenBucketRateLimiterOptions
                     {
                         TokenLimit = perUser,
                         TokensPerPeriod = perUser,
@@ -112,28 +147,62 @@ internal static class ScadaResilience
                         AutoReplenishment = true
                     });
 
-                if (perAnonymous > 0 && http.Connection.RemoteIpAddress is { } address)
-                    return RateLimitPartition.GetFixedWindowLimiter($"ip:{address}", _ => new FixedWindowRateLimiterOptions
+                if (perAnonymous > 0)
+                    return RateLimitPartition.GetFixedWindowLimiter($"ip:{AddressKey(http)}", _ => new FixedWindowRateLimiterOptions
                     {
                         PermitLimit = perAnonymous,
                         Window = TimeSpan.FromMinutes(1),
                         QueueLimit = 0
                     });
 
-                // 拿不到来源地址（TestServer、Unix 域套接字转发）时无法按 IP 公平分区：
-                // 所有请求会挤进同一个分区，正常的集成测试与本地转发都会被误杀，因此直接放行。
-                return RateLimitPartition.GetNoLimiter("no-remote-ip");
+                // 匿名限流被显式关闭（=0）才放行。
+                return RateLimitPartition.GetNoLimiter("anonymous-disabled");
             });
         });
     }
 
-    private static bool BypassesRateLimit(PathString path) =>
+    /// <summary>终端地址参与分区：拿不到地址时（TestServer、转发场景）退回 <c>local</c>。</summary>
+    internal static string AddressKey(HttpContext http) =>
+        http.Connection.RemoteIpAddress?.ToString() ?? "local";
+
+    /// <summary>
+    /// 限流分区用的身份键。只提取并哈希凭据，不做认证判断——鉴权仍由 AuthenticationHandler
+    /// 与 authorization policy 完成。API 密钥和网关凭据在限流阶段还没有进入 http.User，
+    /// 不从请求头识别就会全部落进匿名 IP 桶。返回 null 表示匿名请求。
+    /// </summary>
+    internal static string? CredentialPartitionKey(HttpContext http)
+    {
+        if (http.User.Identity?.IsAuthenticated == true && http.User.GetUserId() is int userId)
+            return $"user:{userId}";
+        if (ApiKeyAuthenticationHandler.Extract(http.Request) is { Length: > 0 } secret)
+            return "apikey:" + Fingerprint(secret);
+        var authorization = http.Request.Headers.Authorization.ToString();
+        if (authorization.StartsWith("Gateway ", StringComparison.OrdinalIgnoreCase))
+            return "gateway:" + Fingerprint(authorization[8..]);
+        return null;
+    }
+
+    private static string Fingerprint(string secret) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(secret)))[..16];
+
+    /// <summary>
+    /// 每终端一条配额：身份（账号 / API 密钥 / 网关凭据）+ 来源地址。同一账号的多台操作台
+    /// 各用各的桶，同一台机器上的多标签页仍共享一个；拿不到地址时退回 <c>local</c>。
+    /// </summary>
+    internal static string PartitionKey(HttpContext http, string identity) =>
+        $"{identity}:ip:{AddressKey(http)}";
+
+    internal static bool BypassesRateLimit(PathString path) =>
         path.StartsWithSegments("/assets")
         || path.StartsWithSegments("/health/live")
         || path.StartsWithSegments("/api/health/live")
         // HA 心跳/选主是集群内部的高频通信，有独立的 peer 凭据；计入匿名配额会在
         // 故障切换时把最关键的状态探测打成 429，导致双主或长时间无主。
         || path.StartsWithSegments("/api/ha/peer")
+        // 桌面客户端每 30 秒探测一次主备角色（HaEndpoints 里是匿名可调），几百台终端
+        // 走同一个出口时会把 120/min 的匿名配额吃满，连带登录等匿名请求一起 429。
+        // 与 peer 同理：这是集群状态探测，读多写零，直接豁免。
+        || path.StartsWithSegments("/api/ha/role")
         // MCP 有按来源 IP 的专用策略（ScadaMcp）。再叠一层全局匿名配额，有效配额会变成
         // 两者中的较小值，且两个窗口的起算时刻不同，客户端无法预期何时被拒。
         || path.StartsWithSegments(McpEndpoints.Path)

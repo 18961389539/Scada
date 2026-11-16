@@ -39,6 +39,53 @@
       </template>
     </div>
 
+    <div class="panel" data-test="desktop-clients-panel">
+      <div class="toolbar">
+        <h3>{{ $t('opsView.desktopClients.title') }}</h3>
+        <el-tag v-if="desktop" size="small" :type="desktop.haRole === 'Standby' ? 'warning' : undefined">{{ desktop.node }} · {{ desktop.haRole }}</el-tag>
+        <span v-if="desktop" class="tiny muted">{{ $t('opsView.desktopClients.onlineSummary', [desktop.online, desktop.total]) }}</span>
+        <span v-if="desktop" class="tiny muted" data-test="desktop-clients-policy">{{ policyText }}</span>
+        <el-tag v-if="desktop && desktop.blocked > 0" size="small" type="danger" data-test="desktop-clients-blocked">{{ $t('opsView.desktopClients.blockedSummary', [desktop.blocked]) }}</el-tag>
+        <el-tag v-if="desktop && desktop.outdated > 0" size="small" type="warning" data-test="desktop-clients-outdated">{{ $t('opsView.desktopClients.outdatedSummary', [desktop.outdated]) }}</el-tag>
+        <span class="spacer" />
+        <el-button :loading="desktopBusy" data-test="desktop-clients-refresh" @click="refreshDesktop()">{{ $t('opsView.desktopClients.refresh') }}</el-button>
+      </div>
+      <el-alert v-if="desktopError" :title="desktopError" type="error" :closable="false" show-icon data-test="desktop-clients-error" />
+      <el-alert v-else-if="desktop?.haRole === 'Standby'" :title="$t('opsView.desktopClients.standbyNote')" type="info" :closable="false" show-icon data-test="desktop-clients-standby" />
+      <el-alert v-else-if="desktop && desktop.total > 0 && desktop.online === 0" :title="$t('opsView.desktopClients.allOffline')" type="warning" :closable="false" show-icon data-test="desktop-clients-all-offline" />
+      <el-table :data="desktopRows" size="small" :empty-text="desktopError ? $t('opsView.desktopClients.loadFailed') : $t('opsView.desktopClients.empty')" data-test="desktop-clients-table">
+        <el-table-column prop="machineName" :label="$t('opsView.desktopClients.machine')" min-width="130" show-overflow-tooltip />
+        <el-table-column prop="windowsUser" :label="$t('opsView.desktopClients.windowsUser')" width="120" show-overflow-tooltip />
+        <el-table-column :label="$t('opsView.desktopClients.account')" width="120" show-overflow-tooltip><template #default="{ row }">{{ row.userName ?? '—' }}</template></el-table-column>
+        <el-table-column :label="$t('opsView.desktopClients.target')" min-width="170" show-overflow-tooltip><template #default="{ row }">{{ targetText(row) }}</template></el-table-column>
+        <el-table-column prop="appVersion" :label="$t('opsView.desktopClients.version')" width="100" show-overflow-tooltip />
+        <el-table-column prop="webView2Version" :label="$t('opsView.desktopClients.webview')" width="130" show-overflow-tooltip />
+        <el-table-column :label="$t('opsView.desktopClients.source')" width="100"><template #default="{ row }">{{ sourceText(row.configScope) }}</template></el-table-column>
+        <el-table-column :label="$t('opsView.desktopClients.status')" width="150">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.online ? 'success' : 'info'">{{ row.online ? $t('opsView.desktopClients.online') : $t('opsView.desktopClients.offline') }}</el-tag>
+            <el-tag v-if="row.conflict" size="small" type="warning" style="margin-left: 4px">{{ $t('opsView.desktopClients.conflict') }}</el-tag>
+            <el-tag v-if="row.blockedReason" size="small" type="danger" style="margin-left: 4px">{{ $t('opsView.desktopClients.blocked') }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('opsView.desktopClients.lastSeen')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.lastSeenTs) }}</template></el-table-column>
+      </el-table>
+      <!-- 服务端最多返回 500 条；一次渲染全部行会让 15 秒轮询明显卡顿，分页后每页只挂 20 行。 -->
+      <el-pagination
+        v-if="desktopPageCount > 1"
+        :current-page="Math.min(desktopPage, desktopPageCount)"
+        :page-size="DESKTOP_PAGE_SIZE"
+        :total="desktop?.clients.length ?? 0"
+        :pager-count="5"
+        layout="total, prev, pager, next"
+        data-test="desktop-clients-pagination"
+        @update:current-page="desktopPage = $event"
+      />
+      <p v-if="desktop?.truncated" class="tiny muted" data-test="desktop-clients-truncated">
+        {{ $t('opsView.desktopClients.truncatedHint', [desktop.clients.length, desktop.total]) }}
+      </p>
+    </div>
+
     <div class="panel" data-test="backup-panel">
       <div class="toolbar">
         <h3>{{ $t('opsView.k3199f6') }}</h3>
@@ -74,13 +121,30 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { opsApi } from '../api/ops'
-import type { BackupRun, BackupSummary, HaStatus } from '../api/ops'
+import type { BackupRun, BackupSummary, DesktopClient, DesktopClientList, HaStatus } from '../api/ops'
 import { errorMessage } from '../api/http'
 import { formatBytes, formatTime } from '../utils'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
 const ha = ref<HaStatus | null>(null)
+const desktop = ref<DesktopClientList | null>(null)
+const desktopBusy = ref(false)
+const desktopError = ref('')
+const DESKTOP_PAGE_SIZE = 20
+const desktopPage = ref(1)
+const desktopPageCount = computed(() => Math.max(1, Math.ceil((desktop.value?.clients.length ?? 0) / DESKTOP_PAGE_SIZE)))
+const desktopRows = computed(() => {
+  const rows = desktop.value?.clients ?? []
+  const page = Math.min(desktopPage.value, desktopPageCount.value)
+  const start = (page - 1) * DESKTOP_PAGE_SIZE
+  return rows.slice(start, start + DESKTOP_PAGE_SIZE)
+})
+const policyText = computed(() => {
+  const policy = desktop.value?.policy
+  if (!policy || (!policy.minimumVersion && !policy.latestVersion)) return tr('opsView.desktopClients.policyNone')
+  return tr('opsView.desktopClients.policySummary', [policy.minimumVersion ?? '—', policy.latestVersion ?? '—'])
+})
 const runs = ref<BackupRun[]>([])
 const backups = ref<BackupSummary[]>([])
 const targets = ref<{ name: string; kind: string; keepLatest: number }[]>([])
@@ -98,6 +162,33 @@ function targetKind(kind: string): string {
   if (key === 'directory') return tr('opsView.targetDirectory')
   if (key === 's3') return tr('opsView.targetS3')
   return kind
+}
+const targetKinds: Record<string, string> = {
+  screen: tr('opsView.desktopClients.kind.screen'),
+  layout: tr('opsView.desktopClients.kind.layout'),
+  workstation: tr('opsView.desktopClients.kind.workstation'),
+  workspace: tr('opsView.desktopClients.kind.workspace')
+}
+function targetText(row: DesktopClient): string {
+  const kind = row.targetKind ? targetKinds[row.targetKind] ?? row.targetKind : ''
+  const name = row.targetName || (row.targetId ? `#${row.targetId}` : '')
+  return [kind, name].filter(Boolean).join(' · ') || '—'
+}
+function sourceText(scope: string | null): string {
+  if (scope === 'machine') return tr('opsView.desktopClients.sourceMachine')
+  if (scope === 'user') return tr('opsView.desktopClients.sourceUser')
+  return tr('opsView.desktopClients.sourceLocal')
+}
+async function refreshDesktop(): Promise<void> {
+  desktopBusy.value = true
+  try {
+    desktop.value = await opsApi.desktopClients()
+    desktopError.value = ''
+  } catch (e) {
+    desktopError.value = errorMessage(e, tr('opsView.desktopClients.loadFailed'))
+  } finally {
+    desktopBusy.value = false
+  }
 }
 const roleLabel = computed(() => (ha.value ? roleText(ha.value.role) : ''))
 const roleType = computed(() => (ha.value?.role === 'Standby' ? 'warning' : undefined))
@@ -177,5 +268,6 @@ usePolling(async () => {
     statusError.value = errorMessage(e, tr('opsView.statusLoadFailed'))
   }
 }, 5000)
+usePolling(refreshDesktop, 15000, { immediate: true })
 onMounted(() => { void refresh() })
 </script>

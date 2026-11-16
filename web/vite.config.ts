@@ -60,6 +60,8 @@ export default defineConfig({
     }
   },
   build: {
+    // i18n 语言包用顶层 await 按当前语言动态加载（见 src/i18n/index.ts），目标环境必须支持。
+    target: 'es2022',
     manifest: true,
     outDir: 'dist',
     chunkSizeWarningLimit: 1500,

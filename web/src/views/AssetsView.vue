@@ -295,121 +295,16 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="completeDialog" :title="$t('assets.workOrder.completeTitle', [completeTarget?.number ?? ''])" width="560px" destroy-on-close>
-      <el-alert v-if="dialogError" :title="dialogError" type="error" :closable="false" show-icon data-test="wo-complete-error" />
-      <el-form label-width="110px" size="small">
-        <el-form-item :label="$t('assets.workOrder.resolution')">
-          <el-input v-model="completeForm.resolution" type="textarea" :rows="4" data-test="wo-resolution" />
-        </el-form-item>
-        <el-form-item :label="$t('assets.workOrder.downtime')">
-          <el-input-number v-model="completeForm.downtimeMinutes" :min="0" :max="100000" data-test="wo-downtime" />
-        </el-form-item>
-        <div class="hint">{{ $t('assets.workOrder.downtimeHint') }}</div>
-      </el-form>
-      <template #footer>
-        <el-button @click="completeDialog = false">{{ $t('assets.cancel') }}</el-button>
-        <el-button type="primary" :loading="statusSaving" data-test="wo-complete-submit" @click="submitComplete">{{ $t('assets.workOrder.complete') }}</el-button>
-      </template>
-    </el-dialog>
+    <WorkOrderCompleteDialog ref="completeDialog" @changed="loadOrdersAndAssets" />
 
-    <el-dialog v-model="orderPartsDialog" :title="$t('assets.workOrder.partsTitle', [orderPartsTarget?.number ?? ''])" width="760px" destroy-on-close>
-      <el-alert v-if="partsError" :title="partsError" type="error" :closable="false" show-icon data-test="wo-parts-error" />
-      <div v-if="orderPartsTarget && canControlArea(orderPartsTarget.areaId) && !isClosed(orderPartsTarget.status)" class="toolbar filter-row">
-        <el-select v-model="issueForm.partId" filterable :placeholder="$t('assets.workOrder.part')" style="width: 240px" data-test="wo-part-select">
-          <el-option v-for="p in enabledParts" :key="p.id" :label="`${p.code} ${p.name} (${formatQty(p.stock)} ${p.unit})`" :value="p.id" />
-        </el-select>
-        <el-input-number v-model="issueForm.quantity" :min="0.001" :step="1" data-test="wo-part-qty" />
-        <el-input v-model="issueForm.note" :placeholder="$t('assets.workOrder.note')" style="width: 180px" />
-        <el-button type="primary" :loading="issueSaving" data-test="wo-part-issue" @click="submitIssuePart">{{ $t('assets.workOrder.issuePart') }}</el-button>
-      </div>
-      <el-table :data="orderParts" size="small" :empty-text="$t('assets.workOrder.partEmpty')" data-test="wo-parts-table">
-        <el-table-column :label="$t('assets.part.time')" width="150">
-          <template #default="{ row }">{{ formatTime(row.ts) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.workOrder.part')" min-width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ partName(row.partId) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.workOrder.quantity')" width="100">
-          <template #default="{ row }">{{ formatQty(row.quantity) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.part.balanceAfter')" width="100">
-          <template #default="{ row }">{{ formatQty(row.balanceAfter) }}</template>
-        </el-table-column>
-        <el-table-column prop="operator" :label="$t('assets.part.operator')" width="110" show-overflow-tooltip />
-        <el-table-column prop="note" :label="$t('assets.part.note')" min-width="120" show-overflow-tooltip />
-      </el-table>
-    </el-dialog>
+    <WorkOrderPartsDialog ref="orderPartsDialog" :enabled-parts="enabledParts" :can-control-area="canControlArea"
+      :is-closed="isClosed" :part-name="partName" :format-qty="formatQty" @changed="loadParts" />
 
-    <el-dialog v-model="partDialog" :title="partForm.id ? $t('assets.part.editTitle') : $t('assets.part.addTitle')" width="680px" destroy-on-close>
-      <el-alert v-if="dialogError" :title="dialogError" type="error" :closable="false" show-icon data-test="part-save-error" />
-      <el-form label-width="100px" size="small">
-        <el-row :gutter="12">
-          <el-col :span="12"><el-form-item :label="$t('assets.part.code')"><el-input v-model="partForm.code" data-test="part-code" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.name')"><el-input v-model="partForm.name" data-test="part-name" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.specification')"><el-input v-model="partForm.specification" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.unit')"><el-input v-model="partForm.unit" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.stock')"><el-input-number v-model="partForm.stock" :min="0" style="width: 100%" data-test="part-stock" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.minStock')"><el-input-number v-model="partForm.minStock" :min="0" style="width: 100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.location')"><el-input v-model="partForm.location" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.supplier')"><el-input v-model="partForm.supplier" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.unitPrice')"><el-input-number v-model="partForm.unitPrice" :min="0" :precision="2" style="width: 100%" /></el-form-item></el-col>
-          <el-col :span="12"><el-form-item :label="$t('assets.part.enabled')"><el-switch v-model="partForm.enabled" /></el-form-item></el-col>
-          <el-col :span="24"><el-form-item :label="$t('assets.part.description')"><el-input v-model="partForm.description" type="textarea" :rows="2" /></el-form-item></el-col>
-        </el-row>
-      </el-form>
-      <template #footer>
-        <el-button @click="partDialog = false">{{ $t('assets.cancel') }}</el-button>
-        <el-button type="primary" :loading="partSaving" data-test="part-save" @click="savePart">{{ $t('assets.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <SparePartDialog ref="partDialog" @changed="loadParts" />
 
-    <el-dialog v-model="movementDialog" :title="$t('assets.part.movementTitle')" width="520px" destroy-on-close>
-      <el-alert v-if="dialogError" :title="dialogError" type="error" :closable="false" show-icon data-test="part-movement-error" />
-      <el-form label-width="110px" size="small">
-        <el-form-item :label="$t('assets.part.movementType')">
-          <el-radio-group v-model="movementForm.type" data-test="part-movement-type">
-            <el-radio-button v-for="t in movementTypeValues" :key="t" :value="t">{{ movementTypeLabel(t) }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item :label="movementForm.type === 'Adjust' ? $t('assets.part.adjustQuantity') : $t('assets.part.quantity')">
-          <el-input-number v-model="movementForm.quantity" :min="movementForm.type === 'Adjust' ? 0 : 0.001" :step="1" data-test="part-movement-qty" />
-        </el-form-item>
-        <el-form-item v-if="movementForm.type === 'Out'" :label="$t('assets.part.workOrder')">
-          <el-select v-model="movementForm.workOrderId" clearable :placeholder="$t('assets.none')" style="width: 100%">
-            <el-option v-for="o in openOrders" :key="o.id" :label="`${o.number} ${o.title}`" :value="o.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('assets.part.note')"><el-input v-model="movementForm.note" type="textarea" :rows="2" /></el-form-item>
-        <div v-if="movementForm.type === 'Adjust'" class="hint">{{ $t('assets.part.adjustHint') }}</div>
-      </el-form>
-      <template #footer>
-        <el-button @click="movementDialog = false">{{ $t('assets.cancel') }}</el-button>
-        <el-button type="primary" :loading="movementSaving" data-test="part-movement-save" @click="submitMovement">{{ $t('assets.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <StockMovementDialog ref="movementDialog" :open-orders="openOrders" @changed="loadParts" />
 
-    <el-dialog v-model="movementsDialog" :title="$t('assets.part.movementsTitle', [movementsTarget?.name ?? ''])" width="760px" destroy-on-close>
-      <el-alert v-if="partsError" :title="partsError" type="error" :closable="false" show-icon data-test="part-movements-error" />
-      <el-table :data="partMovements" size="small" :empty-text="$t('assets.part.noMovements')" data-test="part-movements-table">
-        <el-table-column :label="$t('assets.part.time')" width="150">
-          <template #default="{ row }">{{ formatTime(row.ts) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.part.movementType')" width="100">
-          <template #default="{ row }">{{ movementTypeLabel(row.type) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.part.quantity')" width="100">
-          <template #default="{ row }">{{ formatQty(row.quantity) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.part.balanceAfter')" width="100">
-          <template #default="{ row }">{{ formatQty(row.balanceAfter) }}</template>
-        </el-table-column>
-        <el-table-column :label="$t('assets.part.workOrder')" width="150" show-overflow-tooltip>
-          <template #default="{ row }">{{ orderNumber(row.workOrderId) }}</template>
-        </el-table-column>
-        <el-table-column prop="operator" :label="$t('assets.part.operator')" width="110" show-overflow-tooltip />
-        <el-table-column prop="note" :label="$t('assets.part.note')" min-width="120" show-overflow-tooltip />
-      </el-table>
-    </el-dialog>
+    <PartMovementsDialog ref="movementsDialog" :order-number="orderNumber" :format-qty="formatQty" />
   </div>
 </template>
 
@@ -422,9 +317,14 @@ import { can } from '../access/policies'
 import { currentLocale, tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
+import WorkOrderCompleteDialog from '../components/assets/WorkOrderCompleteDialog.vue'
+import WorkOrderPartsDialog from '../components/assets/WorkOrderPartsDialog.vue'
+import SparePartDialog from '../components/assets/SparePartDialog.vue'
+import StockMovementDialog from '../components/assets/StockMovementDialog.vue'
+import PartMovementsDialog from '../components/assets/PartMovementsDialog.vue'
 import type {
-  Area, Asset, AssetInput, AssetStatus, Device, MaintenanceWorkOrder, SparePart, SparePartInput,
-  SparePartMovement, SparePartMovementType, WorkOrderInput, WorkOrderPriority, WorkOrderStatus, WorkOrderType
+  Area, Asset, AssetInput, AssetStatus, Device, MaintenanceWorkOrder, SparePart,
+  SparePartMovementType, WorkOrderInput, WorkOrderPriority, WorkOrderStatus, WorkOrderType
 } from '../types'
 
 const auth = useAuthStore()
@@ -440,11 +340,9 @@ const assetError = ref('')
 const orderError = ref('')
 const partError = ref('')
 const dialogError = ref('')
-const partsError = ref('')
 
 const assetLoading = ref(false), orderLoading = ref(false), partLoading = ref(false)
-const assetSaving = ref(false), orderSaving = ref(false), partSaving = ref(false)
-const statusSaving = ref(false), issueSaving = ref(false), movementSaving = ref(false)
+const assetSaving = ref(false), orderSaving = ref(false)
 
 const assetSearch = ref(''), assetStatus = ref<AssetStatus | ''>(''), assetArea = ref<number | null>(null), assetEnabledOnly = ref(false)
 const orderSearch = ref(''), orderStatus = ref<WorkOrderStatus | ''>(''), orderType = ref<WorkOrderType | ''>('')
@@ -455,7 +353,6 @@ const assetStatusValues: AssetStatus[] = ['InService', 'Standby', 'Maintenance',
 const workOrderStatusValues: WorkOrderStatus[] = ['Open', 'InProgress', 'OnHold', 'Completed', 'Cancelled']
 const workOrderTypeValues: WorkOrderType[] = ['Corrective', 'Preventive', 'Inspection', 'Improvement']
 const workOrderPriorityValues: WorkOrderPriority[] = ['Low', 'Normal', 'High', 'Urgent']
-const movementTypeValues: SparePartMovementType[] = ['In', 'Out', 'Adjust']
 const assetStatusLabels: Record<AssetStatus, string> = {
   InService: tr('assets.status.InService'), Standby: tr('assets.status.Standby'),
   Maintenance: tr('assets.status.Maintenance'), Retired: tr('assets.status.Retired')
@@ -484,18 +381,11 @@ const isClosed = (status: WorkOrderStatus) => status === 'Completed' || status =
 
 const assetDialog = ref(false)
 const orderDialog = ref(false)
-const completeDialog = ref(false)
-const orderPartsDialog = ref(false)
-const partDialog = ref(false)
-const movementDialog = ref(false)
-const movementsDialog = ref(false)
-
-const completeTarget = ref<MaintenanceWorkOrder | null>(null)
-const orderPartsTarget = ref<MaintenanceWorkOrder | null>(null)
-const movementTarget = ref<SparePart | null>(null)
-const movementsTarget = ref<SparePart | null>(null)
-const orderParts = ref<SparePartMovement[]>([])
-const partMovements = ref<SparePartMovement[]>([])
+const completeDialog = ref<InstanceType<typeof WorkOrderCompleteDialog>>()
+const orderPartsDialog = ref<InstanceType<typeof WorkOrderPartsDialog>>()
+const partDialog = ref<InstanceType<typeof SparePartDialog>>()
+const movementDialog = ref<InstanceType<typeof StockMovementDialog>>()
+const movementsDialog = ref<InstanceType<typeof PartMovementsDialog>>()
 
 const assetForm = reactive({
   id: 0,
@@ -522,20 +412,6 @@ const orderForm = reactive({
   reporter: '',
   plannedStart: null as Date | null,
   plannedEnd: null as Date | null
-})
-
-const completeForm = reactive({ resolution: '', downtimeMinutes: 0 })
-const issueForm = reactive({ partId: null as number | null, quantity: 1, note: '' })
-const partForm = reactive({
-  id: 0,
-  code: '', name: '', specification: '', unit: '', stock: 0, minStock: 0, location: '', supplier: '',
-  unitPrice: null as number | null, description: '', enabled: true
-})
-const movementForm = reactive({
-  type: 'In' as SparePartMovementType,
-  quantity: 1,
-  note: '',
-  workOrderId: null as number | null
 })
 
 const orderAreaOptions = computed(() => areas.value.filter(a =>
@@ -586,11 +462,6 @@ function assetStatusLabel(status: AssetStatus): string { return assetStatusLabel
 function workOrderStatusLabel(status: WorkOrderStatus): string { return workOrderStatusLabels[status] }
 function workOrderTypeLabel(type: WorkOrderType): string { return workOrderTypeLabels[type] }
 function workOrderPriorityLabel(priority: WorkOrderPriority): string { return workOrderPriorityLabels[priority] }
-function movementTypeLabel(type: SparePartMovementType): string {
-  if (type === 'In') return tr('assets.part.stockIn')
-  if (type === 'Out') return tr('assets.part.stockOut')
-  return tr('assets.part.adjust')
-}
 function assetStatusType(status: AssetStatus): string {
   if (status === 'InService') return 'success'
   if (status === 'Maintenance') return 'warning'
@@ -812,33 +683,11 @@ async function cancelOrder(row: MaintenanceWorkOrder) {
   }
   await setOrderStatus(row, 'Cancelled')
 }
-function openComplete(row: MaintenanceWorkOrder) {
-  completeTarget.value = row
-  completeForm.resolution = ''
-  completeForm.downtimeMinutes = 0
-  dialogError.value = ''
-  completeDialog.value = true
+function openComplete(row: MaintenanceWorkOrder): void {
+  void completeDialog.value?.open(row)
 }
-async function submitComplete() {
-  if (!completeTarget.value) return
-  if (!completeForm.resolution.trim()) {
-    dialogError.value = tr('assets.workOrder.resolutionRequired')
-    return
-  }
-  statusSaving.value = true
-  dialogError.value = ''
-  try {
-    await workOrderApi.setStatus(completeTarget.value.id, {
-      status: 'Completed', resolution: completeForm.resolution.trim(), downtimeMinutes: completeForm.downtimeMinutes
-    })
-    completeDialog.value = false
-    await Promise.all([loadOrders(), loadAssets()])
-    ElMessage.success(tr('assets.saved'))
-  } catch (e) {
-    dialogError.value = errorMessage(e, tr('assets.actionFailed'))
-  } finally {
-    statusSaving.value = false
-  }
+function loadOrdersAndAssets(): void {
+  void Promise.all([loadOrders(), loadAssets()])
 }
 async function removeOrder(row: MaintenanceWorkOrder) {
   orderError.value = ''
@@ -850,85 +699,12 @@ async function removeOrder(row: MaintenanceWorkOrder) {
     orderError.value = errorMessage(e, tr('assets.deleteFailed'))
   }
 }
-let detailSeq = 0
-async function openOrderParts(row: MaintenanceWorkOrder) {
-  const seq = ++detailSeq
-  orderPartsTarget.value = row
-  orderParts.value = []
-  issueForm.partId = null
-  issueForm.quantity = 1
-  issueForm.note = ''
-  partsError.value = ''
-  orderPartsDialog.value = true
-  try {
-    const parts = await workOrderApi.parts(row.id)
-    if (seq !== detailSeq || orderPartsTarget.value?.id !== row.id) return
-    orderParts.value = parts
-  } catch (e) {
-    if (seq !== detailSeq || orderPartsTarget.value?.id !== row.id) return
-    partsError.value = errorMessage(e, tr('assets.loadFailed'))
-  }
-}
-async function submitIssuePart() {
-  if (!orderPartsTarget.value) return
-  if (issueForm.partId == null || !Number.isFinite(issueForm.quantity) || issueForm.quantity <= 0) {
-    partsError.value = tr('assets.part.quantityHint')
-    return
-  }
-  issueSaving.value = true
-  partsError.value = ''
-  try {
-    await workOrderApi.issuePart(orderPartsTarget.value.id, {
-      partId: issueForm.partId, quantity: issueForm.quantity, note: issueForm.note.trim()
-    })
-    orderParts.value = await workOrderApi.parts(orderPartsTarget.value.id)
-    await loadParts()
-    issueForm.quantity = 1
-    issueForm.note = ''
-    ElMessage.success(tr('assets.saved'))
-  } catch (e) {
-    partsError.value = errorMessage(e, tr('assets.actionFailed'))
-  } finally {
-    issueSaving.value = false
-  }
+function openOrderParts(row: MaintenanceWorkOrder): void {
+  void orderPartsDialog.value?.open(row)
 }
 
-function openPart(row?: SparePart) {
-  partForm.id = row?.id ?? 0
-  partForm.code = row?.code ?? ''
-  partForm.name = row?.name ?? ''
-  partForm.specification = row?.specification ?? ''
-  partForm.unit = row?.unit ?? ''
-  partForm.stock = row?.stock ?? 0
-  partForm.minStock = row?.minStock ?? 0
-  partForm.location = row?.location ?? ''
-  partForm.supplier = row?.supplier ?? ''
-  partForm.unitPrice = row?.unitPrice ?? null
-  partForm.description = row?.description ?? ''
-  partForm.enabled = row?.enabled ?? true
-  dialogError.value = ''
-  partDialog.value = true
-}
-async function savePart() {
-  partSaving.value = true
-  dialogError.value = ''
-  try {
-    const input: SparePartInput = {
-      code: partForm.code.trim(), name: partForm.name.trim(), specification: partForm.specification.trim(),
-      unit: partForm.unit.trim(), stock: partForm.stock, minStock: partForm.minStock, location: partForm.location.trim(),
-      supplier: partForm.supplier.trim(), unitPrice: partForm.unitPrice, description: partForm.description.trim(),
-      enabled: partForm.enabled
-    }
-    if (partForm.id) await sparePartApi.update(partForm.id, input)
-    else await sparePartApi.create(input)
-    partDialog.value = false
-    await loadParts()
-    ElMessage.success(tr('assets.saved'))
-  } catch (e) {
-    dialogError.value = errorMessage(e, tr('assets.saveFailed'))
-  } finally {
-    partSaving.value = false
-  }
+function openPart(row?: SparePart): void {
+  void partDialog.value?.open(row)
 }
 async function removePart(row: SparePart) {
   partError.value = ''
@@ -940,51 +716,12 @@ async function removePart(row: SparePart) {
     partError.value = errorMessage(e, tr('assets.deleteFailed'))
   }
 }
-function openMovement(row: SparePart, type: SparePartMovementType) {
-  movementTarget.value = row
-  movementForm.type = type
-  movementForm.quantity = type === 'Adjust' ? row.stock : 1
-  movementForm.note = ''
-  movementForm.workOrderId = null
-  dialogError.value = ''
-  movementDialog.value = true
+function openMovement(row: SparePart, type: SparePartMovementType): void {
+  void movementDialog.value?.open(row, type)
 }
-async function submitMovement() {
-  if (!movementTarget.value) return
-  if (!Number.isFinite(movementForm.quantity) || (movementForm.type === 'Adjust' ? movementForm.quantity < 0 : movementForm.quantity <= 0)) {
-    dialogError.value = tr('assets.part.quantityHint')
-    return
-  }
-  movementSaving.value = true
-  dialogError.value = ''
-  try {
-    await sparePartApi.addMovement(movementTarget.value.id, {
-      type: movementForm.type, quantity: movementForm.quantity, note: movementForm.note.trim(),
-      workOrderId: movementForm.type === 'Out' ? movementForm.workOrderId : null
-    })
-    movementDialog.value = false
-    await loadParts()
-    ElMessage.success(tr('assets.saved'))
-  } catch (e) {
-    dialogError.value = errorMessage(e, tr('assets.actionFailed'))
-  } finally {
-    movementSaving.value = false
-  }
-}
-async function openPartMovements(row: SparePart) {
-  const seq = ++detailSeq
-  movementsTarget.value = row
-  partMovements.value = []
-  partsError.value = ''
-  movementsDialog.value = true
-  try {
-    const movements = await sparePartApi.movements(row.id)
-    if (seq !== detailSeq || movementsTarget.value?.id !== row.id) return
-    partMovements.value = movements
-  } catch (e) {
-    if (seq !== detailSeq || movementsTarget.value?.id !== row.id) return
-    partsError.value = errorMessage(e, tr('assets.loadFailed'))
-  }
+
+function openPartMovements(row: SparePart): void {
+  void movementsDialog.value?.open(row)
 }
 
 onMounted(async () => {

@@ -16,6 +16,25 @@ export interface BackupRun {
   drill: BackupDrill | null; targets: BackupTargetResult[]; pruned: string[]
 }
 export interface BackupSummary { fileName: string; bytes: number; createdAt: string }
+export interface DesktopClient {
+  clientId: string; machineName: string; windowsUser: string; userId: number | null; userName: string | null
+  targetKind: string | null; targetId: number | null; targetName: string | null
+  appVersion: string; webView2Version: string; configScope: string | null; nodeId: string; remoteAddress: string | null
+  firstSeenTs: number; lastSeenTs: number; online: boolean; blockedReason: string | null
+  conflict: boolean; previousMachineName: string | null
+}
+export interface DesktopClientPolicy {
+  minimumVersion: string | null; latestVersion: string | null; downloadUrl: string | null
+  updateRequired: boolean; updateAvailable: boolean
+}
+export interface DesktopClientList {
+  node: string; haRole: string; onlineThresholdSeconds: number; total: number
+  /** 全量口径：列表最多返回最近上报的 500 条，计数不受截断影响。 */
+  online: number; blocked: number; outdated: number
+  /** true 表示 clients 只包含最近 500 条，total 是全场数量。 */
+  truncated: boolean; policy: DesktopClientPolicy
+  clients: DesktopClient[]
+}
 
 export const opsApi = {
   role: async () => (await http.get<{ enabled: boolean; node: string | null; role: string; primaryUrl: string | null }>('/ha/role')).data,
@@ -26,5 +45,6 @@ export const opsApi = {
   runs: async () => (await http.get<BackupRun[]>('/maintenance/backups/runs')).data,
   targets: async () => (await http.get<{ name: string; kind: string; keepLatest: number }[]>('/maintenance/backups/targets')).data,
   run: async () => (await http.post<BackupRun>('/maintenance/backups/run', null, { timeout: 600000 })).data,
-  drill: async (fileName: string) => (await http.post<BackupDrill>(`/maintenance/backups/${encodeURIComponent(fileName)}/drill`, null, { timeout: 600000 })).data
+  drill: async (fileName: string) => (await http.post<BackupDrill>(`/maintenance/backups/${encodeURIComponent(fileName)}/drill`, null, { timeout: 600000 })).data,
+  desktopClients: async () => (await http.get<DesktopClientList>('/desktop/clients')).data
 }

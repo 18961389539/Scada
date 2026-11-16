@@ -61,7 +61,48 @@ public sealed class HealthSnapshotService(
     // 历史查询统计只在 Engine 注册后才存在（轻量宿主与单测可能没有）。
     HistoryQueryService? queries = null)
 {
+    private readonly object _cacheGate = new();
+    private HealthSnapshot? _cached;
+    private long _cachedAt;
+    private string _cachedWarnings = "";
+
+    // 前端在报警/实时事件后（600ms 合批）就会调 /health，多个客户端同时在线时这不再是"偶尔一次"：
+    // 每次 Snapshot 要构造 DriveInfo（慢盘与网络盘上 AvailableFreeSpace 可达几十毫秒）、
+    // 读 ConfigDb 文件长度、遍历全部设备状态。1.5 秒 TTL 让同一波事件只算一次。
+    // 但**告警不能等 TTL**：运维刚补上失败的配置快照就查 /health，缓存里还留着
+    // "config_snapshot_failed"，会让人以为修复没生效；新出现的故障也会晚 1.5 秒可见。
+    // 所以告警集合参与缓存键，只有「告警没变且未超 TTL」才复用缓存。
+    private const int CacheTtlMs = 1_500;
+
     public HealthSnapshot Snapshot()
+    {
+        var now = Environment.TickCount64;
+        var warnings = CurrentWarnings();
+        var stamp = string.Join("\n", warnings);
+        lock (_cacheGate)
+        {
+            if (_cached is not null && now - _cachedAt < CacheTtlMs && _cachedWarnings == stamp) return _cached;
+        }
+
+        // 构建放在锁外：并发未命中时可能各算一次，但每次都很快，且不会因为一个慢 DriveInfo
+        // 把所有读取者堵在锁上。最后写入的快照同样有效，下一次读取直接命中。
+        var built = BuildSnapshot(warnings);
+        lock (_cacheGate)
+        {
+            _cached = built;
+            _cachedAt = Environment.TickCount64;
+            _cachedWarnings = stamp;
+        }
+        return built;
+    }
+
+    // 三个来源都是内存态，取值很便宜；真正慢的是磁盘与设备状态枚举，留在 BuildSnapshot 里。
+    private List<SystemWarning> CurrentWarnings() => watch.Current.Warnings
+        .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
+        .Concat(contributors.SelectMany(contributor => contributor.HealthWarnings()))
+        .ToList();
+
+    private HealthSnapshot BuildSnapshot(IReadOnlyList<SystemWarning> warnings)
     {
         var statuses = collector.GetStatuses();
         var online = statuses.Count(x => x.Online);
@@ -86,10 +127,6 @@ public sealed class HealthSnapshotService(
         var historyBytes = (capacity?.RawBytes ?? 0) + (capacity?.AggregateBytes ?? 0);
 
         var status = statuses.Count > 0 && online == 0 ? "degraded" : "ok";
-        var warnings = snapshot.Warnings
-            .Concat(webhook.Warnings().Select(message => new SystemWarning("alarm_webhook_failing", message)))
-            .Concat(contributors.SelectMany(contributor => contributor.HealthWarnings()))
-            .ToList();
         if (warnings.Count > 0) status = "degraded";
 
         return new HealthSnapshot(

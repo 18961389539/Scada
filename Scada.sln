@@ -49,6 +49,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Scada.Desktop", "src\Scada.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Scada.Desktop.Tests", "tests\Scada.Desktop.Tests\Scada.Desktop.Tests.csproj", "{1B10CCC1-36C2-4936-B1D7-08355404EE51}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Scada.Protocols.Tests", "tests\Scada.Protocols.Tests\Scada.Protocols.Tests.csproj", "{474142F4-279F-4F04-9F0B-866FB1B64169}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -299,6 +301,18 @@ Global
 		{1B10CCC1-36C2-4936-B1D7-08355404EE51}.Release|x64.Build.0 = Release|Any CPU
 		{1B10CCC1-36C2-4936-B1D7-08355404EE51}.Release|x86.ActiveCfg = Release|Any CPU
 		{1B10CCC1-36C2-4936-B1D7-08355404EE51}.Release|x86.Build.0 = Release|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Debug|x64.Build.0 = Debug|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Debug|x86.Build.0 = Debug|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Release|Any CPU.Build.0 = Release|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Release|x64.ActiveCfg = Release|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Release|x64.Build.0 = Release|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Release|x86.ActiveCfg = Release|Any CPU
+		{474142F4-279F-4F04-9F0B-866FB1B64169}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -324,5 +338,6 @@ Global
 		{70AFE3DA-A2C7-475B-A208-73FDBE2458AD} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{9D1050AE-DBF7-49A1-AB6B-79E729E7B2C2} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{1B10CCC1-36C2-4936-B1D7-08355404EE51} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{474142F4-279F-4F04-9F0B-866FB1B64169} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

@@ -465,8 +465,13 @@ public sealed class HistoryReliabilityTests
 
     private static string RepoRoot([System.Runtime.CompilerServices.CallerFilePath] string source = "")
     {
-        for (var dir = new DirectoryInfo(Path.GetDirectoryName(source)!); dir is not null; dir = dir.Parent)
-            if (File.Exists(Path.Combine(dir.FullName, "Scada.sln"))) return dir.FullName;
+        // 可移植 PDB 会把源码路径映射成 /_/...，CallerFilePath 在 CI/覆盖率采集下指不到仓库；
+        // 依次退回测试程序集目录与当前目录，保证同一用例在本地和 CI 都能找到 Scada.sln。
+        foreach (var start in new[] { Path.GetDirectoryName(source), AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            for (var dir = string.IsNullOrEmpty(start) ? null : new DirectoryInfo(start); dir is not null; dir = dir.Parent)
+                if (File.Exists(Path.Combine(dir.FullName, "Scada.sln"))) return dir.FullName;
+        }
         throw new InvalidOperationException("repo root not found");
     }
 

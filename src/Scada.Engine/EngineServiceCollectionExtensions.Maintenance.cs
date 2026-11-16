@@ -13,6 +13,9 @@ public static partial class EngineServiceCollectionExtensions
         services.AddSingleton<BackupSchedulerService>();
         services.AddSingleton<SystemWatch>();
         services.AddSingleton<MaintenanceService>();
+        // 时钟偏差是后台检测，必须显式注册成 HostedService；单例注册只为让健康聚合拿到同一个实例。
+        services.AddSingleton<ClockSkewMonitor>();
+        services.AddHostedService(sp => sp.GetRequiredService<ClockSkewMonitor>());
         return services;
     }
 }

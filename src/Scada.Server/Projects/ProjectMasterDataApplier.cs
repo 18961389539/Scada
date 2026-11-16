@@ -92,8 +92,17 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
                 incoming.ChannelId = null;
                 Ctx.WarningList.Add($"设备 {incoming.Name} 的通道编号在本机不存在，已忽略绑定");
             }
-            if (incoming.ChannelId is not null && await DeviceCommandService.ApplyChannelEndpointAsync(Db, incoming, ct) is string channelError)
-            { Error(entry, channelError); continue; }
+            if (incoming.ChannelId is not null)
+            {
+                // 通道绑定的失败原因可能不止一条（协议不支持 + 端点不一致），导入时全部带出来，
+                // 只报首条会让现场改一处、再导一次才发现下一处。
+                var channelIssues = await DeviceCommandService.ApplyChannelEndpointIssuesAsync(Db, incoming, ct);
+                if (channelIssues.Count > 0)
+                {
+                    Error(entry, string.Join("；", channelIssues.Select(x => x.Message)));
+                    continue;
+                }
+            }
             if (existing is null)
             {
                 incoming.DisabledSinceTs = incoming.Enabled ? 0 : Now; Db.Devices.Add(incoming);

@@ -58,6 +58,9 @@ async function openGuide(page: Page): Promise<void> {
   await page.goto(`/overview?setupDeviceId=${device.id}`)
   const guide = page.locator('[data-test="setup-guide"]')
   await expect(guide).toContainText('Setup Pump')
+  // 全部步骤验证完成后，引导会收进「运维」折叠区：先展开外层 details 再操作内层 summary。
+  const maintenance = page.locator('[data-test="overview-maintenance"]')
+  if (await maintenance.getAttribute('open') === null) await maintenance.locator('summary').first().click()
   if (await guide.getAttribute('open') === null) await guide.locator('summary').click()
   await expect(guide.locator('[data-test="setup-verify"]')).not.toHaveClass(/is-loading/)
 }
@@ -141,7 +144,18 @@ for (const kind of ['device', 'tag']) {
   test(`${kind} query, sort and page survive refresh and navigation; drafts wait for Query`, async ({ page, request }) => {
     await prepare(page, request)
     const items = Array.from({ length: 105 }, (_, index) => ({ ...(kind === 'device' ? device : tag), id: 1000 + index, name: `Item ${String(index).padStart(3, '0')}` }))
-    await page.route(url => url.pathname === `/api/${kind === 'device' ? 'devices' : 'tags'}`, route => route.fulfill({ json: items }))
+    await page.route(url => url.pathname === `/api/${kind === 'device' ? 'devices' : 'tags'}`, route => {
+      const query = new URL(route.request().url()).searchParams
+      const search = query.get('search')?.trim() ?? ''
+      let filtered = items.filter(item => !search || item.name.includes(search))
+      if (query.get('sort') === 'name') filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name))
+      if (query.get('order') === 'descending') filtered.reverse()
+      // 设备列表已是服务端分页：mock 必须按 skip/take 切片并回 X-Total-Count，否则页面只能拿到全量。
+      if (kind === 'tag') return route.fulfill({ json: filtered })
+      const skip = Number(query.get('skip') ?? 0)
+      const take = Number(query.get('take') ?? filtered.length)
+      return route.fulfill({ json: filtered.slice(skip, skip + take), headers: { 'X-Total-Count': String(filtered.length) } })
+    })
     const path = kind === 'device' ? '/config/devices' : '/config/tags'
     await page.goto(`${path}?search=Item&sort=name&order=descending&page=2&keep=1`)
     const table = page.locator(`[data-test="${kind === 'device' ? 'devices' : 'tags'}-table"]`)
@@ -265,11 +279,8 @@ test('configuration pages and setup guide fit a narrow viewport', async ({ page,
   await page.setViewportSize({ width: 390, height: 844 })
   for (const path of ['/overview', '/config/devices', '/config/tags']) {
     await page.goto(path)
-    if (path === '/overview') {
-      const guide = page.locator('[data-test="setup-guide"]')
-      await expect(guide).toContainText('Setup Pump')
-      if (await guide.getAttribute('open') === null) await guide.locator('summary').click()
-    } else await expect(page.locator(`[data-test="${path.endsWith('devices') ? 'device' : 'tag'}-query"]`)).toBeVisible()
+    if (path === '/overview') await openGuide(page)
+    else await expect(page.locator(`[data-test="${path.endsWith('devices') ? 'device' : 'tag'}-query"]`)).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
   }
 })

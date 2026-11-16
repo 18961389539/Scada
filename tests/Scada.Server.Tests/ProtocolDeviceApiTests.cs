@@ -89,8 +89,23 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         // 重名和非法地址都必须整体拒绝，不能留下部分测点。
         var duplicate = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-4", 20), BatchTag("批" + u + "-4", 21) } });
         Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+        var duplicateBody = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("tag.name.duplicateInBatch", duplicateBody.GetProperty("issues")[0].GetProperty("code").GetString());
+
         var invalid = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-5", 30), BatchTag("批" + u + "-6", 70000) } });
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var invalidBody = await invalid.Content.ReadFromJsonAsync<JsonElement>();
+        var invalidIssues = invalidBody.GetProperty("issues").EnumerateArray().ToArray();
+        Assert.Single(invalidIssues);
+        Assert.Equal(2, invalidIssues[0].GetProperty("row").GetInt32());
+        Assert.Equal("address", invalidIssues[0].GetProperty("field").GetString());
+        Assert.Equal("tag.address.range", invalidIssues[0].GetProperty("code").GetString());
+
+        // 一次返回多行问题：不再让用户改一条、提交、再看下一条。
+        var multi = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("", 40), BatchTag("批" + u + "-7", 70000) } });
+        var multiIssues = (await multi.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("issues").EnumerateArray().ToArray();
+        Assert.Contains(multiIssues, issue => issue.GetProperty("row").GetInt32() == 1 && issue.GetProperty("field").GetString() == "name");
+        Assert.Contains(multiIssues, issue => issue.GetProperty("row").GetInt32() == 2 && issue.GetProperty("field").GetString() == "address");
         Assert.Equal(3, (await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}"))!.Length);
     }
 

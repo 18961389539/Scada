@@ -12,9 +12,9 @@ namespace Scada.Desktop.Runtime;
 /// </summary>
 internal static class InjectionScript
 {
-    public static string Build(DesktopSettings settings, SessionData? session, string bootId, bool force = false)
+    public static string Build(DesktopSettings settings, SessionData? session, string bootId, bool force = false, string? serverUrl = null)
     {
-        var origin = new Uri(settings.ServerUrl).GetLeftPart(UriPartial.Authority);
+        var origin = new Uri(serverUrl ?? settings.ServerUrl).GetLeftPart(UriPartial.Authority);
         var builder = new StringBuilder("(function(){try{if(window.top!==window.self)return;");
         builder.Append("if(location.origin!==").Append(Js(origin)).Append(")return;");
         if (!force)

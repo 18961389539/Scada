@@ -193,9 +193,9 @@
           </template>
           <p v-if="fieldError('polyline')" class="field-error">{{ fieldError('polyline') }}</p>
         </template>
-        <template v-if="['symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'equipment-panel', 'selector', 'knob'].includes(selected.type)">
+        <template v-if="hasFeature(selected.type, 'states')">
           <el-divider data-field="states">{{ $t('hmi.states') }}</el-divider>
-          <el-button v-if="!selected.states?.length && !['selector', 'knob'].includes(selected.type)" :icon="Plus" data-test="node-common-states" @click="addCommonStates">{{ $t('hmi.enableStates') }}</el-button>
+          <el-button v-if="!selected.states?.length && !hasFeature(selected.type, 'positional')" :icon="Plus" data-test="node-common-states" @click="addCommonStates">{{ $t('hmi.enableStates') }}</el-button>
           <div v-for="(item, index) in selected.states" :key="index" class="hmi-state-row" data-test="node-state-row">
             <el-input-number v-model="item.value" :controls="false" :step="1" :aria-label="$t('hmi.stateValue')" @change="commitField('state-value')" />
             <el-input v-model="item.label" maxlength="40" :aria-label="$t('hmi.stateLabel')" @change="commitField('state-label')" />
@@ -203,7 +203,7 @@
             <el-tooltip :content="$t('hmi.remove')"><el-button :icon="Delete" :aria-label="$t('hmi.remove')" @click="selected.states?.splice(index, 1); commit()" /></el-tooltip>
           </div>
           <el-button v-if="selected.states?.length" :icon="Plus" :disabled="selected.states.length >= stateLimit" data-test="node-add-state" @click="addState">{{ $t('hmi.addState') }}</el-button>
-          <p v-if="selected.type === 'selector' || selected.type === 'knob'" class="field-hint">{{ $t('hmi.positionsHint') }}</p>
+          <p v-if="hasFeature(selected.type, 'positional')" class="field-hint">{{ $t('hmi.positionsHint') }}</p>
           <div v-if="selected.states?.length" class="state-preview" data-test="state-preview">
             <span v-for="state in selected.states" :key="state.value" class="state-chip"><i :style="{ backgroundColor: state.color }" />{{ state.label || state.value }}</span>
           </div>
@@ -280,11 +280,11 @@
           <template #label><FieldLabel :label="$t('screenDesignerView.dataTags')" :help="$t('screenDesignerView.helpChartTags')" /></template>
           <TagSelect v-model="selected.tags" :tags="tags" :devices="devices" :values="tagValues" multiple :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.dataTags')" data-test="node-chart-tags" @change="commit" />
         </el-form-item>
-        <el-form-item v-if="['chart-line', 'chart-area', 'history-table'].includes(selected.type)" :error="fieldError('window')" data-field="window">
+        <el-form-item v-if="hasFeature(selected.type, 'window')" :error="fieldError('window')" data-field="window">
           <template #label><FieldLabel :label="$t('screenDesignerView.windowSeconds')" :help="$t('screenDesignerView.helpWindow')" /></template>
           <el-input-number :model-value="selected.windowSec ?? 300" :min="10" :max="86400" :step="10" @update:model-value="(v: number | undefined) => { if (selected) { selected.windowSec = v ?? 300; commitField('window') } }" />
         </el-form-item>
-        <template v-if="selected.type === 'gauge' || selected.type === 'dial'">
+        <template v-if="hasFeature(selected.type, 'gauge')">
           <el-divider data-field="gaugeBands">{{ $t('screenDesignerView.gaugeBands') }}</el-divider>
           <div v-for="(band, index) in selected.gaugeBands ?? []" :key="index" class="gauge-band-row" data-test="gauge-band-row">
             <el-input-number :model-value="band.from" :min="selected.min" :max="selected.max" :controls="false" :aria-label="$t('screenDesignerView.gaugeBandFrom')" @update:model-value="(v: number | undefined) => updateGaugeBand(index, 'from', v)" />
@@ -303,7 +303,7 @@
           <p class="field-hint">{{ $t('screenDesignerView.gaugeBandHint') }}</p>
           <p v-if="fieldError('gaugeBands') || fieldError('setpoint')" class="field-error">{{ fieldError('gaugeBands') || fieldError('setpoint') }}</p>
         </template>
-        <template v-if="selected.type === 'table' || selected.type === 'history-table'">
+        <template v-if="hasFeature(selected.type, 'table')">
           <el-divider data-field="tableColumns">{{ $t('screenDesignerView.tableColumns') }}</el-divider>
           <el-checkbox-group :model-value="selected.tableColumns ?? defaultTableColumns(selected)" data-test="table-columns" @update:model-value="setTableColumns">
             <el-checkbox v-for="choice in tableColumnChoices" :key="choice.key" :value="choice.key">{{ $t(choice.labelKey) }}</el-checkbox>
@@ -336,7 +336,7 @@
           <p class="field-hint">{{ $t('screenDesignerView.chartOptionHint') }}</p>
           <p v-if="fieldError('chartOptions')" class="field-error">{{ fieldError('chartOptions') }}</p>
         </template>
-        <template v-if="['symbol', 'pipe', 'polyline', 'pump', 'tank', 'valve'].includes(selected.type)">
+        <template v-if="hasFeature(selected.type, 'animation')">
           <el-divider data-field="animation">{{ $t('screenDesignerView.animation') }}</el-divider>
           <el-form-item>
             <template #label><FieldLabel :label="$t('screenDesignerView.animationType')" :help="$t('screenDesignerView.helpAnimation')" /></template>
@@ -497,6 +497,7 @@
 import { computed, ref } from 'vue'
 import type { ScreenAction, ScreenAnimation, ScreenChartOptions, ScreenNode } from '../screens/model'
 import type { DesignerPanelApi } from '../screens/designerPanelApi'
+import { hasFeature, typesWith } from '../screens/nodeSpecs'
 import ColorField from './ColorField.vue'
 import FieldLabel from './FieldLabel.vue'
 import TagSelect from './TagSelect.vue'
@@ -582,8 +583,8 @@ async function onImageFile(event: Event): Promise<void> {
   }
 }
 
-const chartOptionTypes = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge']
-const chartTargetTypes = ['chart-line', 'chart-area', 'chart-bar', 'chart-bar-horizontal', 'chart-bar-stack']
+const chartOptionTypes = typesWith('chartOptions')
+const chartTargetTypes = typesWith('chartTarget')
 function defaultTableColumns(node: ScreenNode | undefined): string[] {
   if (!node) return []
   return node.type === 'history-table' ? ['name', 'last', 'min', 'max', 'avg'] : ['name', 'value', 'unit']

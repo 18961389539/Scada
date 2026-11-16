@@ -252,26 +252,36 @@ public class AlarmEngineFloodTests
     private sealed class Recorder : IAlarmNotifier
     {
         private readonly List<(AlarmEvent Alarm, string Action)> _items = [];
+        // 推送即置位。原先靠 20ms 轮询判定，全量跑时线程池被 400+ 用例抢满，
+        // 轮询本身要排队，10 秒上限会被耗尽——业务逻辑其实是对的，红的是等待方式。
+        private readonly SemaphoreSlim _published = new(0, int.MaxValue);
 
         public IReadOnlyList<(AlarmEvent Alarm, string Action)> Snapshot()
         {
             lock (_items) return _items.ToList();
         }
 
-        public async Task WaitForAsync(Func<IReadOnlyList<(AlarmEvent Alarm, string Action)>, bool> predicate)
+        public async Task WaitForAsync(Func<IReadOnlyList<(AlarmEvent Alarm, string Action)>, bool> predicate, int timeoutSeconds = 30)
         {
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (DateTime.UtcNow < deadline)
+            var deadline = DateTime.UtcNow.AddSeconds(timeoutSeconds);
+            while (true)
             {
-                if (predicate(Snapshot())) return;
-                await Task.Delay(20);
+                var snapshot = Snapshot();
+                if (predicate(snapshot)) return;
+
+                var remaining = deadline - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                    Assert.Fail($"等待报警推送超时（{timeoutSeconds}s）。已收到：{string.Join(", ", snapshot.Select(x => $"{x.Action}:tag{x.Alarm.TagId}"))}");
+
+                // 有推送立刻醒来；静默期最多等 200ms 再复查，谓词往往依赖多条事件的组合。
+                await _published.WaitAsync(remaining < TimeSpan.FromMilliseconds(200) ? remaining : TimeSpan.FromMilliseconds(200));
             }
-            Assert.Fail("等待报警推送超时");
         }
 
         public Task PublishAlarmAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken = default)
         {
             lock (_items) _items.Add((alarm, action));
+            _published.Release();
             return Task.CompletedTask;
         }
     }

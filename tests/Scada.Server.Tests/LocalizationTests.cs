@@ -97,12 +97,20 @@ public sealed partial class LocalizationTests : IClassFixture<ControlTests.Contr
     }
 
     // 未翻译检查：服务端直接返回给用户的提示（与 tools/backend-i18n-extract.py 同一抽取规则）都必须在英文对照表中。
+    // 以前只扫 5 个写死的目录，Services / Reports / External / Mcp / Ha 里的几百条中文提示
+    // 完全不在门禁里；现在扫全部产品程序集，历史欠账记在 i18n-baseline.json（只能减不能增），
+    // 任何**新增**中文提示都会立刻让这条用例变红。
     [Fact]
     public void EveryUserFacingBackendMessageHasAnEnglishTranslation()
     {
         var root = FindRoot();
-        string[] dirs = ["src/Scada.Server/Endpoints", "src/Scada.Server/Auth", "src/Scada.Engine/Control", "src/Scada.Core/Models", "src/Scada.Server/Projects"];
-        var files = dirs.SelectMany(d => Directory.GetFiles(Path.Combine(root, d), "*.cs", SearchOption.AllDirectories)).Append(Path.Combine(root, "src/Scada.Server/Program.cs"));
+        string[] dirs = ["src/Scada.Server", "src/Scada.Engine", "src/Scada.Core", "src/Scada.Data",
+            "src/Scada.Collector", "src/Scada.Gateway", "src/Scada.Gateway.Host", "src/Scada.Protocols"];
+        var files = dirs
+            .Where(d => Directory.Exists(Path.Combine(root, d)))
+            .SelectMany(d => Directory.GetFiles(Path.Combine(root, d), "*.cs", SearchOption.AllDirectories))
+            .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                     && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
         var missing = new SortedSet<string>();
         foreach (var file in files)
         {
@@ -114,7 +122,22 @@ public sealed partial class LocalizationTests : IClassFixture<ControlTests.Contr
                 if (!Localizer.Messages.ContainsKey(key)) missing.Add(key);
             }
         }
-        Assert.True(missing.Count == 0, "Untranslated backend messages (add to src/Scada.Server/Localization/messages.en-US.json):\n" + string.Join("\n", missing));
+        var baselinePath = Path.Combine(root, "tests", "Scada.Server.Tests", "i18n-baseline.json");
+        if (Environment.GetEnvironmentVariable("SCADA_I18N_GENERATE_BASELINE") == "1")
+        {
+            // 维护入口：只有显式带这个环境变量才会重写基线，CI 与日常测试永远不会自动放宽门禁。
+            File.WriteAllText(baselinePath, JsonSerializer.Serialize(missing.ToArray(), new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            }) + "\n");
+            return;
+        }
+        Assert.True(File.Exists(baselinePath), "缺少 i18n 基线文件：tests/Scada.Server.Tests/i18n-baseline.json");
+        var baseline = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(baselinePath))!;
+        var added = missing.Except(baseline).ToArray();
+        Assert.True(added.Length == 0,
+            "新增了未翻译的后端提示（请加到 src/Scada.Server/Localization/messages.en-US.json）：\n" + string.Join("\n", added));
         foreach (var (zh, en) in Localizer.Messages)
             Assert.True(Placeholders(zh) == Placeholders(en), $"Placeholder mismatch: {zh} => {en}");
     }

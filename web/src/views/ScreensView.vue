@@ -54,6 +54,7 @@
         <div class="card-actions">
           <el-button v-if="admin || screen.publishedRevision" :icon="View" :aria-label="$t('screensView.preview')" :data-test="`screen-preview-${screen.id}`" @click="preview(screen)">{{ $t('screensView.preview') }}</el-button>
           <el-button v-if="screen.publishedRevision" type="primary" :icon="VideoPlay" :aria-label="$t('screenMonitor.runVersion', [screen.publishedRevision])" :data-test="`screen-run-${screen.id}`" @click="router.push({ path: `/screens/${screen.id}`, query: route.query })">{{ $t('screensView.run') }}</el-button>
+          <WorkbenchTooltip v-if="screen.publishedRevision" :content="$t('workspace.openInWorkspace')"><el-button :icon="Collection" :aria-label="$t('workspace.openInWorkspace')" :data-test="`screen-workspace-${screen.id}`" @click="openInWorkspace(screen)" /></WorkbenchTooltip>
           <WorkbenchTooltip v-if="admin && screen.publishedRevision" :content="$t('workbenchTips.quickCreate')"><el-button :data-test="`screen-create-workbench-${screen.id}`" @click="quickCreate?.open(screen.id)">{{ $t('workbench.createFromScreen') }}</el-button></WorkbenchTooltip>
           <el-dropdown v-if="canEdit(screen)" trigger="click" @command="screenAction($event, screen)">
             <el-button :icon="MoreFilled" :title="$t('screenMonitor.more')" :aria-label="$t('screenMonitor.moreFor', [screen.name])" :data-test="`screen-more-${screen.id}`" circle />
@@ -100,7 +101,7 @@ import ScreenThumbnail from '../components/ScreenThumbnail.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CopyDocument, Delete, Edit, InfoFilled, MoreFilled, Plus, Refresh, Search, VideoPlay, View } from '@element-plus/icons-vue'
+import { CopyDocument, Collection, Delete, Edit, InfoFilled, MoreFilled, Plus, Refresh, Search, VideoPlay, View } from '@element-plus/icons-vue'
 import { screenApi } from '../api/screens'
 import type { ScreenThumbnail as ScreenThumbnailData } from '../api/screens'
 import { areaApi } from '../api'
@@ -200,6 +201,9 @@ function screenAction(command: string, screen: ScreenSummary): void {
   if (command === 'edit') void router.push(`/config/screens/${screen.id}`)
   else if (command === 'duplicate') void duplicate(screen)
   else if (command === 'delete') void remove(screen)
+}
+function openInWorkspace(screen: ScreenSummary): void {
+  void router.push({ path: '/workspace', query: { screen: String(screen.id) } })
 }
 async function preview(screen: ScreenSummary): Promise<void> {
   actionError.value = ''

@@ -219,7 +219,10 @@ public static class ExternalRestEndpoints
         if (names is null || names.Length == 0) return ExternalApiScope.None;
         ExternalApiScope scopes = ExternalApiScope.None;
         foreach (var name in names)
-            if (Enum.TryParse<ExternalApiScope>(name, true, out var s) && s != ExternalApiScope.All) scopes |= s;
+            // Enum.TryParse 接受未定义的数值（"31"）与逗号组合；不校验 IsDefined 就会把
+            // 越界的 flag 落库，之后 HasScope 的位判断仍可能意外放行。
+            if (Enum.TryParse<ExternalApiScope>(name, true, out var s) && s != ExternalApiScope.None && s != ExternalApiScope.All
+                && (Enum.IsDefined(s) || (s & ~ExternalApiScope.All) == 0)) scopes |= s;
             else if (string.Equals(name, "All", StringComparison.OrdinalIgnoreCase)) scopes = ExternalApiScope.All;
         return scopes;
     }
@@ -284,14 +287,14 @@ public sealed class ExternalAuditFilter(IDbContextFactory<ConfigDbContext> facto
                 Action = $"{http.Request.Method} {http.Request.Path}",
                 TargetType = "ExternalApi",
                 TargetId = key?.Id.ToString() ?? http.User.GetUserId()?.ToString(),
-                Details = JsonSerializer.Serialize(new { key = key?.Name, prefix = key?.KeyPrefix, query = http.Request.QueryString.Value }),
+                Details = JsonSerializer.Serialize(new { key = key?.Name, prefix = key?.KeyPrefix, query = AuditQuery.Scrub(http.Request.QueryString.Value) }),
                 Result = status is >= 200 and < 400 ? "成功" : status == 429 ? "拒绝：限流" : status == 401 ? "拒绝：未认证" : status == 403 ? "拒绝：权限不足" : $"HTTP {status}"
             });
             await db.SaveChangesAsync(CancellationToken.None);
             await runtime.SaveChangesAsync(CancellationToken.None);
         }
-        // 审计写失败不影响外部接口的响应：调用方已经拿到结果，这次调用会在日志里缺失。
-        catch { }
+        // 写失败不影响外部接口的响应，但必须留下可见的错误日志与计数。
+        catch (Exception ex) { AuditFailures.Report(http.RequestServices, "external-rest", ex); }
         return result;
     }
 }

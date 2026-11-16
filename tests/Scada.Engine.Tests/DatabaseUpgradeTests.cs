@@ -150,8 +150,10 @@ public class DatabaseUpgradeTests
             var registerAddresses = tags.Values.Where(t => t.Area == Core.Enums.TagArea.HoldingRegister)
                 .SelectMany(t => Enumerable.Range(t.Address, Scada.Core.Protocols.PointAddress.RegisterCount(t.DataType))).ToList();
             Assert.Equal(registerAddresses.Count, registerAddresses.Distinct().Count());
-            Assert.Equal(10, await db.Devices.CountAsync());
-            Assert.Equal(10, screens.Count);
+            var deviceCount = await db.Devices.CountAsync();
+            Assert.Equal(10, deviceCount);
+            // 每台设备一份运行总览（锅炉除外）+ 全厂驾驶舱/图表展厅/报警中心 + 锅炉总览。
+            Assert.Equal(deviceCount + 3, screens.Count);
             foreach (var published in screens)
             {
                 var layout = JsonSerializer.Deserialize<ScreenDocument>(published.PublishedJson!, new JsonSerializerOptions(JsonSerializerDefaults.Web))!;

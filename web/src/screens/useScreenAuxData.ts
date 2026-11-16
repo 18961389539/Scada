@@ -141,6 +141,7 @@ export function useScreenAuxData(ctx: { isDisposed: () => boolean; generation: (
   let alarmTimer: ReturnType<typeof setInterval> | undefined
   let oeeTimer: ReturnType<typeof setInterval> | undefined
   function startTimers(): void {
+    stopTimers()
     historyTimer = setInterval(() => { if (ctx.replayAt() == null) void loadHistory() }, 10000)
     alarmTimer = setInterval(() => { if (ctx.replayAt() == null) void loadAlarms() }, 10000)
     oeeTimer = setInterval(() => { if (ctx.replayAt() == null) void loadOee() }, 30000)

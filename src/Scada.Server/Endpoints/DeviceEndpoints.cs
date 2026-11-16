@@ -124,7 +124,7 @@ public static class DeviceEndpoints
                 .Take(pageSize)
                 .ToListAsync(cancellationToken);
             return Results.Ok(page);
-        });
+        }).Produces<List<Device>>(StatusCodes.Status200OK);
 
         group.MapGet("/{id:int}", async (
             int id,
@@ -136,7 +136,7 @@ public static class DeviceEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             return device is null || !access.Has(Permission.View, device.AreaId) ? Results.NotFound() : Results.Ok(device);
-        });
+        }).Produces<Device>(StatusCodes.Status200OK);
 
         group.MapPost("", async (
             DeviceRequest request,
@@ -166,14 +166,16 @@ public static class DeviceEndpoints
                 Parity = request.Parity, StopBits = request.StopBits, Cpu = request.Cpu, Rack = request.Rack, Slot = request.Slot
             };
             var credentialError = ApplyOpcSettings(device, request, credentials);
-            if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
+            if (credentialError is not null)
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("device.opc.password", nameof(request.OpcPassword), credentialError)]);
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             // 审计行由 AuditInterceptor 在保存后自动写入（Device 实现了 IAuditedEntity）。
             var result = await deviceCommands.CreateAsync(db, device, cancellationToken);
             return result.Success
                 ? Results.Created($"/api/devices/{device.Id}", device)
-                : EndpointHelpers.BadRequest(result.Message);
-        }).RequireAuthorization(AccessPolicies.Configure);
+                : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
+        }).Produces<Device>(StatusCodes.Status201Created).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
             int id,
@@ -195,7 +197,9 @@ public static class DeviceEndpoints
             if (request.AreaId is int newArea && newArea != device.AreaId)
             {
                 if (await EndpointHelpers.RequireAreaAsync(http, newArea, Permission.Configure, $"移动设备 #{id} 到区域 #{newArea}") is { } deniedMove) return deniedMove;
-                if (!await db.Areas.AnyAsync(x => x.Id == newArea, cancellationToken)) return EndpointHelpers.BadRequest("区域不存在");
+                if (!await db.Areas.AnyAsync(x => x.Id == newArea, cancellationToken))
+                    return EndpointHelpers.ValidationProblem(
+                        [EndpointHelpers.Issue("device.area.notFound", nameof(request.AreaId), "区域不存在")]);
             }
 
             if (request.AreaId is int targetArea) device.AreaId = targetArea;
@@ -216,11 +220,15 @@ public static class DeviceEndpoints
             device.SerialPort = request.SerialPort?.Trim() ?? ""; device.BaudRate = request.BaudRate; device.DataBits = request.DataBits;
             device.Parity = request.Parity; device.StopBits = request.StopBits; device.Cpu = request.Cpu; device.Rack = request.Rack; device.Slot = request.Slot;
             var credentialError = ApplyOpcSettings(device, request, credentials);
-            if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
+            if (credentialError is not null)
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("device.opc.password", nameof(request.OpcPassword), credentialError)]);
 
             var result = await deviceCommands.UpdateAsync(db, device, cancellationToken);
-            return result.Success ? Results.Ok(device) : EndpointHelpers.BadRequest(result.Message);
-        }).RequireAuthorization(AccessPolicies.Configure);
+            return result.Success
+                ? Results.Ok(device)
+                : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
+        }).Produces<Device>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
@@ -240,9 +248,9 @@ public static class DeviceEndpoints
             var result = await deviceCommands.DeleteAsync(db, device, cancellationToken);
             if (result.Success) return Results.NoContent();
             return result.Error == DeviceCommandError.Conflict
-                ? Results.Conflict(new { message = result.Message })
-                : EndpointHelpers.BadRequest(result.Message);
-        }).RequireAuthorization(AccessPolicies.Configure);
+                ? Results.Conflict(new { message = result.Message, issues = result.Issues.Select(issue => issue.ToApiIssue()).ToArray() })
+                : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
+        }).Produces(StatusCodes.Status204NoContent).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/{id:int}/test", (
             int id,
@@ -269,7 +277,7 @@ public static class DeviceEndpoints
                 return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken, collector));
             }
             catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
-        })).RequireAuthorization(AccessPolicies.Control);
+        })).Produces<DeviceProbeResult>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Control);
 
         group.MapPost("/test-draft", async (
             DeviceDraftTestRequest request,
@@ -324,9 +332,13 @@ public static class DeviceEndpoints
                 ChannelId = request.Device.ChannelId
             };
             var credentialError = ApplyOpcSettings(device, request.Device, credentials);
-            if (credentialError is not null) return EndpointHelpers.BadRequest(credentialError);
+            if (credentialError is not null)
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("device.opc.password", nameof(request.Device.OpcPassword), credentialError)]);
             // 试连按通道端点发起：否则用户改了通道地址再点"测试"会打到旧地址。
-            if (await DeviceCommandService.ApplyChannelEndpointAsync(db, device, cancellationToken) is { } channelError) return EndpointHelpers.BadRequest(channelError);
+            var channelIssues = await DeviceCommandService.ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
+            if (channelIssues.Count > 0)
+                return EndpointHelpers.ValidationProblem(channelIssues.Select(issue => issue.ToApiIssue()).ToArray());
 
             // 编辑时留空密码表示沿用已保存口令；试连也不要求用户重新输入。
             var usesCredentials = device.Protocol == ProtocolType.OpcUa
@@ -336,10 +348,10 @@ public static class DeviceEndpoints
                 device.OpcPasswordProtected = stored.OpcPasswordProtected;
             }
 
-            var error = EndpointHelpers.ValidateDevice(device, Settings(http), Drivers(http));
-            if (error is not null)
+            var deviceIssues = ConfigurationValidator.DeviceIssues(device, Settings(http), Drivers(http));
+            if (deviceIssues.Count > 0)
             {
-                return EndpointHelpers.BadRequest(error);
+                return EndpointHelpers.ValidationProblem(deviceIssues.Select(issue => issue.ToApiIssue()).ToArray());
             }
 
             try
@@ -355,7 +367,7 @@ public static class DeviceEndpoints
             {
                 return EndpointHelpers.BadRequest(ex.Message);
             }
-        }).RequireAuthorization(AccessPolicies.Control);
+        }).Produces<DeviceProbeResult>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Control);
     }
 
     private static bool IsAll(string? value) =>

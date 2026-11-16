@@ -26,6 +26,43 @@ describe('serverFormErrors', () => {
     expect(result.message).toBe('测点不存在') // i18n-ignore
     expect(result.fields).toEqual({ tagId: '测点不存在' }) // i18n-ignore
   })
+
+  it('prefers structured issues over the text heuristic', () => {
+    const error = {
+      response: {
+        data: {
+          message: '第 1 个测点“P1”：测点名称须为 1～100 个字符', // i18n-ignore
+          issues: [
+            { code: 'tag.name', field: 'name', row: 1, message: '测点名称须为 1～100 个字符' }, // i18n-ignore
+            { code: 'tag.address.range', field: 'address', row: 1, message: '地址及数据长度超出 0～65535 范围' } // i18n-ignore
+          ]
+        }
+      }
+    }
+
+    const result = serverFormErrors(error, '保存失败') // i18n-ignore
+
+    expect(result.message).toContain('第 1 个测点') // i18n-ignore
+    expect(result.fields).toEqual({
+      name: '测点名称须为 1～100 个字符', // i18n-ignore
+      address: '地址及数据长度超出 0～65535 范围' // i18n-ignore
+    })
+    expect(result.issues).toHaveLength(2)
+    expect(result.issues[0]).toMatchObject({ code: 'tag.name', row: 1 })
+  })
+
+  it('falls back to the heuristic when issues have no field', () => {
+    const error = {
+      response: {
+        data: {
+          message: '设备名称已存在', // i18n-ignore
+          issues: [{ code: 'device.name.duplicate', field: null, message: '设备名称已存在' }] // i18n-ignore
+        }
+      }
+    }
+
+    expect(serverFormErrors(error, '保存失败').fields).toEqual({ name: '设备名称已存在' }) // i18n-ignore
+  })
 })
 
 describe('field error helpers', () => {

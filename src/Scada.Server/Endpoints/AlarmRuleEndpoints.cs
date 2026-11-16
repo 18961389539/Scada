@@ -99,7 +99,7 @@ public static class AlarmRuleEndpoints
                 .Take(pageSize)
                 .ToListAsync(cancellationToken);
             return Results.Ok(page);
-        });
+        }).Produces<List<AlarmRule>>(StatusCodes.Status200OK);
 
         group.MapPost("", async (
             AlarmRuleRequest request,
@@ -111,8 +111,9 @@ public static class AlarmRuleEndpoints
             if (await EndpointHelpers.RequireTagsAsync(http, [request.TagId], Permission.Configure, $"创建报警规则：测点 #{request.TagId}") is { } denied) return denied;
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             // 映射与「结构 → 目标」两级校验在服务里完成，顺序不能颠倒：结构错误要先给可读文案。
-            var (rule, error) = await commands.PrepareAsync(db, request, excludeRuleId: null, cancellationToken);
-            if (error is not null) return EndpointHelpers.BadRequest(error);
+            var (rule, issues) = await commands.PrepareIssuesAsync(db, request, excludeRuleId: null, cancellationToken);
+            if (issues.Count > 0)
+                return EndpointHelpers.ValidationProblem(issues.Select(issue => issue.ToApiIssue()).ToArray());
             if (await CheckSuppressTagAsync(http, db, rule!, cancellationToken) is { } suppressError) return suppressError;
             if (await CheckExpressionTagsAsync(http, db, rule!, $"创建报警规则：测点 #{rule!.TagId}", cancellationToken) is { } expressionError) return expressionError;
 
@@ -120,7 +121,7 @@ public static class AlarmRuleEndpoints
             // 审计行由 AuditInterceptor 在保存后写入（AlarmRule 实现了 IAuditedEntity）；落库与热加载由服务成对执行。
             await commands.SaveAsync(db, cancellationToken);
             return Results.Created($"/api/alarm-rules/{rule!.Id}", rule);
-        }).RequireAuthorization(AccessPolicies.Configure);
+        }).Produces<AlarmRule>(StatusCodes.Status201Created).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
             int id,
@@ -139,10 +140,10 @@ public static class AlarmRuleEndpoints
 
             // 旧测点与新测点都必须有权限：否则可以把规则「搬」到自己无权查看的测点上。
             if (await EndpointHelpers.RequireTagsAsync(http, new[] { rule.TagId, request.TagId }.Distinct(), Permission.Configure, $"修改报警规则 #{id}") is { } denied) return denied;
-            var (updated, error) = await commands.PrepareAsync(db, request, id, cancellationToken);
-            if (error is not null)
+            var (updated, issues) = await commands.PrepareIssuesAsync(db, request, id, cancellationToken);
+            if (issues.Count > 0)
             {
-                return EndpointHelpers.BadRequest(error);
+                return EndpointHelpers.ValidationProblem(issues.Select(issue => issue.ToApiIssue()).ToArray());
             }
 
             if (await CheckSuppressTagAsync(http, db, updated!, cancellationToken) is { } suppressError) return suppressError;
@@ -152,7 +153,7 @@ public static class AlarmRuleEndpoints
             // 审计由拦截器写。
             await commands.SaveAsync(db, cancellationToken);
             return Results.Ok(rule);
-        }).RequireAuthorization(AccessPolicies.Configure);
+        }).Produces<AlarmRule>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
@@ -173,7 +174,7 @@ public static class AlarmRuleEndpoints
             // 审计由拦截器写。
             await commands.SaveAsync(db, cancellationToken);
             return Results.NoContent();
-        }).RequireAuthorization(AccessPolicies.Configure);
+        }).Produces(StatusCodes.Status204NoContent).RequireAuthorization(AccessPolicies.Configure);
 
         // 停用（out of service）：维修/仪表故障期间不评估；必须写原因，走差分审计。
         group.MapPost("/{id:int}/out-of-service", async (
@@ -190,8 +191,12 @@ public static class AlarmRuleEndpoints
             if (rule is null) return Results.NotFound();
             var action = request.OutOfService ? $"停用报警规则 #{id}" : $"恢复报警规则 #{id}";
             if (await EndpointHelpers.RequireTagsAsync(http, [rule.TagId], Permission.Configure, action) is { } denied) return denied;
-            if (request.OutOfService && string.IsNullOrWhiteSpace(request.Reason)) return EndpointHelpers.BadRequest("停用必须填写原因");
-            if (request.Reason is { Length: > 500 }) return EndpointHelpers.BadRequest("原因不能超过 500 字");
+            if (request.OutOfService && string.IsNullOrWhiteSpace(request.Reason))
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("alarm.outOfService.reasonRequired", nameof(request.Reason), "停用必须填写原因")]);
+            if (request.Reason is { Length: > 500 })
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("alarm.outOfService.reasonTooLong", nameof(request.Reason), "原因不能超过 500 字")]);
             // 停用/恢复是业务动作，文案要写「停用/恢复」而不是通用的「修改」：
             // 手工记一条，同时抑制拦截器避免同一改动出现两行。
             using var outOfServiceAudit = Scada.Core.Security.AuditContext.Suppress();
@@ -203,7 +208,7 @@ public static class AlarmRuleEndpoints
             await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(rule);
-        }).RequireAuthorization(AccessPolicies.Configure);
+        }).Produces<AlarmRule>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         // 暂挂（shelve）：操作员动作，需报警所在区域的确认报警权限；限时、必须写原因。
         group.MapPost("/{id:int}/shelve", async (
@@ -234,7 +239,7 @@ public static class AlarmRuleEndpoints
                 await runtime.SaveChangesAsync(cancellationToken);
             }
             return Results.Ok(result.Shelve);
-        }).RequireAuthorization(AccessPolicies.AckAlarm);
+        }).Produces<AlarmShelve>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.AckAlarm);
 
         group.MapPost("/{id:int}/unshelve", async (
             int id,
@@ -324,6 +329,7 @@ public static class AlarmRuleEndpoints
             await runtime.SaveChangesAsync(cancellationToken);
             return Results.Ok(result);
         }).DisableAntiforgery().RequireAuthorization(AccessPolicies.Configure)
+            .Produces<AlarmRuleImportResult>(StatusCodes.Status200OK)
             // 万行级规则导入要逐行校验并整库热加载，超过默认读超时。
             .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
 
@@ -467,7 +473,9 @@ public static class AlarmRuleEndpoints
     private static async Task<IResult?> CheckSuppressTagAsync(HttpContext http, ConfigDbContext db, AlarmRule rule, CancellationToken ct)
     {
         if (rule.SuppressTagId is not int conditionId) return null;
-        if (!await db.Tags.AnyAsync(x => x.Id == conditionId, ct)) return EndpointHelpers.BadRequest($"条件测点不存在：{conditionId}");
+        if (!await db.Tags.AnyAsync(x => x.Id == conditionId, ct))
+            return EndpointHelpers.ValidationProblem(
+                [EndpointHelpers.Issue("alarm.suppressTag.notFound", nameof(rule.SuppressTagId), $"条件测点不存在：{conditionId}")]);
         // 条件测点至少要能查看，防止借抑制条件探测无权区域的测点。
         return await EndpointHelpers.RequireTagsAsync(http, [conditionId], Permission.View, $"报警规则引用条件测点 #{conditionId}");
     }
@@ -482,7 +490,9 @@ public static class AlarmRuleEndpoints
         if (references.Length == 0) return null;
         var existing = await db.Tags.AsNoTracking().Where(x => references.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
         var unknown = references.Except(existing).Take(20).ToArray();
-        if (unknown.Length > 0) return EndpointHelpers.BadRequest($"表达式引用测点不存在：{string.Join(",", unknown)}");
+        if (unknown.Length > 0)
+            return EndpointHelpers.ValidationProblem(
+                [EndpointHelpers.Issue("alarm.expression.tagNotFound", nameof(rule.Expression), $"表达式引用测点不存在：{string.Join(",", unknown)}")]);
         // 引用测点至少要能查看，防止借表达式探测无权区域的测点。
         return await EndpointHelpers.RequireTagsAsync(http, references, Permission.View, $"{action}（表达式引用测点）");
     }

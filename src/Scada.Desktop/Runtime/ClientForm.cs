@@ -22,32 +22,46 @@ internal sealed class ClientForm : Form
 
     private readonly DesktopSettings _settings;
     private readonly DesktopPaths _paths;
+    private readonly SettingsStore _userStore;
     private readonly int _parentProcessId;
     private readonly string _bootId = Guid.NewGuid().ToString("N");
     private readonly CancellationTokenSource _lifetime = new();
-    private readonly ServerApiClient _api;
     private readonly Panel _overlay = new();
     private readonly Label _overlayTitle = new();
     private readonly Label _overlayDetail = new();
+    private readonly LinkLabel _overlayLink = new();
+    private readonly LinkLabel _toast = new();
+    private readonly HaFailoverCoordinator _failover = new();
 
     private WebView2? _webView;
     private CoreWebView2? _core;
+    private ServerApiClient? _api;
     private SessionData? _session;
+    private ClientHeartbeat? _heartbeat;
+    private string? _documentScriptId;
+    private string _effectiveServerUrl;
+    private string? _clientId;
+    private string? _webViewVersion;
+    private string? _blockedReason;
     private System.Windows.Forms.Timer? _parentTimer;
     private System.Windows.Forms.Timer? _keepAwakeTimer;
     private System.Windows.Forms.Timer? _reloadTimer;
+    private System.Windows.Forms.Timer? _haTimer;
+    private System.Windows.Forms.Timer? _toastTimer;
     private DateTime _lastLoginAttemptUtc = DateTime.MinValue;
     private bool _allowClose;
     private bool _shuttingDown;
     private bool _reloginInProgress;
+    private bool _switching;
     private bool _webViewRecovered;
 
-    public ClientForm(DesktopSettings settings, DesktopPaths paths, int parentProcessId)
+    public ClientForm(DesktopSettings settings, DesktopPaths paths, SettingsStore userStore, int parentProcessId)
     {
         _settings = settings;
         _paths = paths;
+        _userStore = userStore;
         _parentProcessId = parentProcessId;
-        _api = new ServerApiClient(settings.ServerUrl);
+        _effectiveServerUrl = settings.ServerUrl;
 
         Text = "SCADA 桌面客户端";
         ShowInTaskbar = true;
@@ -56,9 +70,11 @@ internal sealed class ClientForm : Form
         Font = new Font("Microsoft YaHei UI", 9F);
         BackColor = Color.FromArgb(13, 22, 34);
         BuildOverlay();
+        BuildToast();
         // 登录与网络重试阶段还没有 WebView2，覆盖层必须先挂在窗体上，
         // 否则无人值守终端在服务器未就绪时只会看到一片黑屏。
         Controls.Add(_overlay);
+        Controls.Add(_toast);
         ApplyMonitorBounds();
         try
         {
@@ -122,9 +138,14 @@ internal sealed class ClientForm : Form
         _keepAwakeTimer?.Dispose();
         _reloadTimer?.Stop();
         _reloadTimer?.Dispose();
+        _haTimer?.Stop();
+        _haTimer?.Dispose();
+        _toastTimer?.Stop();
+        _toastTimer?.Dispose();
+        _heartbeat?.Dispose();
         if (_settings.KeepAwake) SleepPreventer.Release();
         try { _webView?.Dispose(); } catch { /* 关闭阶段的异常不阻塞退出 */ }
-        _api.Dispose();
+        _api?.Dispose();
         base.OnFormClosing(e);
     }
 
@@ -184,10 +205,35 @@ internal sealed class ClientForm : Form
         _overlayDetail.ForeColor = Color.FromArgb(150, 170, 190);
         _overlayDetail.Margin = new Padding(0, 12, 0, 0);
 
+        _overlayLink.AutoSize = true;
+        _overlayLink.Font = new Font("Microsoft YaHei UI", 10F);
+        _overlayLink.LinkColor = Color.FromArgb(120, 180, 240);
+        _overlayLink.ActiveLinkColor = Color.FromArgb(170, 210, 255);
+        _overlayLink.Margin = new Padding(0, 12, 0, 0);
+        _overlayLink.Visible = false;
+        _overlayLink.LinkClicked += (_, _) => OpenDownloadLink();
+
         stack.Controls.Add(_overlayTitle);
         stack.Controls.Add(_overlayDetail);
+        stack.Controls.Add(_overlayLink);
         center.Controls.Add(stack, 0, 1);
         _overlay.Controls.Add(center);
+    }
+
+    private void BuildToast()
+    {
+        _toast.Dock = DockStyle.Bottom;
+        _toast.Height = 34;
+        _toast.TextAlign = ContentAlignment.MiddleCenter;
+        _toast.BackColor = Color.FromArgb(28, 58, 88);
+        _toast.ForeColor = Color.White;
+        _toast.Font = new Font("Microsoft YaHei UI", 9F);
+        _toast.LinkColor = Color.FromArgb(170, 220, 255);
+        _toast.ActiveLinkColor = Color.White;
+        // 提示条同时承担"有新版本"的可点击通知：默认没有链接，ShowToast 传 url 时才挂上。
+        _toast.LinkArea = new LinkArea(0, 0);
+        _toast.LinkClicked += (_, _) => { if (_toast.Tag is string url) OpenExternal(url); };
+        _toast.Visible = false;
     }
 
     private async Task InitializeAsync()
@@ -200,9 +246,15 @@ internal sealed class ClientForm : Form
                 RequestExit(ExitCodes.WebViewMissing);
                 return;
             }
+            _webViewVersion = webViewVersion;
             DesktopLogger.Info($"WebView2 Runtime：{webViewVersion}");
+            _clientId = ClientIdentity.Ensure(_settings, _userStore);
 
             SetOverlay("正在连接服务器…", _settings.ServerUrl);
+            _effectiveServerUrl = await ResolveServerAsync();
+            _api = new ServerApiClient(_effectiveServerUrl);
+            SetOverlay("正在连接服务器…", _effectiveServerUrl);
+
             var (session, fatal) = await AcquireSessionAsync();
             if (fatal)
             {
@@ -211,10 +263,34 @@ internal sealed class ClientForm : Form
             }
             _session = session;
 
+            _heartbeat = new ClientHeartbeat(() => _api, () => _session, BuildHeartbeatPayload);
+            _heartbeat.PrimaryUrlDiscovered += OnPrimaryUrlDiscovered;
+            var first = await _heartbeat.SendNowAsync();
+            DesktopLogger.Info(first is null ? "首次心跳未返回策略，按未知版本继续" : "首次心跳完成");
+            var gate = VersionPolicyEvaluator.Evaluate(AppVersion.Current, first?.Policy);
+            if (gate == VersionGate.Block)
+            {
+                _blockedReason = "version";
+                _ = _heartbeat.SendNowAsync();
+                _heartbeat.Start(first!.HeartbeatSeconds);
+                ShowVersionBlock(first!.Policy!);
+                StartHaTimer();
+                return;
+            }
+            if (gate == VersionGate.UpdateAvailable)
+            {
+                DesktopLogger.Info($"桌面客户端有新版本可用：{first?.Policy?.LatestVersion}");
+                // 只写日志的话，"可升级"这个策略在现场等于不存在：操作员看不到任何提示。
+                if (DesktopUpdateNotice.TryCreate(first?.Policy, out var notice, out var downloadUrl))
+                    ShowToast(notice, seconds: 15, link: downloadUrl);
+            }
+            _heartbeat.Start(first?.HeartbeatSeconds ?? 30);
+
             SetOverlay("正在打开画面…", string.Empty);
             await CreateWebViewAsync();
             if (_shuttingDown || _core is null) return;
-            _core.Navigate(TargetUrl.Build(_settings));
+            _core.Navigate(TargetUrl.Build(_settings, _effectiveServerUrl));
+            StartHaTimer();
         }
         catch (OperationCanceledException)
         {
@@ -229,7 +305,29 @@ internal sealed class ClientForm : Form
         }
     }
 
-    private async Task<(SessionData? Session, bool Fatal)> AcquireSessionAsync()
+    private async Task<string> ResolveServerAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.PasswordCipher)) return _settings.ServerUrl;
+        try
+        {
+            using var probe = new ServerApiClient(_settings.ServerUrl);
+            var role = await probe.GetHaRoleAsync(_lifetime.Token);
+            if (role is { Enabled: true, Role: "Standby" }
+                && !string.IsNullOrWhiteSpace(role.PrimaryUrl)
+                && SettingsValidator.TryNormalizeServerUrl(role.PrimaryUrl, out var primary, out _))
+            {
+                DesktopLogger.Info($"当前节点为备机，改用主机 {primary}");
+                return primary;
+            }
+        }
+        catch (Exception exception)
+        {
+            DesktopLogger.Warn("探测 HA 角色失败：" + exception.Message);
+        }
+        return _settings.ServerUrl;
+    }
+
+    private async Task<(SessionData? Session, bool Fatal)> AcquireSessionAsync(int maxNetworkAttempts = 0)
     {
         if (string.IsNullOrWhiteSpace(_settings.PasswordCipher)) return (null, false);
         var password = PasswordProtector.Unprotect(_settings.PasswordCipher);
@@ -238,6 +336,7 @@ internal sealed class ClientForm : Form
             ShowFatal("无法解密已保存的密码。请打开设置重新输入账号密码。");
             return (null, true);
         }
+        if (_api is null) return (null, true);
 
         var attempts = 0;
         while (!_lifetime.IsCancellationRequested)
@@ -262,6 +361,11 @@ internal sealed class ClientForm : Form
                     return (null, true);
                 case LoginStatus.Network:
                 case LoginStatus.Server:
+                    if (maxNetworkAttempts > 0 && attempts >= maxNetworkAttempts)
+                    {
+                        DesktopLogger.Warn($"登录重试达到上限：{result.Message}");
+                        return (null, true);
+                    }
                     SetOverlay("正在连接服务器…", $"{result.Message}\n第 {attempts} 次重试，15 秒后继续。");
                     await Task.Delay(TimeSpan.FromSeconds(15), _lifetime.Token);
                     break;
@@ -282,9 +386,13 @@ internal sealed class ClientForm : Form
         };
         Controls.Add(_webView);
         _overlay.BringToFront();
+        _toast.BringToFront();
 
+        DesktopLogger.Info("正在创建 WebView2 环境");
         var environment = await CoreWebView2Environment.CreateAsync(null, _paths.WebViewDirectory);
+        DesktopLogger.Info("WebView2 环境已创建，正在初始化控件");
         await _webView.EnsureCoreWebView2Async(environment);
+        DesktopLogger.Info("WebView2 控件初始化完成");
         _core = _webView.CoreWebView2;
 
         var browserSettings = _core.Settings;
@@ -299,8 +407,7 @@ internal sealed class ClientForm : Form
         browserSettings.IsWebMessageEnabled = false;
         browserSettings.AreHostObjectsAllowed = false;
 
-        await _core.AddScriptToExecuteOnDocumentCreatedAsync(
-            InjectionScript.Build(_settings, _session, _bootId));
+        await RegisterDocumentScriptAsync();
 
         _core.NavigationStarting += OnNavigationStarting;
         _core.NavigationCompleted += OnNavigationCompleted;
@@ -308,16 +415,77 @@ internal sealed class ClientForm : Form
         _core.NewWindowRequested += (_, args) =>
         {
             args.Handled = true;
-            DesktopLogger.Warn($"桌面客户端暂不支持弹出新窗口：{args.Uri}");
+            DesktopLogger.Warn($"桌面客户端暂不支持弹出新窗口：{SafeUri(args.Uri)}");
         };
-        _core.DownloadStarting += (_, args) =>
-        {
-            args.Cancel = true;
-            DesktopLogger.Warn("桌面客户端暂不支持下载文件");
-        };
+        _core.DownloadStarting += OnDownloadStarting;
         _core.PermissionRequested += (_, args) => args.State = CoreWebView2PermissionState.Deny;
         _core.ServerCertificateErrorDetected += (_, args) =>
-            DesktopLogger.Error($"服务器证书不受信任：{args.RequestUri}");
+            DesktopLogger.Error($"服务器证书不受信任：{SafeUri(args.RequestUri)}");
+    }
+
+    private async Task RegisterDocumentScriptAsync()
+    {
+        if (_core is null) return;
+        if (!string.IsNullOrEmpty(_documentScriptId))
+        {
+            try { _core.RemoveScriptToExecuteOnDocumentCreated(_documentScriptId); }
+            catch (Exception exception) { DesktopLogger.Warn("移除旧注入脚本失败：" + exception.Message); }
+            _documentScriptId = null;
+        }
+        _documentScriptId = await _core.AddScriptToExecuteOnDocumentCreatedAsync(
+            InjectionScript.Build(_settings, _session, _bootId, force: false, _effectiveServerUrl));
+    }
+
+    private async Task InjectSessionAsync()
+    {
+        if (_core is null || _session is null) return;
+        try
+        {
+            await _core.ExecuteScriptAsync(
+                InjectionScript.Build(_settings, _session, _bootId, force: true, _effectiveServerUrl));
+        }
+        catch (Exception exception)
+        {
+            DesktopLogger.Warn("注入会话失败：" + exception.Message);
+        }
+    }
+
+    private void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
+    {
+        if (!_settings.AllowDownloads)
+        {
+            e.Cancel = true;
+            DesktopLogger.Warn("下载已禁用：" + SafeUri(e.DownloadOperation.Uri));
+            return;
+        }
+        try
+        {
+            var directory = string.IsNullOrWhiteSpace(_settings.DownloadDirectory)
+                ? DownloadPolicy.DefaultDirectory
+                : _settings.DownloadDirectory!;
+            Directory.CreateDirectory(directory);
+            var suggested = Path.GetFileName(e.ResultFilePath);
+            if (string.IsNullOrWhiteSpace(suggested)
+                && Uri.TryCreate(e.DownloadOperation.Uri, UriKind.Absolute, out var uri))
+            {
+                suggested = Path.GetFileName(uri.LocalPath);
+            }
+            e.ResultFilePath = DownloadPolicy.ResolveDestination(directory, suggested);
+            e.Handled = true;
+            e.DownloadOperation.StateChanged += (sender, _) =>
+            {
+                var operation = sender as CoreWebView2DownloadOperation ?? e.DownloadOperation;
+                if (operation.State == CoreWebView2DownloadState.Completed)
+                    ShowToast("已下载：" + Path.GetFileName(operation.ResultFilePath));
+                else if (operation.State == CoreWebView2DownloadState.Interrupted)
+                    ShowToast("下载失败：" + operation.InterruptReason);
+            };
+        }
+        catch (Exception exception)
+        {
+            e.Cancel = true;
+            DesktopLogger.Error("下载保存失败", exception);
+        }
     }
 
     private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
@@ -326,7 +494,7 @@ internal sealed class ClientForm : Form
         if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
         if (!TargetUrl.IsLoginPage(uri)) return;
         if (string.IsNullOrWhiteSpace(_settings.PasswordCipher)) return;
-        if (_reloginInProgress) return;
+        if (_reloginInProgress || _switching) return;
 
         e.Cancel = true;
         _ = EnsureReLoggedInAsync();
@@ -334,7 +502,7 @@ internal sealed class ClientForm : Form
 
     private async Task EnsureReLoggedInAsync()
     {
-        if (_reloginInProgress || _shuttingDown) return;
+        if (_reloginInProgress || _switching || _shuttingDown) return;
         _reloginInProgress = true;
         try
         {
@@ -358,17 +526,16 @@ internal sealed class ClientForm : Form
                 attempts++;
 
                 SetOverlay("会话已过期", "正在自动重新登录…");
+                if (_api is null) return;
                 var result = await _api.LoginAsync(_settings.UserName ?? string.Empty, password, _lifetime.Token);
                 switch (result.Status)
                 {
                     case LoginStatus.Success:
                         _session = result.Session;
-                        if (_core is not null)
-                        {
-                            await _core.ExecuteScriptAsync(
-                                InjectionScript.Build(_settings, _session, _bootId, force: true));
-                            _core.Navigate(TargetUrl.Build(_settings));
-                        }
+                        await RegisterDocumentScriptAsync();
+                        await InjectSessionAsync();
+                        _core?.Navigate(TargetUrl.Build(_settings, _effectiveServerUrl));
+                        _ = _heartbeat?.SendNowAsync();
                         return;
                     case LoginStatus.Network:
                     case LoginStatus.Server:
@@ -398,6 +565,99 @@ internal sealed class ClientForm : Form
         }
     }
 
+    private void StartHaTimer()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.PasswordCipher)) return;
+        _haTimer = new System.Windows.Forms.Timer { Interval = 30_000 };
+        _haTimer.Tick += (_, _) => _ = PollHaAsync();
+        _haTimer.Start();
+    }
+
+    private async Task PollHaAsync()
+    {
+        if (_shuttingDown || _switching || _reloginInProgress || _api is null) return;
+        try
+        {
+            var role = await _api.GetHaRoleAsync(_lifetime.Token);
+            if (role is { Enabled: true, Role: "Standby" } && !string.IsNullOrWhiteSpace(role.PrimaryUrl))
+                await SwitchServerAsync(role.PrimaryUrl!);
+        }
+        catch (OperationCanceledException)
+        {
+            // 窗口关闭。
+        }
+        catch (Exception exception)
+        {
+            DesktopLogger.Warn("HA 角色轮询失败：" + exception.Message);
+        }
+    }
+
+    private void OnPrimaryUrlDiscovered(string primary)
+    {
+        if (_shuttingDown || IsDisposed || !IsHandleCreated) return;
+        try { BeginInvoke(new Action(() => _ = SwitchServerAsync(primary))); }
+        catch (Exception exception) { DesktopLogger.Warn("切换主机调度失败：" + exception.Message); }
+    }
+
+    private async Task SwitchServerAsync(string target)
+    {
+        if (_switching || _reloginInProgress || _shuttingDown) return;
+        if (string.IsNullOrWhiteSpace(_settings.PasswordCipher)) return;
+        if (!SettingsValidator.TryNormalizeServerUrl(target, out var normalized, out _)) return;
+        if (string.Equals(normalized, _effectiveServerUrl, StringComparison.OrdinalIgnoreCase)) return;
+
+        var now = DateTime.UtcNow;
+        if (!_failover.ShouldAttempt(normalized, now)) return;
+        _failover.RecordAttempt(normalized, now);
+
+        _switching = true;
+        var previous = _effectiveServerUrl;
+        try
+        {
+            SetOverlay("正在切换主机…", normalized);
+            _api?.Dispose();
+            _api = new ServerApiClient(normalized);
+            _effectiveServerUrl = normalized;
+
+            var (session, fatal) = await AcquireSessionAsync(maxNetworkAttempts: 3);
+            if (fatal || session is null)
+            {
+                RevertServer(previous);
+                var delay = _failover.RecordFailure(normalized, DateTime.UtcNow);
+                SetOverlay("主备切换失败", delay is null
+                    ? "已暂停自动切换，请检查主机状态或重新启动客户端。"
+                    : $"将在 {Math.Max(1, (int)delay.Value.TotalSeconds)} 秒后重试。");
+                return;
+            }
+
+            _session = session;
+            await RegisterDocumentScriptAsync();
+            await InjectSessionAsync();
+            _core?.Navigate(TargetUrl.Build(_settings, _effectiveServerUrl));
+            _failover.RecordSuccess(normalized);
+            DesktopLogger.Info($"已切换到主机 {normalized}");
+        }
+        catch (Exception exception)
+        {
+            if (_shuttingDown) return;
+            DesktopLogger.Error("主备切换失败", exception);
+            RevertServer(previous);
+            _failover.RecordFailure(normalized, DateTime.UtcNow);
+            SetOverlay("主备切换失败", exception.Message);
+        }
+        finally
+        {
+            _switching = false;
+        }
+    }
+
+    private void RevertServer(string previous)
+    {
+        _effectiveServerUrl = previous;
+        _api?.Dispose();
+        _api = new ServerApiClient(previous);
+    }
+
     private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
         if (_shuttingDown) return;
@@ -407,7 +667,7 @@ internal sealed class ClientForm : Form
             _ = HideOverlaySoonAsync();
             return;
         }
-        if (_reloginInProgress) return;
+        if (_reloginInProgress || _switching) return;
         SetOverlay("无法打开画面", DescribeWebError(e.WebErrorStatus) + "\n10 秒后重试…");
         ScheduleReload();
     }
@@ -528,8 +788,89 @@ internal sealed class ClientForm : Form
         }
         _overlayTitle.Text = title;
         _overlayDetail.Text = detail ?? string.Empty;
+        _overlayLink.Visible = false;
         _overlay.Visible = true;
         _overlay.BringToFront();
+    }
+
+    private void ShowVersionBlock(VersionPolicy policy)
+    {
+        SetOverlay("客户端版本过低",
+            $"当前版本 {AppVersion.Current ?? "未知"}，最低要求 {policy.MinimumVersion ?? "未知"}。\n请安装新版本后重新启动。");
+        if (!string.IsNullOrWhiteSpace(policy.DownloadUrl)
+            && Uri.TryCreate(policy.DownloadUrl, UriKind.Absolute, out var uri)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            _overlayLink.Text = "打开下载页面";
+            _overlayLink.Tag = uri.ToString();
+            _overlayLink.Visible = true;
+        }
+    }
+
+    private void OpenDownloadLink()
+    {
+        if (_overlayLink.Tag is string url) OpenExternal(url);
+    }
+
+    private static void OpenExternal(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return;
+        }
+        try { Process.Start(new ProcessStartInfo { FileName = uri.ToString(), UseShellExecute = true }); }
+        catch (Exception exception) { DesktopLogger.Warn("打开外部链接失败：" + exception.Message); }
+    }
+
+    private void ShowToast(string message, int seconds = 5, string? link = null)
+    {
+        if (_shuttingDown || IsDisposed) return;
+        if (InvokeRequired)
+        {
+            try { BeginInvoke(new Action(() => ShowToast(message, seconds, link))); } catch { }
+            return;
+        }
+        _toast.Text = message;
+        _toast.Tag = link;
+        _toast.LinkArea = link is null ? new LinkArea(0, 0) : new LinkArea(0, message.Length);
+        _toast.Visible = true;
+        _toast.BringToFront();
+        _toastTimer?.Stop();
+        _toastTimer?.Dispose();
+        _toastTimer = new System.Windows.Forms.Timer { Interval = Math.Max(2, seconds) * 1000 };
+        _toastTimer.Tick += (_, _) =>
+        {
+            _toastTimer?.Stop();
+            _toastTimer?.Dispose();
+            _toastTimer = null;
+            _toast.Visible = false;
+        };
+        _toastTimer.Start();
+    }
+
+    private HeartbeatPayload BuildHeartbeatPayload()
+    {
+        var kind = _settings.Target.Kind;
+        var targetId = kind switch
+        {
+            "screen" => _settings.Target.ScreenId,
+            "layout" => _settings.Target.LayoutId,
+            "workstation" => _settings.Target.WorkstationId,
+            _ => null
+        };
+        return new HeartbeatPayload(
+            _clientId ?? string.Empty,
+            Environment.MachineName,
+            Environment.UserName,
+            AppVersion.Current ?? "unknown",
+            _webViewVersion,
+            _bootId,
+            kind,
+            targetId,
+            _settings.Target.TargetName,
+            _settings.ConfigScope,
+            _blockedReason);
     }
 
     private void ShowFatal(string message)
@@ -543,6 +884,12 @@ internal sealed class ClientForm : Form
         {
             // 窗口已销毁时无法弹窗，交给日志和退出码。
         }
+    }
+
+    private static string SafeUri(string? value)
+    {
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return value ?? string.Empty;
+        return uri.GetLeftPart(UriPartial.Path);
     }
 
     private static string DescribeWebError(CoreWebView2WebErrorStatus status) => status switch

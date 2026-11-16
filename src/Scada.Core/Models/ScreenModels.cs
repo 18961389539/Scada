@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Scada.Core.Entities;
@@ -145,6 +146,11 @@ public sealed record HmiTemplateDefinition(string Key, double Width, double Heig
 public static class ScreenExpander
 {
     public const string Separator = "--";
+    private static readonly JsonSerializerOptions CloneOptions = new(JsonSerializerDefaults.Web);
+
+    // 模板内部图元只携带运行时字段；JSON 往返保证集合与嵌套对象深拷贝，新增字段默认跟随，不再逐项手抄。
+    private static ScreenNode CloneRuntimeFields(ScreenNode inner) =>
+        JsonSerializer.Deserialize<ScreenNode>(JsonSerializer.Serialize(inner, CloneOptions), CloneOptions) ?? new ScreenNode();
 
     public static ScreenDocument Expand(ScreenDocument document, Func<string, HmiTemplateDefinition?> lookup)
     {
@@ -162,40 +168,42 @@ public static class ScreenExpander
             int? Resolve(string? key) => key is not null && bindings.TryGetValue(key, out var id) ? id : null;
             foreach (var inner in template.Nodes)
             {
-                result.Nodes.Add(new ScreenNode
-                {
-                    Id = $"{node.Id}{Separator}{inner.Id}", Type = inner.Type, X = node.X + inner.X * sx, Y = node.Y + inner.Y * sy,
-                    Width = inner.Width * sx, Height = inner.Height * sy, Rotation = inner.Rotation, Text = inner.Text, Color = inner.Color, ActiveColor = inner.ActiveColor,
-                    Unit = inner.Unit, Decimals = inner.Decimals, Min = inner.Min, Max = inner.Max, ActiveThreshold = inner.ActiveThreshold, Symbol = inner.Symbol,
-                    // 集合一律新建：发布物与图库模板共享可变对象时，后续对模板的编辑会“隔着引用”改掉已发布的画面。
-                    Texts = inner.Texts is null ? null : new Dictionary<string, string>(inner.Texts), FontSize = inner.FontSize,
-                    Align = inner.Align, Wrap = inner.Wrap, AutoFit = inner.AutoFit, Bold = inner.Bold, Opacity = inner.Opacity, BorderWidth = inner.BorderWidth, Radius = inner.Radius,
-                    // Hidden 必须保留：模板内部图元的隐藏属于运行期语义，不是编辑态辅助。
-                    Hidden = inner.Hidden,
-                    // Locked / GroupId 刻意不复制：它们只服务于设计器的选中与成组操作，展开后的节点不再被编辑。
-                    Tags = inner.TagBinds is not null ? inner.TagBinds.Select(Resolve).Where(id => id.HasValue).Select(id => id!.Value).ToList() : inner.Tags,
-                    Animation = inner.Animation is { } animation ? new ScreenAnimation { Type = animation.Type, Source = animation.Source,
-                        TagId = inner.AnimationBind is not null ? Resolve(inner.AnimationBind) : animation.TagId, From = animation.From, To = animation.To, OutFrom = animation.OutFrom, OutTo = animation.OutTo } : null,
-                    WindowSec = inner.WindowSec, LineId = inner.LineId,
-                    Points = inner.Points is null ? null : [.. inner.Points],
-                    States = inner.States is null ? null : [.. inner.States],
-                    Source = inner.Source is { } source ? source with { NodeId = $"{node.Id}{Separator}{source.NodeId}" } : null,
-                    Target = inner.Target is { } target ? target with { NodeId = $"{node.Id}{Separator}{target.NodeId}" } : null,
-                    Commands = inner.Commands?.Select(command => command with { TagId = Resolve(command.Bind), Bind = null }).ToList(),
-                    ReleaseValue = inner.ReleaseValue, PulseMs = inner.PulseMs, MaxHoldMs = inner.MaxHoldMs, ResetMode = inner.ResetMode, SilenceMinutes = inner.SilenceMinutes,
-                    RecipeTemplateId = inner.RecipeTemplateId,
-                    GaugeBands = inner.GaugeBands is null ? null : [.. inner.GaugeBands], Setpoint = inner.Setpoint,
-                    TableColumns = inner.TableColumns is null ? null : [.. inner.TableColumns],
-                    ChartOptions = inner.ChartOptions is { } chart ? new ScreenChartOptions
+                // 克隆后只做显式变换：位置尺寸、编号、占位符解析与编辑态字段清空。
+                var copy = CloneRuntimeFields(inner);
+                copy.Id = $"{node.Id}{Separator}{inner.Id}";
+                copy.X = node.X + inner.X * sx;
+                copy.Y = node.Y + inner.Y * sy;
+                copy.Width = inner.Width * sx;
+                copy.Height = inner.Height * sy;
+                // Locked / GroupId 只服务于设计器；模板引用与占位符在展开后失去意义。
+                copy.Locked = null;
+                copy.GroupId = null;
+                copy.TemplateKey = null;
+                copy.Bindings = null;
+                copy.Bind = null;
+                copy.AlarmBind = null;
+                copy.TagBinds = null;
+                copy.AnimationBind = null;
+                // 占位符按实例绑定解析成具体测点。
+                copy.TagId = inner.Bind is not null ? Resolve(inner.Bind) : null;
+                copy.AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null;
+                if (inner.TagBinds is not null)
+                    copy.Tags = inner.TagBinds.Select(Resolve).Where(id => id.HasValue).Select(id => id!.Value).ToList();
+                if (copy.Animation is { } animation && inner.AnimationBind is not null)
+                    animation.TagId = Resolve(inner.AnimationBind);
+                copy.Commands = inner.Commands?.Select(command => command with { TagId = Resolve(command.Bind), Bind = null }).ToList();
+                // 动作始终非空：JSON 里可能出现 action:null，运行端不应再判空。
+                copy.Action = inner.Action is { } action
+                    ? new ScreenAction
                     {
-                        Legend = chart.Legend, Grid = chart.Grid, DataLabels = chart.DataLabels, YUnit = chart.YUnit,
-                        TargetLines = chart.TargetLines is null ? null : [.. chart.TargetLines]
-                    } : null,
-                    TagId = inner.Bind is not null ? Resolve(inner.Bind) : null, AlarmTagId = inner.AlarmBind is not null ? Resolve(inner.AlarmBind) : null,
-                    Action = new ScreenAction { Type = inner.Action?.Type ?? "none", ScreenId = inner.Action?.ScreenId, Value = inner.Action?.Value ?? 0,
-                        SequenceId = inner.Action?.SequenceId, RecipeId = inner.Action?.RecipeId, JobId = inner.Action?.JobId,
-                        TagId = inner.Action?.Bind is not null ? Resolve(inner.Action.Bind) : null }
-                });
+                        Type = action.Type ?? "none", ScreenId = action.ScreenId, Value = action.Value,
+                        SequenceId = action.SequenceId, RecipeId = action.RecipeId, JobId = action.JobId,
+                        TagId = action.Bind is not null ? Resolve(action.Bind) : null
+                    }
+                    : new ScreenAction();
+                copy.Source = inner.Source is { } source ? source with { NodeId = $"{node.Id}{Separator}{source.NodeId}" } : null;
+                copy.Target = inner.Target is { } target ? target with { NodeId = $"{node.Id}{Separator}{target.NodeId}" } : null;
+                result.Nodes.Add(copy);
             }
         }
         return result;
@@ -258,10 +266,7 @@ public sealed record ScreenIssue(string NodeId, string Message);
 
 public static partial class ScreenValidator
 {
-    public static readonly HashSet<string> NodeTypes =
-        ["text", "value", "pump", "valve", "tank", "pipe", "rectangle", "ellipse", "button", "gauge", "motor", "fan", "symbol", "template",
-         "led", "progress", "kpi", "clock", "image", "marquee", "dial", "chart-bar", "chart-pie", "chart-line", "chart-bar-horizontal", "chart-bar-stack", "chart-area", "chart-radar", "chart-funnel", "chart-gauge", "alarm-banner", "alarm-stats", "alarm-list", "table", "history-table", "oee-kpi", "switch", "slider", "spinner", "input", "polyline", "equipment-panel",
-         "reset", "jog", "pulse", "silence", "selector", "knob", "recipe"];
+    public static readonly IReadOnlySet<string> NodeTypes = ScreenNodeRegistry.Types;
 
     public static IReadOnlyList<ScreenIssue> Validate(
         ScreenDocument document,
@@ -305,14 +310,14 @@ public static partial class ScreenValidator
             if (node.GroupId is not null && !GroupPattern().IsMatch(node.GroupId)) Add(id, "分组编号无效");
             if (node.Decimals is < 0 or > 6 || !double.IsFinite(node.Min) || !double.IsFinite(node.Max)
                 || node.Min >= node.Max || !double.IsFinite(node.ActiveThreshold)) Add(id, "量程或显示精度无效");
-            if (node.Type == "symbol" && (node.Symbol is null || !SymbolPattern().IsMatch(node.Symbol))) Add(id, "图库符号无效");
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Symbol) && (node.Symbol is null || !SymbolPattern().IsMatch(node.Symbol))) Add(id, "图库符号无效");
             if (node.Points is { } points && (points.Count is < 2 or > 64 || points.Any(point => point is null || !Finite(point.X, 0, 100) || !Finite(point.Y, 0, 100))))
                 Add(id, "管道折点必须为 2 至 64 个，坐标范围为 0 至 100");
             if (node.States is { } states && (states.Count > 16 || states.Any(state => state is null || !double.IsFinite(state.Value) || string.IsNullOrWhiteSpace(state.Label) || state.Label.Length > 40 || !IsColor(state.Color))
                 || states.Where(state => state is not null).Select(state => state.Value).Distinct().Count() != states.Count))
                 Add(id, "设备状态配置无效：最多 16 个状态，状态值不能重复");
             foreach (var port in new[] { node.Source, node.Target }.OfType<ScreenPort>())
-                if (node.Type != "polyline" || node.Rotation != 0 || port.Port is not ("left" or "right" or "top" or "bottom")
+                if (!ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.PipePorts) || node.Rotation != 0 || port.Port is not ("left" or "right" or "top" or "bottom")
                     || !document.Nodes.Any(other => other is not null && other.Id == port.NodeId && other.Id != id && other.Type != "polyline"))
                     Add(id, "管道连接端口无效");
             if (node.Commands is { } panelCommands)
@@ -361,7 +366,7 @@ public static partial class ScreenValidator
             if (node.LineId is int lineId && lineId <= 0) Add(id, "OEE 产线无效");
             if (node.GaugeBands is { } gaugeBands)
             {
-                if (node.Type is not ("gauge" or "dial")) Add(id, "色带只能用于仪表或表盘");
+                if (!ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.GaugeBand)) Add(id, "色带只能用于仪表或表盘");
                 else if (gaugeBands.Count > 6) Add(id, "仪表色带最多 6 条");
                 else if (gaugeBands.Any(band => band is null || !double.IsFinite(band.From) || !double.IsFinite(band.To)
                     || band.From >= band.To || band.From < node.Min || band.To > node.Max || !IsColor(band.Color)))
@@ -369,27 +374,21 @@ public static partial class ScreenValidator
             }
             if (node.Setpoint is double setpoint)
             {
-                if (node.Type is not ("gauge" or "dial")) Add(id, "设定值标记只能用于仪表或表盘");
+                if (!ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Setpoint)) Add(id, "设定值标记只能用于仪表或表盘");
                 else if (!double.IsFinite(setpoint) || setpoint < node.Min || setpoint > node.Max) Add(id, "设定值必须在量程内");
             }
             if (node.TableColumns is { } tableColumns)
             {
-                var allowedColumns = node.Type switch
-                {
-                    "table" => new[] { "name", "value", "unit" },
-                    "history-table" => new[] { "name", "last", "min", "max", "avg" },
-                    _ => Array.Empty<string>()
-                };
-                if (allowedColumns.Length == 0) Add(id, "显示列只能用于数据表或历史统计表");
-                else if (tableColumns.Count is < 1 || tableColumns.Count > allowedColumns.Length
+                var allowedColumns = ScreenNodeRegistry.TableColumns(node.Type);
+                if (allowedColumns is null) Add(id, "显示列只能用于数据表或历史统计表");
+                else if (tableColumns.Count is < 1 || tableColumns.Count > allowedColumns.Count
                     || tableColumns.Any(column => column is null || !allowedColumns.Contains(column))
                     || tableColumns.Distinct().Count() != tableColumns.Count)
                     Add(id, "表格显示列无效或重复");
             }
             if (node.ChartOptions is { } chartOptions)
             {
-                var chartTypes = new[] { "chart-bar", "chart-pie", "chart-line", "chart-bar-horizontal", "chart-bar-stack", "chart-area", "chart-radar", "chart-funnel", "chart-gauge" };
-                if (!chartTypes.Contains(node.Type)) Add(id, "图表选项只能用于图表图元");
+                if (!ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.ChartOptions)) Add(id, "图表选项只能用于图表图元");
                 else
                 {
                     if (chartOptions.YUnit is { Length: > 32 }) Add(id, "图表 Y 轴单位过长");
@@ -398,14 +397,14 @@ public static partial class ScreenValidator
                         if (targetLines.Count > 4) Add(id, "图表目标线最多 4 条");
                         else if (targetLines.Any(line => line is null || !double.IsFinite(line.Value) || !IsColor(line.Color) || line.Label is { Length: > 40 }))
                             Add(id, "图表目标线配置无效");
-                        else if (targetLines.Count > 0 && node.Type is not ("chart-line" or "chart-area" or "chart-bar" or "chart-bar-horizontal" or "chart-bar-stack"))
+                        else if (targetLines.Count > 0 && !ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.ChartTargetLines))
                             Add(id, "该图表类型不支持目标线");
                     }
                 }
             }
-            if (node.Type == "reset" && node.ResetMode is not (null or "alarms" or "tag")) Add(id, "复位模式不支持");
-            if (node.Type == "silence" && node.SilenceMinutes is int silenceMinutes && silenceMinutes is < 1 or > 120) Add(id, "消音时长必须在 1 至 120 分钟之间");
-            if (node.Type is "jog" or "pulse")
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Reset) && node.ResetMode is not (null or "alarms" or "tag")) Add(id, "复位模式不支持");
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Silence) && node.SilenceMinutes is int silenceMinutes && silenceMinutes is < 1 or > 120) Add(id, "消音时长必须在 1 至 120 分钟之间");
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Momentary))
             {
                 if (node.ReleaseValue is not double releaseValue) Add(id, "点动或瞬时按钮必须配置释放值");
                 else if (!double.IsFinite(releaseValue)) Add(id, "释放值无效");
@@ -415,22 +414,22 @@ public static partial class ScreenValidator
                 if (node.Type == "jog" && node.MaxHoldMs is int maxHoldMs && maxHoldMs is < 500 or > 30000) Add(id, "最长保持时间必须在 0.5 至 30 秒之间");
                 if (node.Type == "pulse" && node.PulseMs is int pulseMs && pulseMs is < 100 or > 5000) Add(id, "脉冲宽度必须在 100 至 5000 毫秒之间");
             }
-            if (node.Type is "selector" or "knob")
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Positional))
             {
                 if (node.States is not { Count: >= 2 and <= 8 } positions) Add(id, "选择开关或旋钮必须配置 2 至 8 个位置");
                 else if (node.Action?.TagId is int positionTagId && tags is not null && tags.TryGetValue(positionTagId, out var positionTag))
                     foreach (var position in positions)
                         if (!CommandValuePolicy.TryGetRawValue(positionTag, position.Value, out _, out var positionError)) { Add(id, positionError); break; }
             }
-            if (node.Type == "recipe")
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.Recipe))
             {
                 if (node.RecipeTemplateId is not > 0) Add(id, "配方控件必须选择配方模板");
                 if (node.Action?.Type is not "none") Add(id, "配方控件不支持画面动作");
             }
-            var requiresCommand = node.Type is "switch" or "slider" or "spinner" or "input" or "jog" or "pulse" or "selector" or "knob"
+            var requiresCommand = ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.RequiresCommand)
                 || node.Type == "reset" && node.ResetMode == "tag";
             if (requiresCommand && node.Action?.Type != "command") Add(id, "控件必须配置控制动作");
-            if (node.Type == "template")
+            if (ScreenNodeRegistry.Has(node.Type, ScreenNodeFeature.TemplateInstance))
             {
                 if (templateDocument) Add(id, "模板内不能再嵌套模板");
                 else if (node.TemplateKey is null || !KeyPattern().IsMatch(node.TemplateKey)) Add(id, "模板键无效");

@@ -26,6 +26,23 @@ const FIELD_HINTS: [RegExp, string][] = [
 
 export type FieldErrorMap = Record<string, string>
 
+/** 服务端结构化校验问题（与 EndpointHelpers.ApiIssue 对应）。 */
+export interface ServerIssue {
+  code?: string
+  field?: string | null
+  row?: number | null
+  message?: string
+}
+
+function readServerIssues(error: unknown): ServerIssue[] {
+  const data = (error as { response?: { data?: unknown } } | null | undefined)?.response?.data
+  if (!data || typeof data !== 'object') return []
+  const issues = (data as { issues?: unknown }).issues
+  if (!Array.isArray(issues)) return []
+  return issues.filter((issue): issue is ServerIssue =>
+    !!issue && typeof issue === 'object' && typeof (issue as ServerIssue).message === 'string')
+}
+
 export function mapServerFieldError(message: string, preferredFields?: string[]): FieldErrorMap {
   const text = (message || '').trim()
   if (!text) return {}
@@ -41,13 +58,31 @@ export function mapServerFieldError(message: string, preferredFields?: string[])
   return { _form: text }
 }
 
-/** 从 axios/未知错误提取 message，并映射到字段。 */
+/**
+ * 从 axios/未知错误提取 message，并映射到字段。
+ *
+ * 服务端返回结构化 `issues` 时，直接按 `field` 归属（一次可标红多个字段）；
+ * 只有旧端点仍返回纯文案时，才退回中文/英文关键字启发式。
+ */
 export function serverFormErrors(error: unknown, fallback: string, preferredFields?: string[]): {
   message: string
   fields: FieldErrorMap
+  issues: ServerIssue[]
 } {
   const message = errorMessage(error, fallback)
-  return { message, fields: mapServerFieldError(message, preferredFields) }
+  const issues = readServerIssues(error)
+  const fields: FieldErrorMap = {}
+  for (const issue of issues) {
+    const field = issue.field?.trim()
+    const text = issue.message?.trim()
+    if (!field || !text) continue
+    fields[field] = fields[field] ? `${fields[field]}；${text}` : text
+  }
+  return {
+    message,
+    fields: Object.keys(fields).length > 0 ? fields : mapServerFieldError(message, preferredFields),
+    issues
+  }
 }
 
 export function clearFieldErrors(target: FieldErrorMap): void {

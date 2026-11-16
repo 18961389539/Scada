@@ -118,6 +118,12 @@ public sealed class ScadaSettings
     public int WatchdogStallSeconds { get; set; } = 180;
     // 看门狗巡检节拍（毫秒）。默认 15 秒；调小只让"发现停滞"更及时，不改变停滞判定阈值。
     public int WatchdogCheckIntervalMs { get; set; } = 15_000;
+    // 系统时钟偏差检测（SNTP）：只检测并写入 /health 告警，不修改系统时间，对时交给 W32Time / chrony。
+    // 无外网或 UDP 123 被策略拦截时静默跳过，不会产生健康告警；内网 NTP 请把 Server 换成实际地址。
+    public bool ClockCheckEnabled { get; set; } = true;
+    public string ClockCheckServer { get; set; } = "time.windows.com";
+    public int ClockCheckIntervalMinutes { get; set; } = 360;
+    public int ClockSkewWarnMs { get; set; } = 5_000;
     // 报警外发：留空则只走站内推送。同测点同等级在冷却期内只发一次，恢复事件不受冷却限制。
     public string? AlarmWebhookUrl { get; set; }
     public AlarmLevel AlarmWebhookMinLevel { get; set; } = AlarmLevel.Warning;
@@ -197,6 +203,11 @@ public sealed class ScadaSettings
     public bool AllowPublicCollectorTargets { get; set; }
     public bool SeedDemoData { get; set; }
     public bool AggregationEnabled { get; set; } = true;
+    // 桌面客户端集中运维：在线心跳阈值与版本门禁。
+    public DesktopClientOptions DesktopClient { get; set; } = new();
+
+    // 反向代理：默认关闭，只信任显式列出的代理地址。
+    public ReverseProxyOptions ReverseProxy { get; set; } = new();
 }
 
 public sealed class BackupTargetOptions

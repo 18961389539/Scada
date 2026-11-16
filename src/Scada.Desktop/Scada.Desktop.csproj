@@ -8,10 +8,18 @@
     <ApplicationIcon>..\Scada.Server\Scada.Server.ico</ApplicationIcon>
     <AssemblyName>Scada.Desktop</AssemblyName>
     <RootNamespace>Scada.Desktop</RootNamespace>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0.0</FileVersion>
+    <InformationalVersion>1.1.0</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Core 无第三方依赖：只借版本比较等纯逻辑，避免与服务端各写一份规则。 -->
+    <ProjectReference Include="..\Scada.Core\Scada.Core.csproj" />
   </ItemGroup>
 
   <Target Name="RemoveWebView2WpfReference" BeforeTargets="ResolveAssemblyReferences">

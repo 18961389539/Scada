@@ -32,3 +32,5 @@ logs/
 # Agent workspace data
 .workbuddy/
 .trae/
+.trae-html-share-packages/
+.screenshots/

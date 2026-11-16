@@ -37,7 +37,10 @@ public sealed class McpAccessTests : IClassFixture<McpAccessTests.RestrictedSite
     [Fact]
     public void Source_Guard_Defaults_To_Loopback()
     {
-        Assert.True(McpSourceGuard.IsAllowed(null, []));
+        // 拿不到来源地址时不能按「本机」放行：反代 ForwardedHeaders 配错或 Unix 域套接字
+        // 转发会让所有外部调用落进这个分支，等于同时绕过网段、全局限流与分桶。
+        Assert.False(McpSourceGuard.IsAllowed(null, []));
+        Assert.True(McpSourceGuard.IsAllowed(null, [McpSourceGuard.AnySource]));
         Assert.True(McpSourceGuard.IsAllowed(IPAddress.Loopback, []));
         Assert.True(McpSourceGuard.IsAllowed(IPAddress.IPv6Loopback, []));
         Assert.False(McpSourceGuard.IsAllowed(IPAddress.Parse("10.1.2.3"), []));

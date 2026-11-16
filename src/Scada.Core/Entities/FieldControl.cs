@@ -56,7 +56,9 @@ public class ControlLockout
     public string? RemoveReason { get; set; }
 }
 
-public enum ControlRequestStatus { Pending = 0, Executed = 1, Failed = 2, Rejected = 3, Expired = 4, Cancelled = 5 }
+// Executing = 已由一个复核人抢占、正在执行。并发批准时只有一个人能把 Pending 改成 Executing，
+// 另一个人拿到 0 行后返回 409。执行完转 Executed/Failed；进程崩溃留下的 Executing 由超时回收转 Failed。
+public enum ControlRequestStatus { Pending = 0, Executed = 1, Failed = 2, Rejected = 3, Expired = 4, Cancelled = 5, Executing = 6 }
 
 // 待双人复核的控制请求（单点写入或启动顺控）。
 public class ControlRequest

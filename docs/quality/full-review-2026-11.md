@@ -416,3 +416,204 @@ CS8600/CS8602 变成编译失败；`McpMasterDataTests`+`TagExcelTests`+`DeviceV
 | 前端 | `npm run build` 通过；i18n 4172 键；hygiene any 30 / log 0；access 通过；ESLint 0 error |
 | E2E | 核心冒烟 3 / 3 + 改密 1 / 1（登录、权限、实时/报警、强制改密） |
 | 全量测试 | Server 531 / 532 → 补录 3 条英文对照后 **532 / 532**（6 分 42 秒）；Engine **392 / 392**；Collector **257 / 257**；Gateway **71 / 71** |
+
+---
+
+## 13. 2026-11-15：复核与收口
+
+本轮按「高 → 中 → 低」优先级处理第 5 节遗留项，并把新增门禁与测试接入既有流程。
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| 巨型视图 | TagsView 1142 → 697、AssetsView 986 → 724、DevicesView 883 → 408、ControlView 861 → 646；统一用「子组件持有 visible + `defineExpose({ open })`」 | `web/src/views/*`、`web/src/components/{tags,assets,devices,control}/` |
+| 设计器 | 再抽出 `useDesignerGestures`（Moveable/Selecto/视口）、`useDesignerConflict`（冲突与发布差异）、`useDesignerNodeEditing`（批量/样式）；主文件 1279 → 879 | `web/src/composables/useScreenDesigner.ts` |
+| MCP 双写 | 报警规则增删改改走 `AlarmRuleCommandService`，与 REST 共用映射、两级校验、落库与热加载；设备/测点此前已走命令服务 | `Mcp/McpMasterDataTools.cs`、`Services/AlarmRuleCommandService.cs` |
+| Mock 契约 | 新增 `scripts/check-mock-contract.mjs`，486 处 e2e mock 路由必须命中 `contract.ts` 的 303 条路由，已接入 `test:unit` | `web/scripts/check-mock-contract.mjs` |
+| 覆盖率 | 新增 `HistoryDownsamplerTests`（8）与 `GatewayAcquisitionRuntimeTests`（9）；Gateway.Host 基线 57.78 → **61.26**；顺带修复流式降采样丢失字符串 `Text` 的真实缺陷 | `tests/Scada.Engine.Tests`、`tests/Scada.Gateway.Tests`、`tools/coverage/coverage-baseline.json` |
+| 语言包 | i18n 改为顶层 await 按当前语言加载，中文站点不再携带英文包；LoginView 首屏 380 → 213 KB、Overview 522 → 353 KB（gzip），`build.target` 明确为 es2022 | `web/src/i18n/index.ts`、`web/vite.config.ts` |
+| 测试卫生 | 修复可移植 PDB 下找不到仓库根、演示画面数量断言过期、抖动报警固定延时、脚本工作进程 1s 超时、视口裁剪导致的过期 e2e 断言 | `tests/Scada.Engine.Tests/*`、`web/tests/designer-usability.spec.ts` |
+
+**仍待决策**
+
+- 多关键词跨字段搜索：当前契约是整词、大小写敏感匹配；改为分词/模糊/跨字段属于产品行为变更，未确认前保持现状。
+- Engine 覆盖率基线暂未上调：门禁按单份报告取最大覆盖行数，Server 报告对 Engine 的覆盖高于 Engine 自身报告，新增用例收益被掩盖；要精确棘轮需把门禁改为多报告行级并集统计。
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| 后端构建 | `dotnet build Scada.sln -c Release` 0 error |
+| 后端测试 | Engine **453 / 453**、Gateway **80 / 80**、MCP 主数据/API **36 / 36** |
+| 前端 | `vue-tsc`、`npm run build`（含包体积门禁）、ESLint、单测 **57 / 57**、mock 契约门禁通过 |
+| E2E | 设计器 **16 / 16**、国际化 **2 / 2**、核心冒烟 **3 / 3**、配置流程与目录筛选 **48 / 48** |
+
+## 14. 2026-11-15：P0 收口（限流分区 / HA 探测 / 自启告警）
+
+集中运维上线后，桌面终端成为主要流量来源。本轮只改三处会直接影响现场可用性的点，其余审计项按 P1/P2 排期。
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| 限流分区 | 已登录令牌桶从 `user:{id}` 改为 `user:{id}:ip:{终端地址}`。原因：控制室几十台操作台常用同一个只读账号自动登录，单台固定轮询约 48/min（报警条 2 请求/3s、版本检查 6/min、心跳 2/min），25 台即可打满 1200/min，随后操作员的确认/趋势/配置请求全部 429。改后每台终端各有配额，同一台机器的多标签页仍共享一个桶 | `Startup/ScadaResilience.cs` |
+| HA 探测豁免 | `/api/ha/role` 加入限流豁免（此前只豁免 `/api/ha/peer`）。桌面客户端每 30s 探一次主备角色，且该端点匿名可调，几百台终端同出口时会把 120/min 的匿名配额吃满，连带登录等匿名请求一起 429 | `Startup/ScadaResilience.cs`、`Ha/HaEndpoints.cs` |
+| 自启告警 | `AutostartRegistration.Apply` 返回值由 `bool + out warning` 改为结果记录；启动编排抽成 `AutostartStartup`。原写法 `Apply(...) && warning != null` 短路后失败分支永不落日志，现场只能看到"重启后没自启" | `Configuration/AutostartRegistration.cs`、`Configuration/AutostartStartup.cs`、`Program.cs`、`Ui/SettingsForm.cs` |
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build Scada.sln -c Release` | 0 error / 1 warning（`CollectorResilienceTests` 的存量 xUnit2017，与本次无关） |
+| 新增限流分区用例 | `RateLimitPartitionTests` 10 / 10（含 `/api/ha/role` 豁免、不同终端不同桶、同终端多标签同桶、无地址回退） |
+| 新增自启编排用例 | `AutostartStartupTests` 4 / 4（失败必须上报、成功不上报、安装器托管不算失败、参数透传） |
+| 桌面端全量 | 90 / 90 |
+| 服务端定向 | 限流 10 + 桌面客户端 API 4 + 主备集群 1 = 15 / 15（主备首跑超时，单跑复验通过；手动起两节点 9 秒完成选主，判定为并行会话争用下的启动抖动） |
+
+**仍未处理**：单台操作台 40/min 的报警轮询仍随终端数线性增长，限流不再误杀之后应补一条"N 终端 × 共享账号"的容量回归；桌面在线表的 50/账号淘汰、Registry 无锁读写、版本解析两份实现等 P1 项见本轮评审记录。
+
+## 15. 2026-11-15：P1 收口（在线表 / 并发 / 版本规则 / 阻塞判定 / 配置分层）
+
+P0 只处理了"会不会打满、会不会误杀"，本轮处理"线上数据准不准、配置会不会串层"。
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| 在线表容量 | 同账号上限 50 → 200；淘汰先挑离线记录，全部在线时才淘汰最久未上报并记 Warn（旧策略 51 台起会持续轮换：被踢的 30 秒后重注册，再踢下一台）；顺带补上 `workspace` 目标类型（`NormalizeTargetKind` 漏了它，既有用例一直是红的） | `Desktop/DesktopClientRegistry.cs` |
+| 并发一致性 | `Entry` 的所有读写（更新、快照投影、清理、淘汰排序）都进同一把记录级锁；快照不再可能读到 `int?`/`bool` 撕裂的中间态 | 同上 |
+| 心跳体积上限 | 处理器里的 `ContentLength` 判断在模型绑定之后，chunked 请求无长度可查，等于没有限制；改为端点元数据 `RequestSizeLimit(4096)`，由 Kestrel 在读体前直接 413 | `Desktop/DesktopClientEndpoints.cs` |
+| 版本规则单一实现 | Desktop 与 Server 各写一份的 `TryParse/IsBelow` 下沉到 `Scada.Core.Versioning.AppVersionRule`；Desktop 增加对 Core 的项目引用（Core 无第三方依赖） | `Core/Versioning/AppVersionRule.cs`、`Runtime/VersionPolicyEvaluator.cs`、`Desktop/DesktopClientPolicy.cs` |
+| 阻塞状态 | "被版本门禁挡住"改由服务端按上报版本判定，客户端自报的 `BlockedReason` 只作补充；快照新增 `online/blocked/outdated`（全量口径，不受 500 条列表截断影响），运维页显示"被挡/待升级"标签与 `workspace` 类型 | `Desktop/DesktopClientPolicy.cs`、`Desktop/DesktopClientRegistry.cs`、`web/src/views/OpsView.vue` |
+| 配置分层 | 保存时只把用户可编辑字段写回用户层，机器锁定字段保留用户层原值；`ClientIdentity.Ensure` 已有用户配置时只回写 ClientId。此前整份保存会把管理员下发的 serverUrl/target 沉淀为用户设置，撤掉机器配置后终端仍按旧目标跑 | `Configuration/DesktopConfigLayers.cs`、`Ui/SettingsForm.cs`、`Configuration/ClientIdentity.cs` |
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build Scada.sln -c Release` | 0 error / 1 warning（存量 xUnit2017） |
+| 版本规则 | `AppVersionRuleTests` 23 / 23 |
+| 桌面在线表 / 策略 | `DesktopClientRegistryTests` + `DesktopClientPolicyTests` 11 / 11（含 60 台不互踢、离线优先淘汰、blocked/outdated 计数） |
+| 桌面 API | 5 / 5（含端点元数据声明 4096 上限） |
+| 限流 / 加固 | 与桌面用例合并跑 31 / 31 |
+| 桌面端全量 | 94 / 94（含配置分层、ClientId 不回写机器值） |
+| 前端 | `npm run build`、i18n 4262 键、单测与 mock 契约通过；`api:types:check` 契约一致（响应覆盖 49/412） |
+
+**仍未处理**：`AutostartDecision` 只剩测试在用（规则在 `AutostartRegistration.Apply` 里另写了一份）。
+
+## 16. 2026-11-16：P2 收口（边界值 / 心跳周期 / 慢恢复 / 契约声明）
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| 机器配置边界值 | 手写或脚本生成的机器配置显式写 `"locked": null` 时，`Locked.Length` 会抛 NRE（客户端启动即崩）。改为 `is { Length: > 0 }` 模式匹配，两处调用点（解析、配准）都覆盖 | `Configuration/DesktopConfigResolver.cs`、`Configuration/ProvisionCommand.cs` |
+| HA 慢恢复 | 原实现第 3 次切换失败后永久暂停自动切换，注释却写"30/60/120 秒退避"（120 分支不可达）。改为 30/60 秒退避、第 3 次失败冷却 10 分钟：断网/主机重启这类瞬时故障过去后，无人值守终端能自己回到主机，不必人工重启；冷却结束计数清零，每窗口最多 3 次尝试 | `Runtime/HaFailoverCoordinator.cs` |
+| 心跳周期 | 服务端响应里的 `heartbeatSeconds` 是写死的 30，客户端也写死 30，配置无法生效。新增 `DesktopClient.HeartbeatSeconds`（10–600，默认 30），响应按配置下发；客户端首次与每次心跳后按返回值重排定时器 | `Core/Options/DesktopClientOptions.cs`、`Desktop/DesktopClientEndpoints.cs`、`Runtime/ClientHeartbeat.cs`、`Runtime/ClientForm.cs` |
+| 在线表分页 | 服务端最多返回 500 条，前端一次渲染全部行、15 秒轮询整体重绘。改为每页 20 行 + 分页（单页时隐藏），页面越界自动收敛到最后页 | `web/src/views/OpsView.vue` |
+| 导入错误完整性 | 工程导入迁移到 `ApplyChannelEndpointIssuesAsync`，把通道绑定的多条失败原因一次带出（原来只取首条，现场改一处、再导一次才发现下一处）；删除 `InspectAsync` / `ApplyChannelEndpointAsync` 两个只取首条的兼容包装 | `Projects/ProjectMasterDataApplier.cs`、`Services/DeviceCommandService.cs` |
+| 契约声明 | 两个桌面端点补 `.Produces<T>()`（此前契约里只有路由、没有响应模型，违反 §12 的"新增端点必须声明响应类型"）；响应覆盖 49/412 → **51/412**，基线同步更新 | `Desktop/DesktopClientEndpoints.cs`、`web/src/api/contract.ts`、`web/contract-coverage.json` |
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build src/Scada.Server -c Release` | 0 error（17 条 Core/Data 存量分析器告警） |
+| 桌面端全量 | 96 / 96（新增 HA 冷却重排、`locked: null` 边界） |
+| 服务端定向 | 桌面客户端 / 限流 / 工程应用 27 / 27 |
+| 前端 | `npm run build`、i18n 4262 键、单测 69 / 69、mock 契约通过；`api:types:check` 契约一致、响应覆盖 51/412 |
+
+**合并说明**：限流分区在并行会话里又演进为「身份 + 终端地址」，身份来自 `CredentialPartitionKey`（账号 / API 密钥 / 网关凭据），原先只处理登录用户的 `UserPartitionKey` 已成为死代码。本轮把它收敛成 `PartitionKey(http, identity)` 由限流器统一调用，用例改为断言真实路径，并补了 API 密钥与网关凭据各占一个桶的用例。
+
+**未做**：桌面包 Authenticode 签名需要可用的代码签名证书，仓库内只做 SHA256 校验；有证书后应在 `Build-DesktopPackage.ps1` 加签名 + 时间戳，并在 `package-manifest.mjs` 校验。全量 `dotnet build Scada.sln` 期间多次被并行会话的 `VBCSCompiler` / 运行中服务端锁住 `obj`、`bin`，最终以单项目构建 + 独立输出目录完成验证。
+
+## 17. 2026-11-16：部署姿态与终端运维闭环
+
+本轮处理"现场部署形态"与"终端运营闭环"，不改采集、历史与画面主链路。
+
+| 组 | 改动 | 关键位置 |
+| --- | --- | --- |
+| 客户端代理 | `ServerApiClient` 默认改用 `SocketsHttpHandler { UseProxy = false }`：企业镜像的系统代理会把回环/局域网请求也转给代理，表现为"浏览器能开、客户端连不上"（网关侧此前已踩过同一个坑） | `Api/ServerApiClient.cs` |
+| 反向代理 | 新增 `Scada:ReverseProxy`（默认关闭）：只有显式列出的 `KnownProxies` 发来的 `X-Forwarded-For/Proto` 才被信任，限流、IP 白名单、审计重新拿到真实客户端地址。启用却未列代理、或地址无法解析时启动失败；未启用但检测到 `X-Forwarded-For` 时每 5 分钟提示一次 | `Core/Options/ReverseProxyOptions.cs`、`Startup/ScadaResilience.cs`、`Middleware/ReverseProxyWarning.cs`、`Core/Options/ScadaSettingsValidation.cs` |
+| 策略热更新 | 桌面端两个端点改用 `IOptionsMonitor<ScadaSettings>`：`MinimumVersion`/`LatestVersion`/`HeartbeatSeconds` 保存后一个心跳周期生效，不必重启服务端（其他配置仍按原语义重启生效） | `Desktop/DesktopClientEndpoints.cs`、`tools/config-doc/generate.py` |
+| 升级提示 | `LatestVersion` 不再只写日志：客户端底部提示条显示可点击的"有新版本，点击下载"，没有 `DownloadUrl` 时提示联系管理员；文案与链接判定抽成 `DesktopUpdateNotice` 并有单测 | `Runtime/DesktopUpdateNotice.cs`、`Runtime/ClientForm.cs` |
+| 离线闭环 | 新增 `DesktopClientMonitor` 后台巡检（30 秒）：不打开运维页也能在服务端日志看到"终端离线/恢复"的一次性转换；运维页在全场离线时给出警示条 | `Desktop/DesktopClientMonitor.cs`、`Desktop/DesktopClientRegistry.cs`、`web/src/views/OpsView.vue` |
+| 运维可见性 | 快照补 `policy`（当前门禁）与 `truncated`（列表只含最近 500 台）；页面显示"最低/最新版本"、截断提示与 `blocked/outdated` 计数 | `Desktop/DesktopClientRegistry.cs`、`web/src/api/ops.ts`、`OpsView.vue` |
+| 心跳可测 | 心跳依赖抽成 `IHeartbeatClient`，新增 `ClientHeartbeatTests`（周期钳制、服务端下发后重排、异常吞掉）与 `DesktopUpdateNoticeTests` | `Api/IHeartbeatClient.cs`、`tests/Scada.Desktop.Tests/*` |
+| 配准防呆 | `--scope user` 在提权窗口下默认拒绝（否则写进管理员配置，现场表现为"配准成功但客户端没登录"），需显式 `--allow-elevated-user` | `Configuration/ProvisionCommand.cs` |
+| 状态清理 | 机器名改回原值即解除"机器名冲突"，不再挂到进程重启 | `Desktop/DesktopClientRegistry.cs` |
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| `dotnet build src/Scada.Server -c Release` | 0 error（17 条 Core/Data 存量分析器告警） |
+| `Scada.Core.Tests` | 129 / 129（含版本号、心跳/离线阈值、反向代理配置校验） |
+| `Scada.Desktop.Tests` | 112 / 112（含心跳周期、升级提示、提权配准守卫） |
+| 服务端定向（桌面客户端 / 限流分区） | 28 / 28 |
+| 前端 | `npm run build`、i18n 4266 键、单测 69 / 69、mock 契约通过；`api:types:check` 一致，覆盖 51/412 |
+| 配置文档 | `python tools/config-doc/generate.py --check` 通过（新增 `ReverseProxy` 与热更新说明） |
+
+**未做（需要单独一轮）**：`ClientForm` 899 行编排层拆分（HA/门禁/下载/心跳全部在 WinForms 事件里，属高风险重写，本轮先把纯逻辑抽出来并补测）；终端离线接入通知通道（需要先定"发给谁、静默时段、去重"）；静默自动升级（涉及安装器与回滚策略）；工作区仍有 188 个文件未提交，建议先按主题切分提交再继续。
+
+## 18. 2026-11-16：测试夹具临时目录泄漏与两条 flaky 用例
+
+本轮不改产品链路，只修「测试基础设施让结论不可信」的两类问题：一轮全量服务端测试会在系统
+临时目录留下几十个目录（本机累积到 **6809 个目录 / 17079 个文件 / 8.22 GB**）；两个用例
+在全量跑时偶发红灯、单跑必过。
+
+### 18.1 临时目录泄漏
+
+**现象**：`%TEMP%` 下 `scada-*` 前缀目录按来源分布为 `scada-authz-` 3169、`scada-center-test-` 2453、
+`scada-test-` 447、`scada-diag-` 139、`scada-history-` 117、`scada-pwd-` 101……几乎全部来自
+`Scada.Server.Tests` 的站点夹具。
+
+**根因（三层，缺任何一层都不会积到这个量）**
+
+| 层 | 说明 |
+| --- | --- |
+| 清池清单是硬编码的 | `TestSqlite.ClearPools` 只清 `config.db` / `runtime.db` / `scada.db`。站点夹具还会在 `history/` 下建按年月分片的 `raw_202611.db`、`agg_2026.db`，以及 `backups/`、`diag/`、`reports/` 里的库——这些池没清，文件句柄不释放，`Directory.Delete` 必然抛 `IOException` |
+| 删除失败被静默吞掉 | 36 处 `try { Directory.Delete(...) } catch { }`，失败即永久残留，没有任何观测点 |
+| 没有跨次运行的兜底 | 宿主（Kestrel / 后台服务 / 连接池）的句柄关闭晚于 `_factory.DisposeAsync()` 返回。实测并行跑时**2 秒窗口内也释放不了**，只有 testhost 退出后才释放；进程内的任何等待都无效 |
+
+**改动**
+
+- `ClearPools` 改为递归枚举目录下**所有** `*.db`，连接串按 4 种常见写法各清一次（清不存在的池是 no-op）。
+  「不清池的 Delete 必然失败」这个前提写进类型注释，避免下次又被简化回去。
+- `TryDeleteDirectory`：两轮短退避（20/40ms）→ 清池 → 仍失败则排进重试队列并登记兜底。
+  刻意不做 5 轮 620ms 的等待：句柄若是「进程活着就一直握着」，等再久也没用，反而让 599 个用例
+  多花约 4 分钟（实测 11m30s → 8m43s）。
+- 新增 `TryDeleteDirectoryAsync`：夹具收尾用，200ms 自适应窗口，成功即返回（多数用例零开销）。
+- 新增 `TempCleanup`：跨进程两层兜底——`ProcessExit` 时先 `ClearAllPools` 再删；登记时**立即**把路径追加到
+  `%TEMP%/scada-test-cleanup-pending.txt`（不能等 `ProcessExit` 再写：VSTest 宿主退出时不保证触发该事件，
+  实测依赖它会让清单永远为空），由 `ModuleInitializer` 在**下一次运行启动时**逐条删除并回收清单。
+  那时上一个 testhost 已退出、句柄必然释放，删除一定成功，残留不再逐次累积。
+- `Scada.Server.Tests` 里 14 个测试文件的清理调用全部收敛到 `TestSqlite`；`ExternalOpcUaTests` 的 PKI 根目录
+  此前完全没有清理；`McpResilienceTests` 的单文件库补 `-wal`/`-shm` 清理。
+
+**验证**
+
+| 项 | 结果 |
+| --- | --- |
+| 新增 `TestSqliteTests`（4 条） | 递归清池、WAL 池化连接删除、兜底登记、跨进程清单启动清理 |
+| 反向验证 | 把 `SearchOption.AllDirectories` 降为 `TopDirectoryOnly`，4 条里 2 条立即变红，证明用例测的是缺陷本身而不是空跑 |
+| 单类跑（`AuthorizationTests` 10 条） | 清理前每次留下 10 个目录；修复后**新增 0** |
+| 并行跑（`Authorization` + `McpApi` + `ExternalOpcUa`，43 用例） | 落盘 3 条、进程退出后实际残留 **0**，清单由下次启动回收 |
+| 全量 `Scada.Server.Tests` | 600 / 600 通过（含新增的 4 条清理回归）；单次全量新增残留由「每用例 1 个」降到 45–75 个（并行度不同有波动），且由跨进程清单在下次启动时清零 |
+| 耗时 | 11m30s（5 轮等待）→ 8m43s（2 轮）→ 10m57s（自适应 2 秒，无收益，回退到 200ms 后 8m22s） |
+
+### 18.2 两条 flaky 用例
+
+| 用例 | 根因 | 改动 |
+| --- | --- | --- |
+| `AlarmEngineFloodTests.Flood_MarksFirstOut_...` | `Recorder.WaitForAsync` 用 20ms 轮询 + 10 秒上限。全量跑时线程池被 400+ 用例抢满，轮询自身要排队，10 秒被耗尽——业务逻辑其实是对的，红的是等待方式 | 改 `SemaphoreSlim` 事件驱动（推送即唤醒），上限 30 秒，超时信息带上实际收到的通知序列，便于下次直接定位 |
+| `AlarmManagementTests.ConcurrentEscalationScansAndTriggersSendOnlyOnce` | runtime 用 `:memory:`，`TestRuntime.Factory(connection)` 把**同一个 `SqliteConnection` 交给多个 DbContext**。SQLite 单连接不支持并行命令，两个实例同时写发件箱就撞 `SQLITE_BUSY` / 连接占用；config 早就是文件库，唯独 runtime 漏了 | runtime 改文件库（与生产同构：每个上下文独立连接），清理不再用进程级 `ClearAllPools` |
+
+**验证**：Engine 全量 453 / 453（连跑 4 轮）；改动后的并发用例单跑连跑 5 次全绿，且不再产生
+`outbox-*.db` 残留。
+
+### 未做
+
+1. `Collector.Tests` / `Engine.Tests` / `Desktop.Tests` 仍各有自己的 `TempDir`，没有接入 `TempCleanup`。
+   残留量小（`scada-trace-` 70、`scada-retention-` 20、`scada-objects-` 等），但同一类缺陷还在；
+   接共享测试库才能一次收口。
+2. 本机 **6809 个历史残留（8.22 GB）** 不在待清理清单里（清单只覆盖本轮之后的失败项），
+   需要人工确认后按前缀批量删除。删除前建议先 `Get-ChildItem` 核对时间范围，避免误删正在跑的会话目录。
+3. `McpOperationsTests` 在第五次全量里出现过一次 `Test Class Cleanup Failure: NullReferenceException`
+   （单跑 10 / 10 通过，同一份代码前四次全量未复现），属并行下的既有偶发；xUnit 只打了消息、没带堆栈，
+   下次复现要先抓完整输出再定位。
+4. `ClientForm` 916 行编排层拆分、`MCP`/`REST` 双写收敛、`Gateway.Host` 覆盖率（59.64%，全仓最低）
+   仍按第 17 节的排期，未在本轮触碰。

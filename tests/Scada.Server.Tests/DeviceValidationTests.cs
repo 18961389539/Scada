@@ -44,9 +44,13 @@ public sealed class DeviceValidationTests : IClassFixture<AuthorizationTests.Sit
 
         var second = await admin.PostAsJsonAsync("/api/devices", Rtu(Unique("串口独占"), port));
         Assert.Equal(HttpStatusCode.BadRequest, second.StatusCode);
-        var message = await MessageAsync(second);
+        var body = await second.Content.ReadFromJsonAsync<JsonElement>();
+        var message = body.GetProperty("message").GetString() ?? "";
         Assert.Contains("占用", message);
         Assert.Contains(port, message);
+        var issue = body.GetProperty("issues")[0];
+        Assert.Equal("device.serial.portConflict", issue.GetProperty("code").GetString());
+        Assert.Equal("serialPort", issue.GetProperty("field").GetString());
     }
 
     [Fact]

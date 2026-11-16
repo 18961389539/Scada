@@ -1,5 +1,5 @@
 import type { ScreenDocument } from './model'
-import { palette } from './model'
+import { NODE_TYPES } from './nodeSpecs'
 
 export interface EditorState { name: string; document: ScreenDocument }
 export interface LocalScreenDraft { version: 1; baseRevision: number; baseSnapshot: string; snapshot: string; savedAt: number }
@@ -15,7 +15,7 @@ export function parseEditorState(source: string): EditorState | null {
       || !Number.isFinite(document.width) || document.width < 320 || document.width > 7680
       || !Number.isFinite(document.height) || document.height < 200 || document.height > 4320
       || typeof document.background !== 'string' || !Array.isArray(document.nodes) || document.nodes.length > 1000) return null
-    const types = new Set([...palette.map(item => item.type), 'symbol', 'template'])
+    const types = new Set<string>(NODE_TYPES)
     if (!document.nodes.every(node => node && typeof node.id === 'string' && types.has(node.type)
       && [node.x, node.y, node.width, node.height, node.rotation, node.min, node.max, node.activeThreshold, node.decimals].every(value => value == null || Number.isFinite(value))
       && (node.decimals == null || node.decimals >= 0 && node.decimals <= 6)

@@ -185,6 +185,6 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
             Assert.True(auto.Verify([1, 2, 3], sig, thumb).Valid);
             Assert.False(auto.Verify([1, 2, 3], sig, "00").Valid);
         }
-        finally { Directory.Delete(dir, true); }
+        finally { TestSqlite.TryDeleteDirectory(dir); }
     }
 }

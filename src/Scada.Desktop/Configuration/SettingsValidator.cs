@@ -2,7 +2,7 @@ namespace Scada.Desktop.Configuration;
 
 internal static class SettingsValidator
 {
-    public static readonly string[] TargetKinds = ["screen", "layout", "workstation"];
+    public static readonly string[] TargetKinds = ["screen", "layout", "workstation", "workspace"];
 
     /// <summary>
     /// 规范化服务器地址：允许省略 scheme，但只接受 http/https 根地址，防止误填到子路径后
@@ -57,7 +57,7 @@ internal static class SettingsValidator
         settings.ServerUrl = url;
 
         settings.Target.Kind = (settings.Target.Kind ?? string.Empty).Trim().ToLowerInvariant();
-        if (!TargetKinds.Contains(settings.Target.Kind)) return "请选择要显示的组态画面或运行布局";
+        if (!TargetKinds.Contains(settings.Target.Kind)) return "请选择要显示的组态画面、运行布局或工作台";
 
         switch (settings.Target.Kind)
         {

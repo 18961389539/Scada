@@ -145,7 +145,12 @@ public sealed class AuditInterceptor(IServiceProvider services) : SaveChangesInt
             // 回填必须走同一个 DbContext：端点自己开事务时，另开连接会等配置库的写锁（最长 5 秒）。
             if (PatchLateIds(context, state)) await context.SaveChangesAsync(cancellationToken);
             var drainer = services.GetService<AuditOutboxDrainer>();
-            if (drainer is not null)
+            // 调用方自己开了事务时不能在 SavedChanges 阶段另开配置库连接：连接初始化会执行
+            // PRAGMA journal_mode / auto_vacuum，写事务未提交时这些语句要抢库级锁，
+            // 而拦截器里的原生 DbCommand 不受 EF 的 SetCommandTimeout 约束，会一直等到
+            // 默认的 30 秒命令超时，把一次配置保存拖成 HTTP 504。发件箱行已经随业务事务
+            // 落库，提交后由后台补投即可（SourceId 保证不会重复）。
+            if (drainer is not null && context.Database.CurrentTransaction is null)
                 // 内联投递不删行（删行要抢配置库写锁），因此积压会累积；每次都按整批上限投，
                 // 否则新写的审计会被前面留下的旧行挤出 maxRows，表现为"这一条没审计"。
                 await drainer.TryDrainAsync(AuditOutboxDrainer.BatchSize, AuditOutboxDrainer.InlineTimeoutSeconds, cancellationToken);

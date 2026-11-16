@@ -1,0 +1,1821 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>多页面宿主与布局编排示例 · HMI LAB</title>
+<style>
+:root,
+:root[data-theme="night"] {
+  --bg: #070c11;
+  --bg-2: #0a1219;
+  --panel: #0d161f;
+  --panel-2: #111d27;
+  --line: rgba(126, 176, 198, 0.16);
+  --line-strong: rgba(126, 176, 198, 0.34);
+  --text: #d8e6ee;
+  --muted: #7d94a4;
+  --faint: #556c7b;
+  --accent: #3ee08d;
+  --accent-ink: #04140c;
+  --accent-2: #ffb454;
+  --danger: #ff6b5e;
+  --warning: #ffce5c;
+  --grid: rgba(126, 176, 198, 0.05);
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  --font: "Bahnschrift", "DIN Alternate", "Microsoft YaHei UI", "PingFang SC", sans-serif;
+  --mono: "Cascadia Mono", "Consolas", "SF Mono", monospace;
+  --radius: 6px;
+}
+:root[data-theme="day"] {
+  --bg: #e8edf0;
+  --bg-2: #f2f6f8;
+  --panel: #fbfdfe;
+  --panel-2: #eef4f6;
+  --line: rgba(19, 51, 66, 0.14);
+  --line-strong: rgba(19, 51, 66, 0.3);
+  --text: #142229;
+  --muted: #5b7180;
+  --faint: #8697a2;
+  --accent: #087f4c;
+  --accent-ink: #f2fff9;
+  --accent-2: #a86400;
+  --danger: #bd2f26;
+  --warning: #9a6a00;
+  --grid: rgba(19, 51, 66, 0.05);
+  --shadow: 0 18px 40px rgba(30, 60, 75, 0.14);
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  display: grid;
+  grid-template-rows: 58px minmax(0, 1fr);
+  overflow: hidden;
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+button { font-family: inherit; }
+.topbar, .app { position: relative; z-index: 1; }
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--panel), var(--bg-2));
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand .mark {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--accent);
+  transform: rotate(45deg);
+  position: relative;
+  flex: none;
+}
+.brand .mark::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  background: var(--accent);
+}
+.brand b { display: block; font-size: 14px; letter-spacing: 0.14em; font-weight: 600; }
+.brand small { display: block; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; margin-top: 2px; }
+.topright { display: flex; align-items: center; gap: 12px; }
+.site { font-family: var(--mono); font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; letter-spacing: 0.04em; }
+.site i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+.clock { font-family: var(--mono); font-size: 13px; color: var(--text); letter-spacing: 0.06em; min-width: 66px; text-align: right; }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--bg-2); }
+.seg button {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.seg button.on { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.theme-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: var(--radius);
+  padding: 5px 9px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+.app {
+  display: grid;
+  grid-template-columns: 238px minmax(0, 1fr) 292px;
+  min-height: 0;
+}
+.rail {
+  border-right: 1px solid var(--line);
+  background: var(--bg-2);
+  padding: 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.rail-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--faint);
+}
+.rail-head b { font-family: var(--mono); font-weight: 500; color: var(--muted); }
+.rail-group { display: flex; flex-direction: column; gap: 3px; }
+.rail-label { font-size: 10px; letter-spacing: 0.14em; color: var(--faint); padding: 8px 8px 4px; }
+.page-link {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 2px solid transparent;
+  color: var(--muted);
+  padding: 9px 8px;
+  cursor: pointer;
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.page-link:hover { background: var(--panel); color: var(--text); }
+.page-link.on { background: var(--panel-2); color: var(--text); border-left-color: var(--accent); }
+.page-link .idx { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.page-link b { display: block; font-size: 13px; font-weight: 500; }
+.page-link small { display: block; margin-top: 2px; font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.page-link.locked { opacity: 0.62; }
+.page-link .lock {
+  font-size: 9px;
+  color: var(--accent-2);
+  border: 1px solid color-mix(in srgb, var(--accent-2) 42%, transparent);
+  padding: 2px 5px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.rail-foot { margin-top: auto; padding: 10px 8px 4px; border-top: 1px solid var(--line); }
+.rail-foot .cap { font-size: 9px; letter-spacing: 0.14em; color: var(--faint); margin-bottom: 6px; }
+.rail-foot p { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  padding: 6px 10px 0;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  min-height: 38px;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-bottom: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius) var(--radius) 0 0;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  user-select: none;
+}
+.tab.on { background: var(--panel); color: var(--text); border-color: var(--line-strong); box-shadow: inset 0 2px 0 var(--accent); }
+.tab-id { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.tab-x { color: var(--faint); padding: 0 3px; border-radius: 3px; }
+.tab-x:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.tabs-empty { color: var(--faint); font-size: 11px; padding: 8px 4px; }
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 12px;
+}
+.icon-btn, .btn {
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+}
+.icon-btn { padding: 6px 9px; font-family: var(--mono); }
+.icon-btn:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn.ghost { background: transparent; }
+.btn.danger { border-color: color-mix(in srgb, var(--danger) 55%, transparent); color: var(--danger); background: transparent; }
+.btn.danger:hover { background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.switch { display: flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; user-select: none; }
+.switch input { accent-color: var(--accent); }
+.route {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.spacer { flex: 1; }
+.outlet { flex: 1; overflow: auto; padding: 16px; min-height: 0; }
+.page { animation: rise 0.18s ease; }
+.page[hidden] { display: none !important; }
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 14px;
+}
+.eyebrow { font-family: var(--mono); font-size: 10px; letter-spacing: 0.08em; color: var(--faint); }
+.eyebrow .pub { color: var(--accent); }
+.eyebrow .draft { color: var(--accent-2); }
+.page-head h1 { margin: 4px 0 2px; font-size: 22px; font-weight: 600; letter-spacing: 0.02em; }
+.sub { margin: 0; color: var(--muted); font-size: 12px; }
+.head-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.hint-inline { color: var(--muted); font-size: 11px; align-self: center; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.metric {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+}
+.metric::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.6;
+}
+.metric-label { font-size: 11px; letter-spacing: 0.06em; color: var(--muted); }
+.metric-line { display: flex; align-items: baseline; gap: 6px; margin-top: 6px; }
+.metric-value { font-family: var(--mono); font-size: 26px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.metric-unit { font-size: 11px; color: var(--faint); }
+.metric-spark { margin-top: 6px; height: 26px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 10px; }
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  min-width: 0;
+}
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.chart { display: block; width: 100%; height: 120px; }
+.legend { display: flex; gap: 10px; font-size: 10px; color: var(--muted); letter-spacing: 0; }
+.legend i { display: inline-block; width: 10px; height: 2px; vertical-align: middle; margin-right: 4px; }
+.event-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.event-list li { display: grid; grid-template-columns: 56px 8px minmax(0, 1fr); gap: 7px; align-items: center; font-size: 11px; color: var(--muted); }
+.ev-time { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.ev-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.ev-dot[data-level="严重"] { background: var(--danger); }
+.ev-dot[data-level="警告"] { background: var(--warning); }
+.ev-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.process { display: flex; align-items: center; padding: 18px 4px 6px; min-height: 150px; }
+.tank {
+  width: 96px;
+  height: 132px;
+  border: 1px solid var(--line-strong);
+  position: relative;
+  overflow: hidden;
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  background: var(--panel-2);
+  flex: none;
+}
+.tank-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 34%, transparent), color-mix(in srgb, var(--accent) 12%, transparent));
+  border-top: 1px solid var(--accent);
+  transition: height 0.6s ease;
+}
+.tank span { position: relative; z-index: 1; font-size: 11px; color: var(--muted); }
+.tank b { position: relative; z-index: 1; font-family: var(--mono); font-size: 18px; margin-bottom: 8px; }
+.pipe {
+  flex: 1;
+  height: 6px;
+  background: repeating-linear-gradient(90deg, var(--line-strong) 0 8px, transparent 8px 14px);
+  position: relative;
+}
+.pipe::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background: var(--line);
+}
+.pipe.flow::after {
+  top: -3px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: flow 1.6s linear infinite;
+}
+.pump {
+  width: 64px;
+  height: 64px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  position: relative;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 10px;
+  flex: none;
+}
+.pump::before {
+  content: "";
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  border: 1px dashed var(--accent);
+  border-radius: 50%;
+  animation: spin 4s linear infinite;
+}
+.valve {
+  width: 52px;
+  height: 52px;
+  border: 1px solid var(--accent-2);
+  transform: rotate(45deg);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.valve span { transform: rotate(-45deg); font-family: var(--mono); font-size: 10px; color: var(--accent-2); }
+.bars { display: flex; flex-direction: column; gap: 10px; }
+.bar-row { display: grid; grid-template-columns: 88px minmax(0, 1fr) 48px; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+.bar-track { height: 6px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); transition: width 0.4s ease; }
+.bar-fill.amber { background: var(--accent-2); }
+.status-chip { color: var(--accent); border: 1px solid var(--accent); padding: 2px 7px; font-size: 10px; letter-spacing: 0.08em; }
+.status-chip.bad { color: var(--danger); border-color: var(--danger); }
+.kv-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.kv-table th, .kv-table td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); }
+.kv-table th { color: var(--faint); font-weight: 400; font-size: 10px; letter-spacing: 0.08em; }
+.kv-table td.num { font-family: var(--mono); text-align: right; }
+.kv-table tr:last-child td { border-bottom: none; }
+.filter-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.chip-btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.chip-btn b { font-family: var(--mono); font-weight: 500; margin-left: 3px; }
+.chip-btn.on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.alarm-list { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+.alarm-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) 92px 70px;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  background: var(--panel);
+}
+.alarm-row:last-child { border-bottom: none; }
+.level {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  padding: 3px 6px;
+  border-radius: 2px;
+  text-align: center;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+}
+.level[data-level="严重"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 48%, transparent); background: color-mix(in srgb, var(--danger) 9%, transparent); }
+.level[data-level="警告"] { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 48%, transparent); background: color-mix(in srgb, var(--warning) 9%, transparent); }
+.alarm-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alarm-time { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.ack {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  padding: 4px 6px;
+  font-size: 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.ack.on { color: var(--accent); border-color: var(--accent); }
+.empty { padding: 18px; text-align: center; color: var(--faint); font-size: 12px; }
+.result-panel { display: flex; align-items: center; gap: 14px; }
+.result-badge { font-size: 11px; letter-spacing: 0.1em; border: 1px solid var(--accent); color: var(--accent); padding: 7px 12px; }
+.result-badge.bad { color: var(--danger); border-color: var(--danger); }
+.pass-bar { flex: 1; min-width: 0; }
+.config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.meta-list { display: flex; flex-direction: column; }
+.meta-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.meta-row:last-child { border-bottom: none; }
+.meta-row span { color: var(--muted); }
+.meta-row b { font-family: var(--mono); font-weight: 500; text-align: right; }
+.action-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.notice { border-left: 2px solid var(--accent-2); background: color-mix(in srgb, var(--accent-2) 8%, transparent); padding: 10px 12px; color: var(--muted); font-size: 12px; line-height: 1.6; margin: 12px 0 0; }
+.layout-page { display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 250px); min-height: 520px; }
+.layout-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 10px; min-height: 0; }
+.region { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.region-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.region-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.region-title b { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.region-title span { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.region-actions { display: flex; gap: 2px; flex: none; }
+.region-actions button {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+}
+.region-actions button:hover { border-color: var(--line-strong); color: var(--accent); }
+.region-body { flex: 1; overflow: hidden; padding: 8px; min-height: 0; }
+.region-body .page-head { padding-bottom: 6px; margin-bottom: 8px; }
+.region-body .page-head h1 { font-size: 15px; margin: 2px 0; }
+.region-body .eyebrow { font-size: 9px; }
+.region-body .sub { display: none; }
+.region-body .head-actions { display: none; }
+.region-body .kpi-grid { gap: 6px; margin-bottom: 6px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.region-body .metric { padding: 6px 8px; }
+.region-body .metric-value { font-size: 17px; }
+.region-body .metric-label { font-size: 9px; }
+.region-body .metric-spark { height: 18px; }
+.region-body .split { grid-template-columns: 1fr; }
+.region-body .hide-in-region { display: none; }
+.region-body .chart { height: 54px; }
+.region-body .card { padding: 8px; }
+.region-body .card-head { font-size: 9px; margin-bottom: 4px; }
+.region-body .process { min-height: 100px; padding: 8px 0; }
+.region-body .tank { width: 60px; height: 84px; }
+.region-body .tank b { font-size: 13px; }
+.region-body .pump { width: 44px; height: 44px; }
+.region-body .valve { width: 38px; height: 38px; }
+.region-body .bars { gap: 6px; }
+.region-body .bar-row { grid-template-columns: 60px minmax(0, 1fr) 38px; font-size: 9px; }
+.region-body .filter-row { display: none; }
+.region-body .alarm-row { grid-template-columns: 46px minmax(0, 1fr); gap: 6px; padding: 6px 8px; font-size: 10px; }
+.region-body .alarm-row .alarm-time,
+.region-body .alarm-row .ack { display: none; }
+.alarm-strip { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); min-height: 40px; overflow: hidden; }
+.alarm-strip .cap { font-size: 9px; letter-spacing: 0.14em; color: var(--danger); flex: none; }
+.strip-items { display: flex; gap: 18px; overflow: hidden; white-space: nowrap; }
+.strip-item { font-size: 11px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.strip-item i { width: 5px; height: 5px; border-radius: 50%; background: var(--danger); flex: none; }
+.page-error { border: 1px solid var(--danger); background: color-mix(in srgb, var(--danger) 7%, var(--panel)); padding: 22px; border-radius: var(--radius); }
+.err-badge { display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--danger); border: 1px solid var(--danger); padding: 3px 7px; margin-bottom: 10px; }
+.page-error h2 { margin: 0 0 6px; font-size: 18px; }
+.page-error p { margin: 0 0 8px; color: var(--muted); font-size: 12px; }
+.page-error .hint { color: var(--faint); }
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 8, 12, 0.68);
+  backdrop-filter: blur(3px);
+  display: grid;
+  place-items: center;
+  z-index: 50;
+  padding: 24px;
+  animation: fade 0.14s ease;
+}
+.popup {
+  width: min(880px, 100%);
+  max-height: 82vh;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.popup-head { display: flex; justify-content: space-between; align-items: flex-start; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--panel-2); }
+.popup-head h2 { margin: 2px 0 0; font-size: 18px; font-weight: 600; }
+.popup-body { padding: 16px; overflow: auto; }
+.inspector { border-left: 1px solid var(--line); background: var(--bg-2); padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+.ins-section { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 10px 12px; }
+.ins-title { font-size: 10px; letter-spacing: 0.14em; color: var(--faint); margin-bottom: 8px; }
+.count-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.count { background: var(--bg-2); border: 1px solid var(--line); padding: 8px; }
+.count b { display: block; font-family: var(--mono); font-size: 20px; font-weight: 600; }
+.count span { font-size: 9px; letter-spacing: 0.08em; color: var(--faint); }
+.log-list { display: flex; flex-direction: column; gap: 6px; font-size: 11px; max-height: 230px; overflow: auto; }
+.log-item { display: grid; grid-template-columns: 52px 56px minmax(0, 1fr); gap: 6px; align-items: baseline; color: var(--muted); }
+.log-time { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+.log-tag { font-family: var(--mono); font-size: 9px; text-transform: uppercase; padding: 1px 3px; border: 1px solid var(--line-strong); text-align: center; color: var(--muted); }
+.log-tag.mount { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.log-tag.unmount { color: var(--faint); }
+.log-tag.navigate, .log-tag.popup, .log-tag.region, .log-tag.cache, .log-tag.role { color: var(--accent-2); }
+.log-tag.error, .log-tag.deny { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.log-tag.publish, .log-tag.alarm { color: var(--accent); }
+.log-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 6px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+  flex-wrap: wrap;
+}
+.statusbar b { color: var(--muted); font-weight: 500; }
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translate(-50%, 12px);
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  padding: 8px 14px;
+  font-size: 12px;
+  border-radius: 999px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 60;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.toast.on { opacity: 1; transform: translate(-50%, 0); }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes flow { from { background-position: -60px 0; } to { background-position: 60px 0; } }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 1180px) {
+  .app { grid-template-columns: 210px minmax(0, 1fr); }
+  .inspector { display: none; }
+}
+@media (max-width: 820px) {
+  body { overflow: auto; grid-template-rows: auto auto; height: auto; min-height: 100vh; }
+  .app { grid-template-columns: 1fr; }
+  .rail { flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--line); }
+  .rail-head, .rail-label, .rail-foot { display: none; }
+  .rail-group { flex-direction: row; }
+  .page-link { width: auto; }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .split, .config-grid { grid-template-columns: 1fr; }
+  .layout-page { height: auto; min-height: 0; }
+  .layout-grid { height: auto; grid-template-columns: 1fr; grid-template-rows: repeat(4, 320px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="mark"></span>
+    <div>
+      <b>MULTIPAGE / HMI LAB</b>
+      <small>页面资源 · 宿主 · 导航 · 布局编排</small>
+    </div>
+  </div>
+  <div class="topright">
+    <span class="site"><i></i>DEMO SITE · LOCAL</span>
+    <span class="clock" id="clock">--:--:--</span>
+    <div class="seg" id="roleSwitch">
+      <button data-role="operator" class="on">操作员</button>
+      <button data-role="engineer">工程师</button>
+    </div>
+    <button class="theme-btn" id="themeBtn">日间模式</button>
+  </div>
+</header>
+
+<div class="app">
+  <aside class="rail">
+    <div class="rail-head"><span>页面资源</span><b id="pageCount">7</b></div>
+    <div id="pageList"></div>
+    <div class="rail-foot">
+      <div class="cap">CONTRACT</div>
+      <p>页面可寻址、版本可发布、权限可过滤；多页面同屏由布局和区域编排，不复制窗口。</p>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="tabs" id="tabs"></div>
+    <div class="toolbar">
+      <button class="icon-btn" id="backBtn" title="后退（浏览器历史）">←</button>
+      <button class="icon-btn" id="forwardBtn" title="前进（浏览器历史）">→</button>
+      <label class="switch"><input type="checkbox" id="cacheToggle" checked>页面缓存</label>
+      <span class="route" id="routeLabel">#/page/overview</span>
+      <span class="spacer"></span>
+      <button class="btn ghost" data-nav="layout">多画面编排</button>
+    </div>
+    <div class="outlet" id="outlet"></div>
+    <div class="statusbar">
+      <span>ROUTE <b id="statRoute">#/page/overview</b></span>
+      <span>TABS <b id="statTabs">0</b></span>
+      <span>MOUNTED <b id="statMounted">0</b></span>
+      <span>SUBSCRIPTIONS <b id="statSubs">0</b></span>
+      <span>ROLE <b id="statRole">操作员</b></span>
+    </div>
+  </main>
+
+  <aside class="inspector">
+    <section class="ins-section">
+      <div class="ins-title">CURRENT PAGE</div>
+      <div class="meta-list" id="curPage"></div>
+    </section>
+    <section class="ins-section">
+      <div class="ins-title">LIFECYCLE / AUDIT</div>
+      <div class="log-list" id="logList"></div>
+    </section>
+    <section class="ins-section">
+      <div class="ins-title">RUNTIME</div>
+      <div class="count-grid">
+        <div class="count"><b id="countTabs">0</b><span>打开标签</span></div>
+        <div class="count"><b id="countMounted">0</b><span>挂载实例</span></div>
+        <div class="count"><b id="countSubs">0</b><span>实时订阅</span></div>
+        <div class="count"><b id="countAlarms">0</b><span>未确认报警</span></div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+const fmt = new Intl.NumberFormat('zh-CN');
+
+const state = {
+  boiler: {
+    temp: 94.2,
+    pressure: 1.7,
+    level: 56.5,
+    flow: 78.1,
+    tempHist: Array.from({ length: 40 }, (_, i) => 92 + Math.sin(i / 5) * 2.4),
+    levelHist: Array.from({ length: 40 }, (_, i) => 54 + Math.cos(i / 6) * 3)
+  },
+  line: {
+    total: 150034,
+    good: 147033,
+    reject: 3000,
+    cycle: 12.4,
+    run: true,
+    outputHist: Array.from({ length: 40 }, (_, i) => 970 + Math.sin(i / 4) * 20)
+  },
+  quality: {
+    voltage: 222.5,
+    current: 1.9,
+    insulation: 506.2,
+    speed: 1474.9,
+    pass: 98.4
+  },
+  load: {
+    power: Array.from({ length: 40 }, (_, i) => 58 + Math.sin(i / 5) * 8),
+    water: Array.from({ length: 40 }, (_, i) => 46 + Math.cos(i / 7) * 6)
+  },
+  alarms: [
+    { id: 'A-1042', level: '严重', text: '过热器出口汽温高', time: '20:37:59', acked: false },
+    { id: 'A-1039', level: '警告', text: '空压机排气温度偏高', time: '20:31:12', acked: false },
+    { id: 'A-1031', level: '提示', text: '循环水箱液位低', time: '20:18:44', acked: true },
+    { id: 'A-1028', level: '警告', text: '装配线节拍偏离目标', time: '20:05:07', acked: false },
+    { id: 'A-1019', level: '严重', text: '出水 COD 超限', time: '19:52:31', acked: true },
+    { id: 'A-1014', level: '提示', text: '过滤器压差上升', time: '19:40:02', acked: false }
+  ]
+};
+
+const PAGES = {
+  overview: {
+    name: '全厂总览',
+    group: '运行监视',
+    version: 'r12',
+    published: true,
+    roles: ['operator', 'engineer'],
+    view: overviewView,
+    mount: mountOverview
+  },
+  boiler: {
+    name: '锅炉房',
+    group: '运行监视',
+    version: 'r9',
+    published: true,
+    roles: ['operator', 'engineer'],
+    view: boilerView,
+    mount: mountBoiler
+  },
+  line: {
+    name: '装配线',
+    group: '运行监视',
+    version: 'r7',
+    published: true,
+    roles: ['operator', 'engineer'],
+    view: lineView,
+    mount: mountLine
+  },
+  quality: {
+    name: '检测台',
+    group: '运行监视',
+    version: 'r5',
+    published: true,
+    roles: ['operator', 'engineer'],
+    view: qualityView,
+    mount: mountQuality
+  },
+  alarms: {
+    name: '报警中心',
+    group: '运行监视',
+    version: 'r11',
+    published: true,
+    roles: ['operator', 'engineer'],
+    view: alarmsView,
+    mount: mountAlarms
+  },
+  layout: {
+    name: '多画面编排',
+    group: '编排',
+    version: 'r3',
+    published: true,
+    roles: ['operator', 'engineer'],
+    view: layoutView,
+    mount: mountLayout
+  },
+  config: {
+    name: '参数配置',
+    group: '工程',
+    version: 'r2',
+    published: false,
+    roles: ['engineer'],
+    view: configView,
+    mount: mountConfig
+  }
+};
+
+const REGION_PAGES = ['overview', 'boiler', 'line', 'quality', 'alarms'];
+
+let role = 'operator';
+let activeId = null;
+const open = new Map();
+let mountedCount = 0;
+let configFailOnce = false;
+let popup = null;
+let toastTimer = null;
+
+const bus = {
+  listeners: new Set(),
+  subscribe(fn) {
+    this.listeners.add(fn);
+    updateStatus();
+    return () => {
+      this.listeners.delete(fn);
+      updateStatus();
+    };
+  },
+  emit() {
+    for (const fn of [...this.listeners]) {
+      try {
+        fn();
+      } catch (error) {
+        console.error(error);
+      }
+    }
+  }
+};
+
+const outlet = $('#outlet');
+const tabsEl = $('#tabs');
+const railList = $('#pageList');
+const logList = $('#logList');
+const cacheToggle = $('#cacheToggle');
+const clockEl = $('#clock');
+const themeBtn = $('#themeBtn');
+
+function allowed(id) {
+  return Boolean(PAGES[id]) && PAGES[id].roles.includes(role);
+}
+
+function pageIdsForRole() {
+  return Object.keys(PAGES).filter(id => allowed(id));
+}
+
+function regionPageIds() {
+  return REGION_PAGES.filter(id => allowed(id));
+}
+
+function cacheEnabled() {
+  return cacheToggle.checked;
+}
+
+function openAlarmCount() {
+  return state.alarms.filter(item => !item.acked).length;
+}
+
+function walk(value, step, min, max) {
+  return Math.min(max, Math.max(min, value + (Math.random() - 0.5) * step));
+}
+
+function setK(root, key, value) {
+  const node = root.querySelector('[data-k="' + key + '"]');
+  if (node) node.textContent = value;
+}
+
+function metric(label, value, unit, key, spark) {
+  return `<div class="metric">
+    <div class="metric-label">${label}</div>
+    <div class="metric-line"><span class="metric-value" data-k="${key}">${value}</span><span class="metric-unit">${unit}</span></div>
+    ${spark ? `<div class="metric-spark" data-spark="${spark}"></div>` : ''}
+  </div>`;
+}
+
+function pageHead(id, subtitle, actions = '') {
+  const def = PAGES[id];
+  return `<header class="page-head">
+    <div>
+      <div class="eyebrow">PAGE / ${id} · <span data-ver>${def.version}</span> · <span data-pub class="${def.published ? 'pub' : 'draft'}">${def.published ? '已发布' : '草稿'}</span></div>
+      <h1>${def.name}</h1>
+      <p class="sub">${subtitle}</p>
+    </div>
+    <div class="head-actions">${actions}</div>
+  </header>`;
+}
+
+function syncMeta(root, id) {
+  const def = PAGES[id];
+  const ver = root.querySelector('[data-ver]');
+  if (ver) ver.textContent = def.version;
+  const pub = root.querySelector('[data-pub]');
+  if (pub) {
+    pub.textContent = def.published ? '已发布' : '草稿';
+    pub.className = def.published ? 'pub' : 'draft';
+  }
+}
+
+function lineChart(series, height = 120, showGrid = true) {
+  const width = 560;
+  const padY = 10;
+  const all = series.flatMap(item => item.values);
+  const min = Math.min(...all);
+  const max = Math.max(...all);
+  const span = max - min || 1;
+  const grid = showGrid
+    ? [0, 0.25, 0.5, 0.75, 1].map(t => {
+        const y = padY + (height - padY * 2) * t;
+        return `<line x1="0" y1="${y}" x2="${width}" y2="${y}" stroke="var(--line)" stroke-width="1"/>`;
+      }).join('')
+    : '';
+  const lines = series.map(item => {
+    const points = item.values.map((value, index) => {
+      const x = (index / (item.values.length - 1)) * width;
+      const y = padY + (1 - (value - min) / span) * (height - padY * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    return `<polyline points="${points}" fill="none" stroke="${item.color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="chart">${grid}${lines}</svg>`;
+}
+
+function sparkFor(kind) {
+  const map = {
+    temp: { values: state.boiler.tempHist, color: 'var(--accent)' },
+    level: { values: state.boiler.levelHist, color: 'var(--accent)' },
+    output: { values: state.line.outputHist, color: 'var(--accent-2)' },
+    pass: { values: state.load.water, color: 'var(--accent)' }
+  };
+  return map[kind] ? lineChart([map[kind]], 26, false) : '';
+}
+
+function paintSparks(root) {
+  $$('[data-spark]', root).forEach(node => {
+    node.innerHTML = sparkFor(node.dataset.spark);
+  });
+}
+
+function loadChart() {
+  return lineChart([
+    { values: state.load.power, color: 'var(--accent)' },
+    { values: state.load.water, color: 'var(--accent-2)' }
+  ], 120);
+}
+
+function outputChart() {
+  return lineChart([{ values: state.line.outputHist, color: 'var(--accent)' }], 120);
+}
+
+function alarmRow(item) {
+  return `<div class="alarm-row">
+    <span class="level" data-level="${item.level}">${item.level}</span>
+    <span class="alarm-text">${item.text}</span>
+    <span class="alarm-time">${item.time}</span>
+    <button class="ack ${item.acked ? 'on' : ''}" data-ack="${item.id}">${item.acked ? '已确认' : '确认'}</button>
+  </div>`;
+}
+
+function overviewView() {
+  return `${pageHead('overview', '跨设备 KPI 与实时负荷', `
+      <button class="btn ghost" data-nav="alarms">打开报警中心</button>
+      <button class="btn primary" data-popup="line">弹窗查看装配线</button>`)}
+    <div class="kpi-grid">
+      ${metric('累计总产量', '150,034', '台', 'total', 'output')}
+      ${metric('累计良品数', '147,033', '台', 'good', 'output')}
+      ${metric('蒸汽温度', '94.2', '°C', 'temp', 'temp')}
+      ${metric('未确认报警', '4', '条', 'open-alarms')}
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-head"><span>全厂负荷趋势 / 最近 40 秒</span><span class="legend"><span><i style="background:var(--accent)"></i>电负荷</span><span><i style="background:var(--accent-2)"></i>水负荷</span></span></div>
+        <div data-chart="load"></div>
+      </div>
+      <div class="card hide-in-region">
+        <div class="card-head"><span>最新事件</span><span>LIVE</span></div>
+        <ul class="event-list" data-events></ul>
+      </div>
+    </div>`;
+}
+
+function boilerView() {
+  return `${pageHead('boiler', '汽水系统实时工艺', `
+      <button class="btn ghost" data-nav="alarms">打开报警中心</button>
+      <button class="btn ghost" data-popup="quality">弹窗检测台</button>`)}
+    <div class="kpi-grid">
+      ${metric('出口温度', '94.2', '°C', 'temp', 'temp')}
+      ${metric('出口压力', '1.70', 'MPa', 'pressure')}
+      ${metric('汽包液位', '56.5', '%', 'level', 'level')}
+      ${metric('主蒸汽流量', '78.1', 't/h', 'flow')}
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-head"><span>汽水流程</span><span>P&amp;ID / LIVE</span></div>
+        <div class="process">
+          <div class="tank"><div class="tank-fill" data-level style="height:56.5%"></div><span>汽包</span><b data-k="drum">56.5%</b></div>
+          <div class="pipe flow"></div>
+          <div class="pump"><span>P-101</span></div>
+          <div class="pipe flow"></div>
+          <div class="valve"><span>FV-201</span></div>
+        </div>
+      </div>
+      <div class="card hide-in-region">
+        <div class="card-head"><span>测点明细</span><span>4 POINTS</span></div>
+        <table class="kv-table">
+          <thead><tr><th>测点</th><th>地址</th><th style="text-align:right">当前值</th></tr></thead>
+          <tbody>
+            <tr><td>出口温度</td><td>40001</td><td class="num" data-k="t-detail">94.2 °C</td></tr>
+            <tr><td>出口压力</td><td>40003</td><td class="num" data-k="p-detail">1.70 MPa</td></tr>
+            <tr><td>汽包液位</td><td>40005</td><td class="num" data-k="l-detail">56.5 %</td></tr>
+            <tr><td>主蒸汽流量</td><td>40007</td><td class="num" data-k="f-detail">78.1 t/h</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function lineView() {
+  return `${pageHead('line', '装配节拍、产量与 OEE', `
+      <button class="btn ghost" data-nav="quality">打开检测台</button>
+      <button class="btn ghost" data-popup="alarms">弹窗报警</button>`)}
+    <div class="kpi-grid">
+      ${metric('累计总产量', '150,034', '台', 'total', 'output')}
+      ${metric('累计良品数', '147,033', '台', 'good', 'output')}
+      ${metric('累计不良品数', '3,000', '台', 'reject')}
+      ${metric('当前节拍', '12.4', 's', 'cycle')}
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-head"><span>设备状态</span><span class="status-chip" data-k="run-state">运行</span></div>
+        <div class="bars">
+          <div class="bar-row"><span>时间开动率</span><div class="bar-track"><div class="bar-fill" data-bar="availability" style="width:92%"></div></div><span data-k="availability">92.4%</span></div>
+          <div class="bar-row"><span>性能开动率</span><div class="bar-track"><div class="bar-fill amber" data-bar="performance" style="width:88%"></div></div><span data-k="performance">88.1%</span></div>
+          <div class="bar-row"><span>良品率</span><div class="bar-track"><div class="bar-fill" data-bar="quality" style="width:98%"></div></div><span data-k="quality">98.0%</span></div>
+        </div>
+        <p class="notice" style="margin-top:12px">当前节拍与目标 12.0 s 的偏差会写入生产事件，不影响页面切换。</p>
+      </div>
+      <div class="card hide-in-region">
+        <div class="card-head"><span>产量趋势</span><span>40 s</span></div>
+        <div data-chart="output"></div>
+      </div>
+    </div>`;
+}
+
+function qualityView() {
+  return `${pageHead('quality', 'EOL 电性能检测实时结果', `
+      <button class="btn ghost" data-popup="alarms">弹窗报警</button>`)}
+    <div class="kpi-grid">
+      ${metric('测试电压', '222.5', 'V', 'voltage')}
+      ${metric('测试电流', '1.9', 'A', 'current')}
+      ${metric('绝缘电阻', '506.2', 'MΩ', 'insulation', 'pass')}
+      ${metric('空载转速', '1474.9', 'rpm', 'speed')}
+    </div>
+    <div class="split">
+      <div class="card">
+        <div class="card-head"><span>检测判定</span><span>THRESHOLD / 100 MΩ</span></div>
+        <div class="result-panel">
+          <span class="result-badge" data-k="result">合格</span>
+          <div class="pass-bar">
+            <div class="bar-row"><span>合格率</span><div class="bar-track"><div class="bar-fill" data-bar="pass" style="width:98.4%"></div></div><span data-k="pass">98.4%</span></div>
+          </div>
+        </div>
+        <p class="notice" style="margin-top:12px">判定只影响本产品记录，不阻断采集；NG 结果会触发报警规则。</p>
+      </div>
+      <div class="card hide-in-region">
+        <div class="card-head"><span>最近检测</span><span>3 RECORDS</span></div>
+        <table class="kv-table">
+          <thead><tr><th>SN</th><th>绝缘</th><th style="text-align:right">结果</th></tr></thead>
+          <tbody>
+            <tr><td>DEMO-MTR-00-A001</td><td class="num">512.4 MΩ</td><td class="num" style="color:var(--accent)">合格</td></tr>
+            <tr><td>DEMO-MTR-00-A004</td><td class="num">86.2 MΩ</td><td class="num" style="color:var(--danger)">不合格</td></tr>
+            <tr><td>DEMO-MTR-00-A008</td><td class="num">498.1 MΩ</td><td class="num" style="color:var(--accent)">合格</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function alarmsView() {
+  return `${pageHead('alarms', '报警列表与本地确认状态', `
+      <button class="btn ghost" data-popup="overview">弹窗总览</button>`)}
+    <div class="filter-row">
+      <button class="chip-btn on" data-filter="all">全部 <b>${state.alarms.length}</b></button>
+      <button class="chip-btn" data-filter="open">未确认 <b data-k="open-count">${openAlarmCount()}</b></button>
+      <button class="chip-btn" data-filter="acked">已确认</button>
+    </div>
+    <div class="alarm-list" data-alarm-list></div>`;
+}
+
+function configView() {
+  return `${pageHead('config', '页面资源与发布治理', '')}
+    <div class="config-grid">
+      <div class="card">
+        <div class="card-head"><span>页面资源</span><span>RESOURCE</span></div>
+        <div class="meta-list">
+          <div class="meta-row"><span>页面 ID</span><b>config</b></div>
+          <div class="meta-row"><span>当前版本</span><b data-k="version">${PAGES.config.version}</b></div>
+          <div class="meta-row"><span>发布状态</span><b data-k="published">${PAGES.config.published ? '已发布' : '草稿'}</b></div>
+          <div class="meta-row"><span>访问权限</span><b>工程师</b></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span>治理动作</span><span>GOVERNANCE</span></div>
+        <div class="action-row">
+          <button class="btn" data-save>保存草稿</button>
+          <button class="btn primary" data-publish>发布新版本</button>
+          <button class="btn danger" data-fail>触发本地异常</button>
+        </div>
+        <p class="notice">异常只会破坏当前页面实例；宿主、其他标签页与布局区域继续运行。这就是页面级错误边界。</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:10px">
+      <div class="card-head"><span>发布说明</span><span>AUDIT</span></div>
+      <p class="sub" style="line-height:1.7">草稿与发布版本分离：保存草稿不改变运行端内容，发布后新开标签或刷新才读取新版本。旧版本保留，可回退。</p>
+    </div>`;
+}
+
+function regionMarkup(index) {
+  const labels = ['A', 'B', 'C', 'D'];
+  return `<div class="region" data-region="${labels[index]}">
+    <header class="region-head">
+      <div class="region-title"><b data-region-name>—</b><span data-region-id>—</span></div>
+      <div class="region-actions">
+        <button data-cycle="-1" title="上一个画面">‹</button>
+        <button data-cycle="1" title="下一个画面">›</button>
+        <button data-open title="在标签页打开">↗</button>
+      </div>
+    </header>
+    <div class="region-body"></div>
+  </div>`;
+}
+
+function layoutView() {
+  return `${pageHead('layout', '布局 → 区域 → 独立画面实例', '<span class="hint-inline">四个区域各自挂载、各自订阅</span>')}
+    <div class="layout-page">
+      <div class="layout-grid">${[0, 1, 2, 3].map(regionMarkup).join('')}</div>
+      <div class="alarm-strip">
+        <span class="cap">ACTIVE ALARMS</span>
+        <div class="strip-items" data-alarm-strip></div>
+      </div>
+    </div>`;
+}
+
+function mountOverview(root) {
+  const paint = () => {
+    const line = state.line;
+    const boiler = state.boiler;
+    setK(root, 'total', fmt.format(line.total));
+    setK(root, 'good', fmt.format(line.good));
+    setK(root, 'temp', boiler.temp.toFixed(1));
+    setK(root, 'open-alarms', String(openAlarmCount()));
+    const chart = root.querySelector('[data-chart="load"]');
+    if (chart) chart.innerHTML = loadChart();
+    const events = root.querySelector('[data-events]');
+    if (events) {
+      events.innerHTML = state.alarms.slice(0, 4).map(item => `<li>
+        <span class="ev-time">${item.time}</span>
+        <span class="ev-dot" data-level="${item.level}"></span>
+        <span class="ev-text">${item.text}</span>
+      </li>`).join('');
+    }
+    paintSparks(root);
+  };
+  const unsubscribe = bus.subscribe(paint);
+  paint();
+  return unsubscribe;
+}
+
+function mountBoiler(root) {
+  const paint = () => {
+    const boiler = state.boiler;
+    setK(root, 'temp', boiler.temp.toFixed(1));
+    setK(root, 'pressure', boiler.pressure.toFixed(2));
+    setK(root, 'level', boiler.level.toFixed(1));
+    setK(root, 'flow', boiler.flow.toFixed(1));
+    setK(root, 'drum', boiler.level.toFixed(1) + '%');
+    setK(root, 't-detail', boiler.temp.toFixed(1) + ' °C');
+    setK(root, 'p-detail', boiler.pressure.toFixed(2) + ' MPa');
+    setK(root, 'l-detail', boiler.level.toFixed(1) + ' %');
+    setK(root, 'f-detail', boiler.flow.toFixed(1) + ' t/h');
+    const fill = root.querySelector('[data-level]');
+    if (fill) fill.style.height = Math.max(6, Math.min(94, boiler.level)) + '%';
+    paintSparks(root);
+  };
+  const unsubscribe = bus.subscribe(paint);
+  paint();
+  return unsubscribe;
+}
+
+function mountLine(root) {
+  const paint = () => {
+    const line = state.line;
+    setK(root, 'total', fmt.format(line.total));
+    setK(root, 'good', fmt.format(line.good));
+    setK(root, 'reject', fmt.format(line.reject));
+    setK(root, 'cycle', line.cycle.toFixed(1));
+    const quality = Math.min(99.9, (line.good / Math.max(1, line.total)) * 100);
+    const availability = 92.4 + Math.sin(line.total / 900) * 1.2;
+    const performance = 88.1 + Math.cos(line.total / 700) * 1.5;
+    setK(root, 'availability', availability.toFixed(1) + '%');
+    setK(root, 'performance', performance.toFixed(1) + '%');
+    setK(root, 'quality', quality.toFixed(1) + '%');
+    const chip = root.querySelector('[data-k="run-state"]');
+    if (chip) {
+      chip.textContent = line.run ? '运行' : '停机';
+      chip.classList.toggle('bad', !line.run);
+    }
+    const bars = { availability, performance, quality };
+    for (const [key, value] of Object.entries(bars)) {
+      const bar = root.querySelector('[data-bar="' + key + '"]');
+      if (bar) bar.style.width = Math.max(0, Math.min(100, value)) + '%';
+    }
+    const chart = root.querySelector('[data-chart="output"]');
+    if (chart) chart.innerHTML = outputChart();
+    paintSparks(root);
+  };
+  const unsubscribe = bus.subscribe(paint);
+  paint();
+  return unsubscribe;
+}
+
+function mountQuality(root) {
+  const paint = () => {
+    const quality = state.quality;
+    setK(root, 'voltage', quality.voltage.toFixed(1));
+    setK(root, 'current', quality.current.toFixed(1));
+    setK(root, 'insulation', quality.insulation.toFixed(1));
+    setK(root, 'speed', quality.speed.toFixed(1));
+    setK(root, 'pass', quality.pass.toFixed(1) + '%');
+    const ok = quality.insulation >= 100 && quality.speed >= 1400 && quality.voltage >= 210;
+    const badge = root.querySelector('[data-k="result"]');
+    if (badge) {
+      badge.textContent = ok ? '合格' : '复测';
+      badge.classList.toggle('bad', !ok);
+    }
+    const bar = root.querySelector('[data-bar="pass"]');
+    if (bar) bar.style.width = Math.max(0, Math.min(100, quality.pass)) + '%';
+    paintSparks(root);
+  };
+  const unsubscribe = bus.subscribe(paint);
+  paint();
+  return unsubscribe;
+}
+
+function mountAlarms(root) {
+  let filter = 'all';
+  const list = root.querySelector('[data-alarm-list]');
+  const paint = () => {
+    const items = state.alarms.filter(item => {
+      if (filter === 'open') return !item.acked;
+      if (filter === 'acked') return item.acked;
+      return true;
+    });
+    list.innerHTML = items.length ? items.map(alarmRow).join('') : '<div class="empty">当前筛选无报警</div>';
+    setK(root, 'open-count', String(openAlarmCount()));
+    $$('[data-filter]', root).forEach(button => button.classList.toggle('on', button.dataset.filter === filter));
+    paintSparks(root);
+  };
+  root.addEventListener('click', event => {
+    const filterButton = event.target.closest('[data-filter]');
+    if (filterButton) {
+      filter = filterButton.dataset.filter;
+      paint();
+      return;
+    }
+    const ack = event.target.closest('[data-ack]');
+    if (ack) {
+      const item = state.alarms.find(alarm => alarm.id === ack.dataset.ack);
+      if (item) {
+        item.acked = !item.acked;
+        paint();
+        bus.emit();
+        updateStatus();
+        log('alarm', `报警 ${item.id} ${item.acked ? '已确认' : '已复位'}`);
+      }
+    }
+  });
+  paint();
+  return () => {};
+}
+
+function mountConfig(root) {
+  if (configFailOnce) {
+    configFailOnce = false;
+    throw new Error('模拟 PLC 数据源超时');
+  }
+  const paint = () => {
+    setK(root, 'version', PAGES.config.version);
+    setK(root, 'published', PAGES.config.published ? '已发布' : '草稿');
+  };
+  root.addEventListener('click', event => {
+    if (event.target.closest('[data-save]')) {
+      PAGES.config.published = false;
+      paint();
+      syncMeta(root, 'config');
+      renderRail();
+      renderInspector();
+      log('draft', '保存 config 草稿');
+      showToast('草稿已保存，运行端不受影响');
+      return;
+    }
+    if (event.target.closest('[data-publish]')) {
+      const version = Number(PAGES.config.version.replace(/\D/g, '')) || 0;
+      PAGES.config.version = 'r' + (version + 1);
+      PAGES.config.published = true;
+      paint();
+      syncMeta(root, 'config');
+      renderRail();
+      renderInspector();
+      log('publish', `发布 config ${PAGES.config.version}`);
+      showToast('新版本已发布');
+      return;
+    }
+    if (event.target.closest('[data-fail]')) {
+      configFailOnce = true;
+      log('error', '主动触发页面异常');
+      remountActive();
+    }
+  });
+  paint();
+  return () => {};
+}
+
+function createRegion(regionEl, index) {
+  const slot = regionEl.querySelector('.region-body');
+  const nameEl = regionEl.querySelector('[data-region-name]');
+  const idEl = regionEl.querySelector('[data-region-id]');
+  const initial = ['boiler', 'line', 'quality', 'alarms'];
+  let id = initial[index] || regionPageIds()[0];
+  if (!regionPageIds().includes(id)) id = regionPageIds()[index % regionPageIds().length];
+  let instance = null;
+  const mount = () => {
+    if (instance) instance.destroy();
+    nameEl.textContent = PAGES[id].name;
+    idEl.textContent = id;
+    instance = mountPage(id, slot, { region: true });
+  };
+  const cycle = delta => {
+    const list = regionPageIds();
+    const at = list.indexOf(id);
+    id = list[(at + delta + list.length) % list.length];
+    mount();
+    log('region', `区域 ${index + 1} → ${id}`);
+  };
+  regionEl.querySelector('[data-cycle="-1"]').addEventListener('click', () => cycle(-1));
+  regionEl.querySelector('[data-cycle="1"]').addEventListener('click', () => cycle(1));
+  regionEl.querySelector('[data-open]').addEventListener('click', () => navigate(id));
+  mount();
+  return {
+    destroy() {
+      if (instance) instance.destroy();
+    }
+  };
+}
+
+function mountLayout(root) {
+  const regions = $$('.region', root).map((regionEl, index) => createRegion(regionEl, index));
+  const paintStrip = () => {
+    const strip = root.querySelector('[data-alarm-strip]');
+    if (!strip) return;
+    const items = state.alarms.filter(item => !item.acked).slice(0, 3);
+    strip.innerHTML = items.length
+      ? items.map(item => `<span class="strip-item"><i></i>${item.text}</span>`).join('')
+      : '<span class="strip-item"><i style="background:var(--accent)"></i>无活动报警</span>';
+  };
+  const unsubscribe = bus.subscribe(paintStrip);
+  paintStrip();
+  return () => {
+    unsubscribe();
+    regions.forEach(region => region.destroy());
+  };
+}
+
+function errorView(id, error) {
+  return `<div class="page-error">
+    <div class="err-badge">ISOLATED FAULT</div>
+    <h2>${PAGES[id].name} 渲染失败</h2>
+    <p>${error.message}</p>
+    <p class="hint">错误已被页面边界捕获，宿主与其他页面不受影响。</p>
+    <button class="btn" data-retry>重新加载此页</button>
+  </div>`;
+}
+
+function mountPage(id, root, options = {}) {
+  const def = PAGES[id];
+  mountedCount += 1;
+  let cleanup = null;
+  try {
+    root.innerHTML = def.view();
+    syncMeta(root, id);
+    cleanup = def.mount ? def.mount(root, options) : null;
+    log('mount', `${id} 挂载${options.region ? '（区域）' : options.popup ? '（弹窗）' : ''}`);
+  } catch (error) {
+    root.innerHTML = errorView(id, error);
+    log('error', `${id} 渲染失败：${error.message}`);
+  }
+  updateStatus();
+  return {
+    id,
+    destroy() {
+      if (!this.alive) return;
+      this.alive = false;
+      try {
+        if (typeof cleanup === 'function') cleanup();
+      } catch (error) {
+        console.error(error);
+      }
+      root.innerHTML = '';
+      mountedCount = Math.max(0, mountedCount - 1);
+      log('unmount', `${id} 卸载`);
+      updateStatus();
+    },
+    alive: true
+  };
+}
+
+function ensureTab(id) {
+  let tab = open.get(id);
+  if (!tab) {
+    const element = document.createElement('section');
+    element.className = 'page';
+    element.hidden = true;
+    outlet.appendChild(element);
+    tab = { id, el: element, inst: null };
+    open.set(id, tab);
+  }
+  if (!tab.inst) tab.inst = mountPage(id, tab.el);
+  return tab;
+}
+
+function unmountTab(tab) {
+  if (tab.inst) {
+    tab.inst.destroy();
+    tab.inst = null;
+  }
+}
+
+function routeId() {
+  const match = location.hash.match(/^#\/page\/([a-z-]+)$/);
+  return match && PAGES[match[1]] ? match[1] : null;
+}
+
+function navigate(id) {
+  if (!PAGES[id]) return;
+  if (!allowed(id)) {
+    showToast(`「${PAGES[id].name}」需要工程师权限`);
+    log('deny', `拒绝访问 ${id}`);
+    return;
+  }
+  if (location.hash === '#/page/' + id) activate(id);
+  else location.hash = '#/page/' + id;
+}
+
+function activate(id) {
+  if (!PAGES[id]) {
+    navigate('overview');
+    return;
+  }
+  if (!allowed(id)) {
+    const fallback = pageIdsForRole()[0] || 'overview';
+    showToast(`「${PAGES[id].name}」需要工程师权限`);
+    log('deny', `拒绝访问 ${id}`);
+    history.replaceState(null, '', '#/page/' + fallback);
+    id = fallback;
+  }
+  if (activeId === id) {
+    showActiveTab();
+    return;
+  }
+  const previous = open.get(activeId);
+  if (previous && !cacheEnabled()) unmountTab(previous);
+  const tab = ensureTab(id);
+  for (const item of open.values()) item.el.hidden = true;
+  tab.el.hidden = false;
+  activeId = id;
+  log('navigate', `${previous ? previous.id : '—'} → ${id}`);
+  renderTabs();
+  renderInspector();
+  renderRail();
+  updateStatus();
+}
+
+function showActiveTab() {
+  for (const tab of open.values()) tab.el.hidden = tab.id !== activeId;
+}
+
+function closeTab(id) {
+  const tab = open.get(id);
+  if (!tab) return;
+  unmountTab(tab);
+  tab.el.remove();
+  open.delete(id);
+  log('close', `关闭标签 ${id}`);
+  renderTabs();
+  if (activeId === id) {
+    activeId = null;
+    const fallback = [...open.keys()].pop() || 'overview';
+    navigate(fallback);
+  } else {
+    updateStatus();
+  }
+}
+
+function setRole(next) {
+  if (role === next) return;
+  role = next;
+  $$('#roleSwitch [data-role]').forEach(button => button.classList.toggle('on', button.dataset.role === role));
+  log('role', `角色切换：${role === 'operator' ? '操作员' : '工程师'}`);
+  for (const id of [...open.keys()]) {
+    if (!allowed(id)) {
+      const tab = open.get(id);
+      if (tab) {
+        unmountTab(tab);
+        tab.el.remove();
+        open.delete(id);
+        if (activeId === id) activeId = null;
+        log('close', `权限变更关闭 ${id}`);
+      }
+    }
+  }
+  if (popup && !allowed(popup.id)) closePopup();
+  renderRail();
+  renderTabs();
+  if (activeId && !allowed(activeId)) activeId = null;
+  if (!activeId) {
+    const fallback = pageIdsForRole().includes('overview') ? 'overview' : pageIdsForRole()[0];
+    history.replaceState(null, '', '#/page/' + fallback);
+    activate(fallback);
+  } else {
+    renderInspector();
+    updateStatus();
+  }
+}
+
+function openPopup(id) {
+  if (!PAGES[id]) return;
+  if (!allowed(id)) {
+    showToast(`「${PAGES[id].name}」需要工程师权限`);
+    log('deny', `拒绝访问弹窗 ${id}`);
+    return;
+  }
+  closePopup();
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay';
+  overlay.innerHTML = `<div class="popup" role="dialog" aria-modal="true" aria-label="${PAGES[id].name}">
+    <header class="popup-head">
+      <div><div class="eyebrow">POPUP / ${id}</div><h2>${PAGES[id].name}</h2></div>
+      <button class="icon-btn" data-popup-close aria-label="关闭">✕</button>
+    </header>
+    <div class="popup-body"></div>
+  </div>`;
+  document.body.appendChild(overlay);
+  const inst = mountPage(id, overlay.querySelector('.popup-body'), { popup: true });
+  popup = { id, overlay, inst };
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay || event.target.closest('[data-popup-close]')) closePopup();
+  });
+  document.addEventListener('keydown', escapeClose);
+  log('popup', `打开弹窗 ${id}`);
+  updateStatus();
+}
+
+function closePopup() {
+  if (!popup) return;
+  const id = popup.id;
+  popup.inst.destroy();
+  popup.overlay.remove();
+  popup = null;
+  document.removeEventListener('keydown', escapeClose);
+  log('popup', `关闭弹窗 ${id}`);
+  updateStatus();
+}
+
+function escapeClose(event) {
+  if (event.key === 'Escape') closePopup();
+}
+
+function remountActive() {
+  const tab = open.get(activeId);
+  if (!tab) return;
+  unmountTab(tab);
+  tab.inst = mountPage(activeId, tab.el);
+  renderInspector();
+  updateStatus();
+}
+
+function renderRail() {
+  const groups = ['运行监视', '编排', '工程'];
+  let counter = 0;
+  railList.innerHTML = groups.map(group => {
+    const items = Object.entries(PAGES).filter(([, def]) => def.group === group);
+    if (!items.length) return '';
+    return `<div class="rail-group"><div class="rail-label">${group}</div>${items.map(([id, def]) => {
+      counter += 1;
+      const locked = !allowed(id);
+      return `<button class="page-link ${id === activeId ? 'on' : ''} ${locked ? 'locked' : ''}" data-page="${id}" aria-disabled="${locked}">
+        <span class="idx">${String(counter).padStart(2, '0')}</span>
+        <span><b>${def.name}</b><small>${id} · ${def.version}</small></span>
+        ${locked ? '<span class="lock">工程师</span>' : (id === activeId ? '<span class="dot-live" style="width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)"></span>' : '')}
+      </button>`;
+    }).join('')}</div>`;
+  }).join('');
+  $('#pageCount').textContent = String(Object.keys(PAGES).length);
+}
+
+function renderTabs() {
+  if (!open.size) {
+    tabsEl.innerHTML = '<span class="tabs-empty">没有打开的页面</span>';
+    return;
+  }
+  tabsEl.innerHTML = [...open.keys()].map(id => {
+    const def = PAGES[id];
+    return `<div class="tab ${id === activeId ? 'on' : ''}" data-tab="${id}" role="button" tabindex="0">
+      <span class="tab-name">${def.name}</span>
+      <span class="tab-id">${id}</span>
+      <span class="tab-x" data-close="${id}" role="button" aria-label="关闭 ${def.name}">×</span>
+    </div>`;
+  }).join('');
+}
+
+function renderInspector() {
+  const id = activeId || 'overview';
+  const def = PAGES[id];
+  $('#curPage').innerHTML = `
+    <div class="meta-row"><span>页面 ID</span><b>${id}</b></div>
+    <div class="meta-row"><span>名称</span><b>${def.name}</b></div>
+    <div class="meta-row"><span>版本</span><b>${def.version}</b></div>
+    <div class="meta-row"><span>状态</span><b>${def.published ? '已发布' : '草稿'}</b></div>
+    <div class="meta-row"><span>访问权限</span><b>${def.roles.includes('operator') ? '所有角色' : '工程师'}</b></div>
+    <div class="meta-row"><span>页面缓存</span><b>${cacheEnabled() ? '开启' : '关闭'}</b></div>`;
+}
+
+function updateStatus() {
+  $('#statRoute').textContent = location.hash || '#/page/overview';
+  $('#routeLabel').textContent = location.hash || '#/page/overview';
+  $('#statTabs').textContent = String(open.size);
+  $('#statMounted').textContent = String(mountedCount);
+  $('#statSubs').textContent = String(bus.listeners.size);
+  $('#statRole').textContent = role === 'operator' ? '操作员' : '工程师';
+  $('#countTabs').textContent = String(open.size);
+  $('#countMounted').textContent = String(mountedCount);
+  $('#countSubs').textContent = String(bus.listeners.size);
+  $('#countAlarms').textContent = String(openAlarmCount());
+}
+
+function log(type, text) {
+  const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  const entries = window.__logEntries || (window.__logEntries = []);
+  entries.unshift({ type, text, time });
+  entries.splice(12);
+  logList.innerHTML = entries.map(entry => `<div class="log-item">
+    <span class="log-time">${entry.time}</span>
+    <span class="log-tag ${entry.type}">${entry.type}</span>
+    <span class="log-text" title="${entry.text.replace(/"/g, '&quot;')}">${entry.text}</span>
+  </div>`).join('');
+}
+
+function showToast(text) {
+  const toast = $('#toast');
+  toast.textContent = text;
+  toast.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('on'), 2200);
+}
+
+function updateClock() {
+  clockEl.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function tick() {
+  const boiler = state.boiler;
+  boiler.temp = walk(boiler.temp, 0.5, 88, 99);
+  boiler.pressure = walk(boiler.pressure, 0.03, 1.4, 2.0);
+  boiler.level = walk(boiler.level, 0.8, 35, 80);
+  boiler.flow = walk(boiler.flow, 1.2, 60, 95);
+  boiler.tempHist.push(boiler.temp);
+  boiler.tempHist.shift();
+  boiler.levelHist.push(boiler.level);
+  boiler.levelHist.shift();
+
+  const line = state.line;
+  const delta = Math.random() < 0.85 ? Math.floor(Math.random() * 3) : 0;
+  line.total += delta;
+  if (Math.random() < 0.98) line.good += delta;
+  line.reject = line.total - line.good;
+  line.cycle = walk(line.cycle, 0.3, 10.5, 14.5);
+  line.outputHist.push(line.total);
+  line.outputHist.shift();
+
+  const quality = state.quality;
+  quality.voltage = walk(quality.voltage, 1.2, 215, 230);
+  quality.current = walk(quality.current, 0.06, 1.4, 2.4);
+  quality.insulation = walk(quality.insulation, 8, 450, 560);
+  quality.speed = walk(quality.speed, 6, 1440, 1510);
+  quality.pass = Math.min(99.9, Math.max(96, (line.good / Math.max(1, line.total)) * 100));
+
+  const load = state.load;
+  load.power.push(walk(load.power[load.power.length - 1], 1.4, 40, 80));
+  load.power.shift();
+  load.water.push(walk(load.water[load.water.length - 1], 1.1, 35, 70));
+  load.water.shift();
+
+  bus.emit();
+  updateClock();
+}
+
+tabsEl.addEventListener('click', event => {
+  const close = event.target.closest('[data-close]');
+  if (close) {
+    closeTab(close.dataset.close);
+    return;
+  }
+  const tab = event.target.closest('[data-tab]');
+  if (tab) navigate(tab.dataset.tab);
+});
+
+railList.addEventListener('click', event => {
+  const link = event.target.closest('[data-page]');
+  if (!link) return;
+  const id = link.dataset.page;
+  if (!allowed(id)) {
+    showToast(`「${PAGES[id].name}」需要工程师权限`);
+    log('deny', `拒绝访问 ${id}`);
+    return;
+  }
+  navigate(id);
+});
+
+document.addEventListener('click', event => {
+  const nav = event.target.closest('[data-nav]');
+  if (nav) {
+    closePopup();
+    navigate(nav.dataset.nav);
+    return;
+  }
+  const popupButton = event.target.closest('[data-popup]');
+  if (popupButton) {
+    openPopup(popupButton.dataset.popup);
+    return;
+  }
+  const retry = event.target.closest('[data-retry]');
+  if (retry) remountActive();
+});
+
+$('#roleSwitch').addEventListener('click', event => {
+  const button = event.target.closest('[data-role]');
+  if (button) setRole(button.dataset.role);
+});
+
+cacheToggle.addEventListener('change', () => {
+  if (!cacheEnabled()) {
+    for (const tab of open.values()) {
+      if (tab.id !== activeId) unmountTab(tab);
+    }
+  }
+  log('cache', cacheEnabled() ? '启用页面缓存' : '关闭页面缓存');
+  renderInspector();
+  updateStatus();
+});
+
+$('#backBtn').addEventListener('click', () => history.back());
+$('#forwardBtn').addEventListener('click', () => history.forward());
+
+themeBtn.addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'night' ? 'day' : 'night';
+  applyTheme(next);
+});
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  themeBtn.textContent = theme === 'night' ? '日间模式' : '夜间模式';
+  try {
+    localStorage.setItem('hmi-multipage-theme', theme);
+  } catch (error) {
+    console.warn(error);
+  }
+}
+
+window.addEventListener('hashchange', () => {
+  const id = routeId();
+  if (!id) {
+    navigate('overview');
+    return;
+  }
+  activate(id);
+});
+
+applyTheme((() => {
+  try {
+    return localStorage.getItem('hmi-multipage-theme') || 'night';
+  } catch (error) {
+    return 'night';
+  }
+})());
+
+renderRail();
+renderInspector();
+log('boot', '宿主编排已启动');
+if (!routeId()) history.replaceState(null, '', '#/page/overview');
+activate(routeId() || 'overview');
+updateClock();
+updateStatus();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>

@@ -49,10 +49,18 @@ public sealed class AlarmRuleCommandService(ConfigReloader reloader)
     public async Task<(AlarmRule? Rule, string? Error)> PrepareAsync(
         ConfigDbContext db, AlarmRuleRequest request, int? excludeRuleId, CancellationToken ct = default)
     {
+        var (rule, issues) = await PrepareIssuesAsync(db, request, excludeRuleId, ct);
+        return (rule, issues.Count > 0 ? issues[0].Message : null);
+    }
+
+    /// <summary>结构化版本：一次返回全部问题，供 REST 表单调红与按错误码本地化。</summary>
+    public async Task<(AlarmRule? Rule, IReadOnlyList<ValidationIssue> Issues)> PrepareIssuesAsync(
+        ConfigDbContext db, AlarmRuleRequest request, int? excludeRuleId, CancellationToken ct = default)
+    {
         var rule = MapRule(request);
-        if (Validate(rule) is { } error) return (null, error);
-        if (await ValidateTargetAsync(db, rule, excludeRuleId, ct) is { } targetError) return (null, targetError);
-        return (rule, null);
+        var issues = ValidateIssues(rule);
+        if (issues.Count == 0) issues = await ValidateTargetIssuesAsync(db, rule, excludeRuleId, ct);
+        return issues.Count == 0 ? (rule, []) : (null, issues);
     }
 
     /// <summary>
@@ -98,161 +106,120 @@ public sealed class AlarmRuleCommandService(ConfigReloader reloader)
     }
 
     /// <summary>结构校验：字段范围、枚举合法性、表达式可编译、文案长度。</summary>
-    public static string? Validate(AlarmRule rule)
+    public static string? Validate(AlarmRule rule) => ValidateIssues(rule).FirstMessage();
+
+    public static IReadOnlyList<ValidationIssue> ValidateIssues(AlarmRule rule)
     {
+        var issues = new List<ValidationIssue>();
         if (rule.TagId <= 0)
-        {
-            return "必须指定测点";
-        }
-
+            issues.Add(new("alarm.tag", nameof(rule.TagId), "必须指定测点"));
         if (!Enum.IsDefined(rule.Type))
-        {
-            return "报警类型无效";
-        }
-
+            issues.Add(new("alarm.type", nameof(rule.Type), "报警类型无效"));
         if (!Enum.IsDefined(rule.ActiveWhen))
-        {
-            return "位报警触发条件无效";
-        }
-
+            issues.Add(new("alarm.activeWhen", nameof(rule.ActiveWhen), "位报警触发条件无效"));
         if (!Enum.IsDefined(rule.Level))
-        {
-            return "报警级别无效";
-        }
-
+            issues.Add(new("alarm.level", nameof(rule.Level), "报警级别无效"));
         if (!Enum.IsDefined(rule.Category))
-        {
-            return "报警类别无效";
-        }
-
+            issues.Add(new("alarm.category", nameof(rule.Category), "报警类别无效"));
         if (!Enum.IsDefined(rule.Consequence))
-        {
-            return "报警后果无效";
-        }
-
+            issues.Add(new("alarm.consequence", nameof(rule.Consequence), "报警后果无效"));
         if (rule.ResponseTimeSec is < 0 or > 86400)
-        {
-            return "允许响应时间须在 0～86400 秒之间";
-        }
-
+            issues.Add(new("alarm.responseTime", nameof(rule.ResponseTimeSec), "允许响应时间须在 0～86400 秒之间"));
         if (rule.AutoPriority && rule.ResponseTimeSec <= 0)
-        {
-            return "自动优先级需要填写允许响应时间";
-        }
+            issues.Add(new("alarm.autoPriority", nameof(rule.ResponseTimeSec), "自动优先级需要填写允许响应时间"));
 
         // 位报警、质量坏报警和复合条件不使用阈值；其余类型必须有有效阈值。
         if (rule.Type is not (AlarmRuleType.StateChange or AlarmRuleType.Discrete or AlarmRuleType.BadQuality or AlarmRuleType.Expression) && double.IsNaN(rule.Threshold))
-        {
-            return "阈值无效";
-        }
+            issues.Add(new("alarm.threshold", nameof(rule.Threshold), "阈值无效"));
 
         // 位号只对位报警有意义，范围按 64 位字保护；具体测点位宽在目标校验里再收紧。
         if (rule.BitIndex is int bit && (rule.Type != AlarmRuleType.Discrete || bit is < 0 or > 63))
-        {
-            return "报警位号只能用于位报警，且在 0～63 之间";
-        }
+            issues.Add(new("alarm.bitIndex", nameof(rule.BitIndex), "报警位号只能用于位报警，且在 0～63 之间"));
 
         if (rule.Type == AlarmRuleType.Expression)
         {
             if (string.IsNullOrWhiteSpace(rule.Expression))
             {
-                return "复合条件报警必须填写表达式";
+                issues.Add(new("alarm.expression.required", nameof(rule.Expression), "复合条件报警必须填写表达式"));
             }
-
-            try
+            else
             {
-                var expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression);
-                if (expression.Dependencies.Count == 0) return "复合条件表达式至少引用一个测点（#测点号）";
-            }
-            catch (Scada.Core.Calculations.TagExpressionException ex)
-            {
-                return $"复合条件表达式无效：{ex.Message}";
+                try
+                {
+                    var expression = Scada.Core.Calculations.TagExpression.Compile(rule.Expression);
+                    if (expression.Dependencies.Count == 0)
+                        issues.Add(new("alarm.expression.noDependencies", nameof(rule.Expression), "复合条件表达式至少引用一个测点（#测点号）"));
+                }
+                catch (Scada.Core.Calculations.TagExpressionException ex)
+                {
+                    issues.Add(new("alarm.expression.invalid", nameof(rule.Expression), $"复合条件表达式无效：{ex.Message}"));
+                }
             }
         }
         else if (!string.IsNullOrWhiteSpace(rule.Expression))
         {
-            return "只有复合条件报警可以使用表达式";
+            issues.Add(new("alarm.expression.notAllowed", nameof(rule.Expression), "只有复合条件报警可以使用表达式"));
         }
 
         if (rule.DelaySec < 0)
-        {
-            return "报警延时不能为负数";
-        }
-
+            issues.Add(new("alarm.delay.negative", nameof(rule.DelaySec), "报警延时不能为负数"));
         if (rule.RecoverDeadband < 0)
-        {
-            return "恢复死区不能为负数";
-        }
-
+            issues.Add(new("alarm.deadband.negative", nameof(rule.RecoverDeadband), "恢复死区不能为负数"));
         if (rule.DelaySec > 3600 || rule.OffDelaySec is < 0 or > 3600)
-        {
-            return "触发/恢复延时须在 0～3600 秒之间";
-        }
-
+            issues.Add(new("alarm.delay.range", nameof(rule.DelaySec), "触发/恢复延时须在 0～3600 秒之间"));
         if (rule.SuppressMode == AlarmSuppressMode.None ? rule.SuppressTagId is not null : rule.SuppressTagId is null)
-        {
-            return "条件抑制需同时指定抑制方式和条件测点";
-        }
-
+            issues.Add(new("alarm.suppress.mode", nameof(rule.SuppressTagId), "条件抑制需同时指定抑制方式和条件测点"));
         if (rule.SuppressTagId == rule.TagId)
-        {
-            return "条件测点不能是报警测点本身";
-        }
+            issues.Add(new("alarm.suppress.self", nameof(rule.SuppressTagId), "条件测点不能是报警测点本身"));
 
         // 只写“高限/状态变化”等于把类型名重复一遍，操作员拿不到任何信息；留空则由引擎自动生成含数值的文案。
         if (rule.Message is { Length: > 0 } message && AlarmRuleText.IsPlaceholderOnly(message))
-        {
-            return "报警消息不能只写报警类型，请说明现象与处置（可留空自动生成）";
-        }
-
+            issues.Add(new("alarm.message.placeholderOnly", nameof(rule.Message), "报警消息不能只写报警类型，请说明现象与处置（可留空自动生成）"));
         if (rule.Message?.Length > AlarmMessageBuilder.MaxLength)
-        {
-            return $"报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符";
-        }
-
+            issues.Add(new("alarm.message.length", nameof(rule.Message), $"报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符"));
         if (rule.MessageEn?.Length > AlarmMessageBuilder.MaxLength)
-        {
-            return $"英文报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符";
-        }
-
+            issues.Add(new("alarm.messageEn.length", nameof(rule.MessageEn), $"英文报警消息不能超过 {AlarmMessageBuilder.MaxLength} 个字符"));
         if (rule.Cause?.Length > 200 || rule.Action?.Length > 200)
-        {
-            return "原因与处置各不能超过 200 个字符";
-        }
-
+            issues.Add(new("alarm.description.length", nameof(rule.Cause), "原因与处置各不能超过 200 个字符"));
         if (rule.CauseEn?.Length > 200 || rule.ActionEn?.Length > 200)
-        {
-            return "英文原因与处置各不能超过 200 个字符";
-        }
-
-        return null;
+            issues.Add(new("alarm.descriptionEn.length", nameof(rule.CauseEn), "英文原因与处置各不能超过 200 个字符"));
+        return issues;
     }
 
     /// <summary>目标校验：测点存在性与类型匹配、位宽、同测点重复规则。</summary>
     public static async Task<string?> ValidateTargetAsync(ConfigDbContext db, AlarmRule rule, int? excludeRuleId, CancellationToken ct)
     {
+        var issues = await ValidateTargetIssuesAsync(db, rule, excludeRuleId, ct);
+        return issues.Count > 0 ? issues[0].Message : null;
+    }
+
+    public static async Task<IReadOnlyList<ValidationIssue>> ValidateTargetIssuesAsync(
+        ConfigDbContext db, AlarmRule rule, int? excludeRuleId, CancellationToken ct)
+    {
         var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == rule.TagId, ct);
         if (tag is null)
-        {
-            return $"测点不存在：{rule.TagId}";
-        }
-        if (tag.DataType == TagDataType.String) return "字符串测点不支持报警规则";
+            return [new ValidationIssue("alarm.tag.notFound", nameof(rule.TagId), $"测点不存在：{rule.TagId}")];
+        if (tag.DataType == TagDataType.String)
+            return [new ValidationIssue("alarm.tag.string", nameof(rule.TagId), "字符串测点不支持报警规则")];
 
         if (rule.Type == AlarmRuleType.Discrete)
         {
             if (tag.DataType == TagDataType.Bool)
             {
-                if (rule.BitIndex is not null) return "Bool 测点的位报警不需要填写位号";
+                if (rule.BitIndex is not null)
+                    return [new ValidationIssue("alarm.bitIndex.notNeeded", nameof(rule.BitIndex), "Bool 测点的位报警不需要填写位号")];
             }
             else if (tag.DataType is TagDataType.Int16 or TagDataType.UInt16 or TagDataType.Int32 or TagDataType.UInt32)
             {
                 var maxBit = tag.DataType is TagDataType.Int16 or TagDataType.UInt16 ? 15 : 31;
-                if (rule.BitIndex is not int bit) return "数值字位报警必须填写位号";
-                if (bit > maxBit) return $"该测点位宽只支持 0～{maxBit} 位";
+                if (rule.BitIndex is not int bit)
+                    return [new ValidationIssue("alarm.bitIndex.required", nameof(rule.BitIndex), "数值字位报警必须填写位号")];
+                if (bit > maxBit)
+                    return [new ValidationIssue("alarm.bitIndex.range", nameof(rule.BitIndex), $"该测点位宽只支持 0～{maxBit} 位")];
             }
             else
             {
-                return "位报警只能用于 Bool 或整数字测点";
+                return [new ValidationIssue("alarm.bit.type", nameof(rule.Type), "位报警只能用于 Bool 或整数字测点")];
             }
         }
 
@@ -268,6 +235,8 @@ public sealed class AlarmRuleCommandService(ConfigReloader reloader)
             x.Expression == rule.Expression &&
             (rule.Type != AlarmRuleType.Discrete || x.ActiveWhen == rule.ActiveWhen) &&
             (rule.Type == AlarmRuleType.StateChange || Math.Abs(x.Threshold - rule.Threshold) < 1e-9), ct);
-        return duplicate ? "同一测点已存在相同的报警规则" : null;
+        return duplicate
+            ? [new ValidationIssue("alarm.duplicate", nameof(rule.TagId), "同一测点已存在相同的报警规则")]
+            : [];
     }
 }

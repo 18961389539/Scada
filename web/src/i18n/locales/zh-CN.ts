@@ -96,7 +96,8 @@ export default {
     alarmNoTag: '未绑定测点'
   },
   tagsUx: {
-    batchCreatedFiltered: '已创建 {0} 个测点，列表已筛选到 {1}'
+    batchCreatedFiltered: '已创建 {0} 个测点，列表已筛选到 {1}',
+    batchRowError: '第 {0} 行：{1}'
   },
   loginUx: {
     capsLockOn: '大写锁定已开启',

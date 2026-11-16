@@ -24,8 +24,8 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
     public async Task<TagCommandResult> CreateAsync(
         ConfigDbContext db, Tag tag, Device device, CancellationToken cancellationToken)
     {
-        var (error, message) = await InspectAsync(db, tag, device, null, cancellationToken);
-        if (error != TagCommandError.None) return TagCommandResult.Failed(error, message);
+        var (error, issues) = await InspectIssuesAsync(db, tag, device, null, cancellationToken);
+        if (error != TagCommandError.None) return TagCommandResult.Failed(error, issues);
 
         db.Tags.Add(tag);
         try
@@ -34,7 +34,8 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         }
         catch (DbUpdateException)
         {
-            return TagCommandResult.Failed(TagCommandError.DuplicateName, DuplicateNameMessage);
+            return TagCommandResult.Failed(TagCommandError.DuplicateName,
+                [new ValidationIssue("tag.name.duplicate", nameof(Tag.Name), DuplicateNameMessage)]);
         }
 
         await ReloadAsync(cancellationToken);
@@ -46,10 +47,11 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         ConfigDbContext db, Tag tag, Tag updated, Device device, CancellationToken cancellationToken)
     {
         if (tag.Kind != TagKind.Physical)
-            return TagCommandResult.Failed(TagCommandError.NotPhysical, "请通过计算测点或计算任务配置修改此测点");
+            return TagCommandResult.Failed(TagCommandError.NotPhysical,
+                [new ValidationIssue("tag.kind.notPhysical", nameof(Tag.Kind), "请通过计算测点或计算任务配置修改此测点")]);
 
-        var (error, message) = await InspectAsync(db, updated, device, tag.Id, cancellationToken);
-        if (error != TagCommandError.None) return TagCommandResult.Failed(error, message);
+        var (error, issues) = await InspectIssuesAsync(db, updated, device, tag.Id, cancellationToken);
+        if (error != TagCommandError.None) return TagCommandResult.Failed(error, issues);
 
         var before = tag.Clone();
         tag.ApplyEditableFrom(updated);
@@ -59,7 +61,8 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         }
         catch (DbUpdateException)
         {
-            return TagCommandResult.Failed(TagCommandError.DuplicateName, DuplicateNameMessage);
+            return TagCommandResult.Failed(TagCommandError.DuplicateName,
+                [new ValidationIssue("tag.name.duplicate", nameof(Tag.Name), DuplicateNameMessage)]);
         }
 
         await ReloadAsync(cancellationToken);
@@ -70,14 +73,17 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         ConfigDbContext db, Tag tag, CancellationToken cancellationToken)
     {
         if (tag.Kind != TagKind.Physical)
-            return TagCommandResult.Failed(TagCommandError.NotPhysical, "请通过计算测点或计算任务配置删除此测点");
+            return TagCommandResult.Failed(TagCommandError.NotPhysical,
+                [new ValidationIssue("tag.kind.notPhysical", nameof(Tag.Kind), "请通过计算测点或计算任务配置删除此测点")]);
 
         if (await db.TagDependencies.AnyAsync(x => x.InputTagId == tag.Id, cancellationToken))
-            return TagCommandResult.Failed(TagCommandError.Referenced, "测点仍被计算定义引用，请先修改依赖定义");
+            return TagCommandResult.Failed(TagCommandError.Referenced,
+                [new ValidationIssue("tag.referenced.calculation", null, "测点仍被计算定义引用，请先修改依赖定义")]);
 
         var references = await usage.ScanAsync(db, tag, null, cancellationToken);
         if (references.Unreadable)
-            return TagCommandResult.Failed(TagCommandError.Referenced, "存在无法解析的画面或模板，无法确认测点引用，暂不能删除");
+            return TagCommandResult.Failed(TagCommandError.Referenced,
+                [new ValidationIssue("tag.referenced.unreadable", null, "存在无法解析的画面或模板，无法确认测点引用，暂不能删除")]);
         if (references.References.Count > 0)
         {
             var summary = string.Join("、", references.References
@@ -85,7 +91,8 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
                 .OrderBy(group => group.Key)
                 .Select(group => $"{CategoryLabel(group.Key)} {group.Count()}"));
             return TagCommandResult.Failed(TagCommandError.Referenced,
-                $"测点仍被 {references.References.Count} 处配置引用：{summary}。请先使用“替换测点”或修改这些配置");
+                [new ValidationIssue("tag.referenced.configurations", null,
+                    $"测点仍被 {references.References.Count} 处配置引用：{summary}。请先使用“替换测点”或修改这些配置")]);
         }
 
         db.Tags.Remove(tag);
@@ -95,7 +102,8 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         }
         catch (DbUpdateException)
         {
-            return TagCommandResult.Failed(TagCommandError.Conflict, "测点引用已变化，请重新读取后修改依赖定义");
+            return TagCommandResult.Failed(TagCommandError.Conflict,
+                [new ValidationIssue("tag.conflict", null, "测点引用已变化，请重新读取后修改依赖定义")]);
         }
 
         await ReloadAsync(cancellationToken);
@@ -106,24 +114,35 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
     /// 校验顺序固定：协议与字段 → 采集档位预算 → 同设备重名。批量建点复用同一判据，
     /// 只是它先按名字数组做一次批量查询，避免 N 次重名查询。
     /// </summary>
-    public async Task<(TagCommandError Error, string Message)> InspectAsync(
+    public async Task<(TagCommandError Error, IReadOnlyList<ValidationIssue> Issues)> InspectIssuesAsync(
         ConfigDbContext db, Tag tag, Device device, int? excludeTagId, CancellationToken cancellationToken)
     {
-        if (ConfigurationValidator.Tag(tag, device) is string invalid)
-            return (TagCommandError.Validation, invalid);
+        var issues = ConfigurationValidator.TagIssues(tag, device);
+        if (issues.Count > 0)
+            return (TagCommandError.Validation, issues);
 
-        // 与 ConfigurationValidator.Tag(tag, device) 用同一个设备：调用方保证 tag.DeviceId 就是 device.Id，
+        // 与 ConfigurationValidator.TagIssues(tag, device) 用同一个设备：调用方保证 tag.DeviceId 就是 device.Id，
         // 这里显式取 device.Id，避免两者不一致时档位预算和重名查到别的设备上。
         var deviceId = device.Id;
         if (await ValidateLaneBudgetAsync(db, deviceId, [tag.ScanRateMs], excludeTagId, cancellationToken) is string laneError)
-            return (TagCommandError.LaneBudgetExceeded, laneError);
+            return (TagCommandError.LaneBudgetExceeded,
+                [new ValidationIssue("tag.scanRate.laneBudget", nameof(Tag.ScanRateMs), laneError)]);
 
         var duplicate = excludeTagId is int exclude
             ? await db.Tags.AnyAsync(x => x.Id != exclude && x.DeviceId == deviceId && x.Name == tag.Name, cancellationToken)
             : await db.Tags.AnyAsync(x => x.DeviceId == deviceId && x.Name == tag.Name, cancellationToken);
         return duplicate
-            ? (TagCommandError.DuplicateName, DuplicateNameMessage)
-            : (TagCommandError.None, string.Empty);
+            ? (TagCommandError.DuplicateName,
+                [new ValidationIssue("tag.name.duplicate", nameof(Tag.Name), DuplicateNameMessage)])
+            : (TagCommandError.None, []);
+    }
+
+    /// <summary>兼容入口：MCP 与工程导入仍只消费首条文案。</summary>
+    public async Task<(TagCommandError Error, string Message)> InspectAsync(
+        ConfigDbContext db, Tag tag, Device device, int? excludeTagId, CancellationToken cancellationToken)
+    {
+        var (error, issues) = await InspectIssuesAsync(db, tag, device, excludeTagId, cancellationToken);
+        return (error, issues.Count > 0 ? issues[0].Message : string.Empty);
     }
 
     // 档位数量是设备级约束：超限时快慢点混跑会退化成相互打断的密集轮询。
@@ -164,8 +183,26 @@ public enum TagCommandError
     Conflict
 }
 
-public sealed record TagCommandResult(bool Success, TagCommandError Error, string Message, Tag? Tag)
+public sealed record TagCommandResult(
+    bool Success, TagCommandError Error, string Message, Tag? Tag,
+    IReadOnlyList<ValidationIssue> Issues)
 {
-    public static TagCommandResult Succeeded(Tag tag) => new(true, TagCommandError.None, string.Empty, tag);
-    public static TagCommandResult Failed(TagCommandError error, string message) => new(false, error, message, null);
+    public static TagCommandResult Succeeded(Tag tag) => new(true, TagCommandError.None, string.Empty, tag, []);
+
+    public static TagCommandResult Failed(TagCommandError error, IReadOnlyList<ValidationIssue> issues) =>
+        new(false, error, issues.Count > 0 ? issues[0].Message : string.Empty, null, issues);
+
+    public static TagCommandResult Failed(TagCommandError error, string message) =>
+        Failed(error, [new ValidationIssue(CodeFor(error), null, message)]);
+
+    private static string CodeFor(TagCommandError error) => error switch
+    {
+        TagCommandError.Validation => "tag.validation",
+        TagCommandError.LaneBudgetExceeded => "tag.scanRate.laneBudget",
+        TagCommandError.DuplicateName => "tag.name.duplicate",
+        TagCommandError.NotPhysical => "tag.kind.notPhysical",
+        TagCommandError.Referenced => "tag.referenced",
+        TagCommandError.Conflict => "tag.conflict",
+        _ => "tag.request"
+    };
 }

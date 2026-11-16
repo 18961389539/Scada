@@ -53,6 +53,8 @@ public sealed record TagBatchItem(
 
 public sealed record TagBatchRequest(int DeviceId, List<TagBatchItem>? Tags);
 
+public sealed record TagBatchCreated(int Created);
+
 public static class TagEndpoints
 {
     private static int[]? ParseIds(string? text)
@@ -129,7 +131,7 @@ public static class TagEndpoints
             http.Response.Headers["X-Total-Count"] = scoped.Count.ToString();
             http.Response.Headers["X-Abnormal-Count"] = abnormal.ToString();
             return Results.Ok(scoped.Skip(Math.Max(0, skip ?? 0)).Take(pageSize).ToList());
-        });
+        }).Produces<List<Tag>>(StatusCodes.Status200OK);
 
         group.MapGet("/{id:int}", async (
             int id,
@@ -141,7 +143,7 @@ public static class TagEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             return tag is null || !access.CanTag(Permission.View, id) ? Results.NotFound() : Results.Ok(tag);
-        });
+        }).Produces<Tag>(StatusCodes.Status200OK);
 
         group.MapGet("/{id:int}/usage", async (
             int id,
@@ -155,7 +157,7 @@ public static class TagEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var tag = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             return tag is null ? Results.NotFound() : Results.Ok(await usage.ScanAsync(db, tag, access, cancellationToken));
-        }).RequireAuthorization(AccessPolicies.Configure);
+        }).Produces<TagUsageView>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/{id:int}/rebind", async (
             int id,
@@ -165,13 +167,17 @@ public static class TagEndpoints
             TagUsageService usage, ConfigReloader reloader,
             CancellationToken cancellationToken) =>
         {
-            if (request.TargetTagId <= 0 || request.TargetTagId == id) return EndpointHelpers.BadRequest("请选择另一个测点作为替换目标");
+            if (request.TargetTagId <= 0 || request.TargetTagId == id)
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.rebind.target", nameof(request.TargetTagId), "请选择另一个测点作为替换目标")]);
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var source = await db.Tags.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             var target = await db.Tags.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.TargetTagId, cancellationToken);
             if (source is null || target is null) return Results.NotFound();
-            if (source.Kind != TagKind.Physical) return EndpointHelpers.BadRequest("只有物理测点支持替换引用");
+            if (source.Kind != TagKind.Physical)
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.rebind.kind", nameof(Tag.Kind), "只有物理测点支持替换引用")]);
             if (await EndpointHelpers.RequireTagsAsync(http, [id, request.TargetTagId], Permission.Configure, $"替换测点引用 #{id}") is { } denied) return denied;
             var access = await http.GetAccessAsync();
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -192,14 +198,15 @@ public static class TagEndpoints
                 await transaction.RollbackAsync(cancellationToken);
                 return ex.Forbidden
                     ? Results.Json(new { message = ex.Message }, statusCode: StatusCodes.Status403Forbidden)
-                    : EndpointHelpers.BadRequest(ex.Message);
+                    : EndpointHelpers.ValidationProblem(
+                        [EndpointHelpers.Issue("tag.rebind.invalid", null, ex.Message)]);
             }
             catch (DbUpdateConcurrencyException)
             {
                 await transaction.RollbackAsync(cancellationToken);
                 return Results.Conflict(new { message = "配置已被其他用户修改，请刷新后重试" });
             }
-        }).RequireAuthorization(AccessPolicies.Configure);
+        }).Produces<TagRebindResult>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("", async (
             TagRequest request,
@@ -213,7 +220,8 @@ public static class TagEndpoints
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
-                return EndpointHelpers.BadRequest($"设备不存在：{request.DeviceId}");
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.device.notFound", nameof(request.DeviceId), $"设备不存在：{request.DeviceId}")]);
             }
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"创建测点：{request.Name}") is { } denied) return denied;
@@ -222,8 +230,8 @@ public static class TagEndpoints
             var result = await tags.CreateAsync(db, MapTag(request), device, cancellationToken);
             return result.Success
                 ? Results.Created($"/api/tags/{result.Tag!.Id}", result.Tag)
-                : EndpointHelpers.BadRequest(result.Message);
-        }).RequireAuthorization(AccessPolicies.Configure);
+                : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
+        }).Produces<Tag>(StatusCodes.Status201Created).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/batch", async (
             TagBatchRequest request,
@@ -234,12 +242,14 @@ public static class TagEndpoints
         {
             if (request.Tags is null || request.Tags.Count == 0)
             {
-                return EndpointHelpers.BadRequest("请至少生成一个测点");
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.batch.empty", nameof(request.Tags), "请至少生成一个测点")]);
             }
 
             if (request.Tags.Count > 500)
             {
-                return EndpointHelpers.BadRequest("单次批量建点最多 500 个");
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.batch.tooMany", nameof(request.Tags), "单次批量建点最多 500 个")]);
             }
 
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -247,12 +257,15 @@ public static class TagEndpoints
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
-                return EndpointHelpers.BadRequest($"设备不存在：{request.DeviceId}");
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.device.notFound", nameof(request.DeviceId), $"设备不存在：{request.DeviceId}")]);
             }
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"批量创建测点：{device.Name}") is { } denied) return denied;
 
             var tags = new List<Tag>(request.Tags.Count);
+            var issues = new List<EndpointHelpers.ApiIssue>();
+            string? firstIssueMessage = null;
             for (var i = 0; i < request.Tags.Count; i++)
             {
                 var item = request.Tags[i];
@@ -260,24 +273,35 @@ public static class TagEndpoints
                     request.DeviceId, item.Name, item.Description, item.Area, item.Address, item.DataType,
                     item.Scale, item.Offset, item.Unit, item.Writable, item.ArchiveMode, item.Deadband,
                     item.ArchivePeriodSec, item.MinValue, item.MaxValue, item.DbNumber, item.BitOffset, item.NodeId, item.ScanRateMs, item.TextLength));
-                var error = ConfigurationValidator.Tag(tag, device);
-                if (error is not null)
+                var tagIssues = ConfigurationValidator.TagIssues(tag, device);
+                if (tagIssues.Count > 0)
                 {
-                    return EndpointHelpers.BadRequest($"第 {i + 1} 个测点“{tag.Name}”：{error}");
+                    firstIssueMessage ??= $"第 {i + 1} 个测点“{tag.Name}”：{tagIssues[0].Message}";
+                    if (issues.Count < 20)
+                        issues.AddRange(tagIssues.Take(20 - issues.Count).Select(issue => issue.ToApiIssue(i + 1)));
+                    continue;
                 }
 
                 tags.Add(tag);
             }
 
+            if (issues.Count > 0)
+            {
+                return EndpointHelpers.ValidationProblem(issues, firstIssueMessage);
+            }
+
             var duplicated = tags.GroupBy(x => x.Name).Where(g => g.Count() > 1).Select(g => g.Key).Take(5).ToArray();
             if (duplicated.Length > 0)
             {
-                return EndpointHelpers.BadRequest($"测点名称重复：{string.Join("、", duplicated)}");
+                return EndpointHelpers.ValidationProblem(
+                    duplicated.Select(name => EndpointHelpers.Issue("tag.name.duplicateInBatch", nameof(Tag.Name), $"测点名称重复：{name}")).ToArray(),
+                    $"测点名称重复：{string.Join("、", duplicated)}");
             }
 
             if (await tagCommands.ValidateLaneBudgetAsync(db, device.Id, tags.Select(x => x.ScanRateMs), null, cancellationToken) is string laneError)
             {
-                return EndpointHelpers.BadRequest(laneError);
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.scanRate.laneBudget", nameof(Tag.ScanRateMs), laneError)]);
             }
 
             var names = tags.Select(x => x.Name).ToArray();
@@ -288,7 +312,9 @@ public static class TagEndpoints
                 .ToListAsync(cancellationToken);
             if (existing.Count > 0)
             {
-                return EndpointHelpers.BadRequest($"测点名称已存在：{string.Join("、", existing)}");
+                return EndpointHelpers.ValidationProblem(
+                    existing.Select(name => EndpointHelpers.Issue("tag.name.exists", nameof(Tag.Name), $"测点名称已存在：{name}")).ToArray(),
+                    $"测点名称已存在：{string.Join("、", existing)}");
             }
 
             // 批量建点最多 500 个：逐条审计会淹没记录，改为保留下面这一条汇总。
@@ -303,12 +329,13 @@ public static class TagEndpoints
             }
             catch (DbUpdateException)
             {
-                return EndpointHelpers.BadRequest("测点名称与现有配置冲突，请调整名称后重试");
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.name.conflict", nameof(Tag.Name), "测点名称与现有配置冲突，请调整名称后重试")]);
             }
 
             await reloader.ReloadAsync(cancellationToken);
-            return Results.Ok(new { created = tags.Count });
-        }).RequireAuthorization(AccessPolicies.Configure);
+            return Results.Ok(new TagBatchCreated(tags.Count));
+        }).Produces<TagBatchCreated>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPut("/{id:int}", async (
             int id,
@@ -331,15 +358,18 @@ public static class TagEndpoints
             var device = await db.Devices.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.DeviceId, cancellationToken);
             if (device is null)
             {
-                return EndpointHelpers.BadRequest($"设备不存在：{request.DeviceId}");
+                return EndpointHelpers.ValidationProblem(
+                    [EndpointHelpers.Issue("tag.device.notFound", nameof(request.DeviceId), $"设备不存在：{request.DeviceId}")]);
             }
 
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"修改测点 #{id} 归属设备") is { } deniedTarget) return deniedTarget;
             var updated = MapTag(request);
             updated.Id = id;
             var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken);
-            return result.Success ? Results.Ok(result.Tag) : EndpointHelpers.BadRequest(result.Message);
-        }).RequireAuthorization(AccessPolicies.Configure);
+            return result.Success
+                ? Results.Ok(result.Tag)
+                : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
+        }).Produces<Tag>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (
             int id,
@@ -361,9 +391,9 @@ public static class TagEndpoints
             var result = await tags.DeleteAsync(db, tag, cancellationToken);
             if (result.Success) return Results.NoContent();
             return result.Error == TagCommandError.Conflict
-                ? Results.Conflict(new { message = result.Message })
-                : EndpointHelpers.BadRequest(result.Message);
-        }).RequireAuthorization(AccessPolicies.Configure);
+                ? Results.Conflict(new { message = result.Message, issues = result.Issues.Select(issue => issue.ToApiIssue()).ToArray() })
+                : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
+        }).Produces(StatusCodes.Status204NoContent).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapGet("/export", async (
             HttpContext http,
@@ -412,6 +442,7 @@ public static class TagEndpoints
         })
             .DisableAntiforgery()
             .RequireAuthorization(AccessPolicies.Configure)
+            .Produces<ImportResult>(StatusCodes.Status200OK)
             // 万点级导入同样超过默认读超时，放宽到写超时。
             .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
     }

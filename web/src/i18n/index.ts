@@ -1,8 +1,4 @@
 import { createI18n } from 'vue-i18n'
-import zhFlow from './locales/zh-CN'
-import enFlow from './locales/en-US'
-import zhCN from './locales/zh-CN.json'
-import enUS from './locales/en-US.json'
 
 export type AppLocale = 'zh-CN' | 'en-US'
 export const LOCALE_KEY = 'scada_locale'
@@ -16,16 +12,22 @@ function initial(): AppLocale {
   return normalizeLocale(localStorage.getItem(LOCALE_KEY)) ?? 'zh-CN'
 }
 
-// 文案以中文为源（zh-CN.json 由 scripts/i18n-extract.py 生成），英文缺失时回退中文；npm run i18n:check 检查未翻译键。
-// 目前两种语言都静态打包：英文包约占首屏脚本的 29%（79 KB gzip），
-// 但改成动态加载需要 top-level await（build.target 不允许）或把 400+ 处模块级 tr() 改成惰性取词，
-// 两者都会动到浏览器基线与全局初始化顺序，留作单独排期（见 docs/quality/full-review-2026-11.md）。
+// 只加载当前语言包：中文站点不再为首屏携带约 79 KB（gzip）的英文文案。
+// 顶层 await 让所有 `import { tr } from '../i18n'` 的模块等待语言包就绪，
+// 因此模块级的 400+ 处 tr() 常量仍然取到正确语言；切换语言本来就会整页重载。
+const active = initial()
+const zhFlow = (await import('./locales/zh-CN')).default
+const zhCN = (await import('./locales/zh-CN.json')).default
+const zhMessages = { ...zhCN, ...zhFlow }
+const enMessages = active === 'en-US'
+  ? await Promise.all([import('./locales/en-US'), import('./locales/en-US.json')]).then(([flow, json]) => ({ ...json.default, ...flow.default }))
+  : zhMessages
 export const i18n = createI18n({
-  legacy: false, globalInjection: true, locale: initial(), fallbackLocale: 'zh-CN',
-  messages: { 'zh-CN': { ...zhCN, ...zhFlow }, 'en-US': { ...enUS, ...enFlow } },
+  legacy: false, globalInjection: true, locale: active, fallbackLocale: 'zh-CN',
+  messages: { 'zh-CN': zhMessages, 'en-US': enMessages },
   missingWarn: false, fallbackWarn: false
 })
-document.documentElement.lang = i18n.global.locale.value
+document.documentElement.lang = active
 
 export const currentLocale = (): AppLocale => i18n.global.locale.value as AppLocale
 export function t(key: string, args?: unknown[] | Record<string, unknown>): string {

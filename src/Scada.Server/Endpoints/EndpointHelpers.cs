@@ -26,6 +26,29 @@ public static class EndpointHelpers
     public static IResult BadRequest(string message) =>
         Results.BadRequest(new { message });
 
+    /// <summary>
+    /// 校验失败中的单条问题。与 <see cref="ValidationIssue"/> 相比多一个 <c>Row</c>，
+    /// 用于批量建点/导入时定位到具体行。
+    /// </summary>
+    public sealed record ApiIssue(string Code, string? Field, string Message, int? Row = null);
+
+    /// <summary>字段名统一转成前端使用的 camelCase（<c>Name</c> → <c>name</c>）。</summary>
+    public static ApiIssue Issue(string code, string? field, string message, int? row = null) =>
+        new(code, field is null ? null : JsonNamingPolicy.CamelCase.ConvertName(field), message, row);
+
+    /// <summary>
+    /// 统一的 400 响应：<c>message</c> 保留首条文案供旧调用方与日志使用，
+    /// <c>issues</c> 供前端按字段标红、按错误码本地化。
+    /// </summary>
+    public static IResult ValidationProblem(IReadOnlyList<ApiIssue> issues, string? message = null)
+    {
+        if (issues.Count == 0) return BadRequest(message ?? "请求无效");
+        return Results.BadRequest(new { message = message ?? issues[0].Message, issues });
+    }
+
+    public static ApiIssue ToApiIssue(this ValidationIssue issue, int? row = null) =>
+        Issue(issue.Code, issue.Field, issue.Message, row);
+
     // 列表仍返回数组。满页时用响应头告诉界面还有更早的，以及下一页从哪个编号接着取。
     public static void MarkPage(HttpContext http, bool more, long? next)
     {

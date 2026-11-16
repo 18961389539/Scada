@@ -16,7 +16,12 @@ namespace Scada.Data.Infrastructure;
 public sealed class SqlitePragmaInterceptor(bool fullDurability = false, int cacheKb = 8_000, long mmapBytes = 0) : DbConnectionInterceptor
 {
     private readonly string _pragmas =
-        "PRAGMA journal_mode=WAL;"
+        // auto_vacuum 只在"库里还没有表"时设置才生效：新现场的库正是由这条语句建起来的第一批 DDL，
+        // 之后删除数据就能用 incremental_vacuum 把空闲页真正还给文件系统。
+        // 已存在的库执行这条不会报错但也不会改变模式（SQLite 要求 VACUUM 重建才切换），
+        // 维护任务里的 incremental_vacuum 对老库因此是 no-op——需要人工 VACUUM 一次才会生效。
+        "PRAGMA auto_vacuum=INCREMENTAL;"
+        + "PRAGMA journal_mode=WAL;"
         + (fullDurability ? " PRAGMA synchronous=FULL;" : " PRAGMA synchronous=NORMAL;")
         + " PRAGMA foreign_keys=ON;"
         + " PRAGMA busy_timeout=5000;"

@@ -40,6 +40,18 @@ public static partial class DatabaseInitializer
         await SeedAdminAsync(ctx, db);
         await SeedDemoAsync(ctx, db);
         await ReloadSnapshotAsync(ctx);
+        // 预热授权配额计数：迁移已完成、没有业务事务，且服务还没开始接收请求。
+        // 放到这里而不是拦截器的保存路径上，是因为新连接初始化要执行 PRAGMA journal_mode，
+        // 在调用方的显式事务里做会等写锁到命令超时。
+        if (services.GetService<LicenseQuotaCounter>() is { } quota)
+        {
+            // 最多等 2 秒：测试夹具与只读部署可能在初始化后立刻开事务，等锁会把启动拖到命令超时。
+            // 预热失败不影响启动，配额校验会在下一次重算前放行。
+            using var warmup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            warmup.CancelAfter(TimeSpan.FromSeconds(2));
+            try { await quota.GetAsync(warmup.Token); }
+            catch (Exception ex) { ctx.Logger?.LogDebug(ex, "预热授权配额计数失败，配额校验会在下次重算前放行"); }
+        }
     }
 
     private sealed record InitContext(

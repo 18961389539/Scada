@@ -52,6 +52,10 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
     public static List<ControlStepResult> InitialResults(IReadOnlyList<ControlSequenceStep> steps) =>
         steps.Select((x, i) => new ControlStepResult { Index = i + 1, StepId = x.Id, Type = x.Type, Name = x.Name, TagId = x.TagId, Value = x.Value }).ToList();
 
+    // 抢占后进程崩溃（或执行抛异常没走到终态）会留下 Executing：超过该时长转 Failed，
+    // 由操作员核对现场后重新发起。不能留在 Executing 让界面看起来"正在执行"。
+    private const long ExecutingTimeoutMs = 300_000;
+
     public async Task ExpireAsync(CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -59,6 +63,15 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         var now = ScadaTime.NowMs();
         var expired = await runtime.ControlRequests.Where(x => x.Status == ControlRequestStatus.Pending && x.ExpiresTs < now).ToListAsync(ct);
         foreach (var r in expired) { r.Status = ControlRequestStatus.Expired; r.DecidedTs = now; runtime.OperationLogs.Add(Audit(r.RequestedByUserId, r.RequestedBy, "控制复核超时", $"请求 {r.Id} 超时未复核", null, r.TagId)); }
+        var stuck = await runtime.ControlRequests
+            .Where(x => x.Status == ControlRequestStatus.Executing && x.DecidedTs != null && x.DecidedTs < now - ExecutingTimeoutMs)
+            .ToListAsync(ct);
+        foreach (var r in stuck)
+        {
+            r.Status = ControlRequestStatus.Failed;
+            r.ResultMessage = "执行中断（服务重启或异常），请核对现场状态后重新发起";
+            runtime.OperationLogs.Add(Audit(r.RequestedByUserId, "system", "控制请求执行中断", $"请求 {r.Id}：{r.ResultMessage}", null, r.TagId));
+        }
         await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
         foreach (var r in expired.Where(x => x.RecipeDownloadId is not null))
@@ -88,14 +101,33 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         await ExpireAsync(ct);
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        var request = await runtime.ControlRequests.SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new ControlWorkflowException("复核请求不存在", 404);
+        // 只读一次用于权限与自审判断；后续状态变更全部走条件更新，不依赖变更跟踪。
+        var request = await runtime.ControlRequests.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct)
+            ?? throw new ControlWorkflowException("复核请求不存在", 404);
         if (request.Status != ControlRequestStatus.Pending) throw new ControlWorkflowException($"请求已处理（{request.Status}）", 409);
         var self = approver.UserId == request.RequestedByUserId;
         if (approve && self) throw new ControlWorkflowException("双人复核须由另一位用户批准", 403);
-        request.DecidedByUserId = approver.UserId; request.DecidedBy = approver.UserName; request.DecidedTs = ScadaTime.NowMs(); request.Comment = comment?.Trim();
+
+        var now = ScadaTime.NowMs();
+        var note = comment?.Trim();
+        var decided = approve ? ControlRequestStatus.Executing : self ? ControlRequestStatus.Cancelled : ControlRequestStatus.Rejected;
+        // 抢占用条件更新：并发复核时只有一个人能把 Pending 改掉，另一个人影响 0 行后返回 409。
+        // 以前是无条件赋值，两人都能通过上面的状态检查，控制命令因此会下发两次。
+        var claimed = await runtime.ControlRequests
+            .Where(x => x.Id == id && x.Status == ControlRequestStatus.Pending)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(x => x.Status, decided)
+                .SetProperty(x => x.DecidedByUserId, approver.UserId)
+                .SetProperty(x => x.DecidedBy, approver.UserName)
+                .SetProperty(x => x.DecidedTs, now)
+                .SetProperty(x => x.Comment, note)
+                .SetProperty(x => x.ResultMessage, approve ? "执行中" : (string?)null), ct);
+        if (claimed == 0) throw new ControlWorkflowException("请求已被其他复核人处理，请刷新后查看", 409);
+        request.Status = decided; request.DecidedByUserId = approver.UserId; request.DecidedBy = approver.UserName;
+        request.DecidedTs = now; request.Comment = note; request.ResultMessage = approve ? "执行中" : null;
+
         if (!approve)
         {
-            request.Status = self ? ControlRequestStatus.Cancelled : ControlRequestStatus.Rejected;
             runtime.OperationLogs.Add(Audit(approver.UserId, approver.UserName, self ? "撤回控制申请" : "驳回控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
             await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
@@ -103,8 +135,6 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 await recipes.DecidedAsync(rejected, false, new(request.RequestedByUserId, request.RequestedBy), null, self ? "申请人撤回" : $"复核人 {approver.UserName} 驳回", ct);
             return (request, null, null);
         }
-        // 标记已执行并落库。注意：无条件更新且无并发令牌，并发复核时两人都能通过上面的 Pending 检查。
-        request.Status = ControlRequestStatus.Executed;
         runtime.OperationLogs.Add(Audit(approver.UserId, approver.UserName, "批准控制申请", $"请求 {request.Id}（申请人 {request.RequestedBy}）{comment}", null, request.TagId));
         await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
@@ -113,29 +143,42 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
             try
             {
                 await recipes.DecidedAsync(downloadId, true, new(request.RequestedByUserId, request.RequestedBy), approver.UserName, "", ct);
+                request.Status = ControlRequestStatus.Executed;
                 request.ResultMessage = $"已开始下发 #{downloadId}";
             }
             catch (Exception ex) { request.Status = ControlRequestStatus.Failed; request.ResultMessage = Trim(ex.Message); }
-            await db.SaveChangesAsync(CancellationToken.None);
-            await runtime.SaveChangesAsync(CancellationToken.None);
+            await FinishAsync(runtime, request);
             return (request, null, null);
         }
         if (request.Kind == "sequence")
         {
             var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == request.SequenceId, ct);
-            if (sequence is null) { request.Status = ControlRequestStatus.Failed; request.ResultMessage = "顺控已删除"; await runtime.SaveChangesAsync(ct); return (request, null, null); }
+            if (sequence is null)
+            {
+                request.Status = ControlRequestStatus.Failed; request.ResultMessage = "顺控已删除";
+                await FinishAsync(runtime, request);
+                return (request, null, null);
+            }
             var run = await StartAsync(sequence, new(request.RequestedByUserId, request.RequestedBy), approver.UserName, ct);
-            request.RunId = run.Id; request.ResultMessage = $"已启动运行 #{run.Id}"; await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
+            request.RunId = run.Id; request.ResultMessage = $"已启动运行 #{run.Id}";
+            await FinishAsync(runtime, request);
             return (request, null, run);
         }
         var result = await commands.SubmitAsync(new ControlSubmission(request.TagId!.Value, request.Value!.Value, new(request.RequestedByUserId, request.RequestedBy), ControlOrigin.Operator,
             request.Source, Confirmed: true, RequestId: request.Id, PreApproved: true, ApprovedBy: approver.UserName), ct);
         request.Status = result.Success ? ControlRequestStatus.Executed : ControlRequestStatus.Failed; request.ResultMessage = Trim(result.Message);
-        await db.SaveChangesAsync(CancellationToken.None);
-        await runtime.SaveChangesAsync(CancellationToken.None);
+        await FinishAsync(runtime, request);
         return (request, result, null);
     }
+
+    // 终态写入：request 是 AsNoTracking 读出来的，SaveChanges 不会持久化它，必须显式更新。
+    // 不受请求取消影响——走到这里控制可能已经下发，记录状态必须落库；写失败则靠 ExpireAsync 的超时回收兜底。
+    private static Task<int> FinishAsync(RuntimeDbContext runtime, ControlRequest request) =>
+        runtime.ControlRequests.Where(x => x.Id == request.Id)
+            .ExecuteUpdateAsync(set => set
+                .SetProperty(x => x.Status, request.Status)
+                .SetProperty(x => x.ResultMessage, request.ResultMessage)
+                .SetProperty(x => x.RunId, request.RunId), CancellationToken.None);
 
     public async Task<ControlSequenceRun> StartAsync(ControlSequence sequence, ControlActor actor, string? approvedBy, CancellationToken ct)
     {

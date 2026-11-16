@@ -136,7 +136,7 @@ public sealed class SessionSecurityTests
         }
         finally
         {
-            try { Directory.Delete(Path.GetDirectoryName(path)!, true); } catch { }
+            TestSqlite.TryDeleteDirectory(Path.GetDirectoryName(path)!);
         }
     }
 

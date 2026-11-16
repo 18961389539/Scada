@@ -8,6 +8,17 @@ namespace Scada.Desktop.Tests;
 
 public sealed class ServerApiClientTests
 {
+    /// <summary>
+    /// 终端只连内网服务端；默认 handler 若读取系统代理，企业镜像里会出现
+    /// "浏览器能打开、客户端连不上"。这条守住 CreateHandler 的 UseProxy=false。
+    /// </summary>
+    [Fact]
+    public void DefaultHandlerBypassesSystemProxy()
+    {
+        using var handler = ServerApiClient.CreateHandler();
+        Assert.False(handler.UseProxy);
+    }
+
     [Fact]
     public async Task ReadsSiteInfo()
     {
@@ -103,6 +114,70 @@ public sealed class ServerApiClientTests
         var exception = await Assert.ThrowsAsync<ApiException>(() => client.GetScreensAsync("expired"));
         Assert.Equal(401, exception.StatusCode);
         Assert.Contains("登录会话已失效", exception.Message);
+    }
+
+    [Fact]
+    public async Task SendsHeartbeatAndParsesPolicy()
+    {
+        HttpRequestMessage? captured = null;
+        using var client = Client(request =>
+        {
+            captured = request;
+            return Json(HttpStatusCode.OK,
+                """{"ok":true,"serverTs":1,"node":"A","haRole":"Primary","policy":{"minimumVersion":"1.0.0","latestVersion":"1.2.0","downloadUrl":"https://example.com/a.zip","updateRequired":false,"updateAvailable":true},"heartbeatSeconds":30}""");
+        });
+
+        var result = await client.HeartbeatAsync("token", new HeartbeatPayload(
+            Guid.NewGuid().ToString("D"), "PC", "operator", "1.1.0", "131.0", "boot", "screen", 1, "总览", "machine", null));
+
+        Assert.Equal(HttpMethod.Post, captured!.Method);
+        Assert.Equal("/api/desktop/heartbeat", captured.RequestUri!.AbsolutePath);
+        Assert.True(result.Ok);
+        Assert.Equal("A", result.Node);
+        Assert.True(result.Policy!.UpdateAvailable);
+        Assert.Equal(30, result.HeartbeatSeconds);
+    }
+
+    [Fact]
+    public async Task Heartbeat503ExposesPrimaryUrl()
+    {
+        using var client = Client(_ =>
+        {
+            var response = Json(HttpStatusCode.ServiceUnavailable, """{"message":"standby","primaryUrl":"http://primary:5080"}""");
+            response.Headers.Add("X-Scada-Primary", "http://primary:5080");
+            return response;
+        });
+
+        var exception = await Assert.ThrowsAsync<ApiException>(() => client.HeartbeatAsync(
+            "token", new HeartbeatPayload(Guid.NewGuid().ToString("D"), "PC", "operator", "1.1.0", null, null, "screen", 1, null, "user", null)));
+        Assert.Equal(503, exception.StatusCode);
+        Assert.Equal("http://primary:5080", exception.PrimaryUrl);
+    }
+
+    [Fact]
+    public async Task ReadsHaRole()
+    {
+        using var client = Client(_ => Json(HttpStatusCode.OK,
+            """{"enabled":true,"node":"B","role":"Standby","primaryUrl":"http://primary:5080"}"""));
+        var role = await client.GetHaRoleAsync();
+        Assert.NotNull(role);
+        Assert.True(role!.Enabled);
+        Assert.Equal("Standby", role.Role);
+        Assert.Equal("http://primary:5080", role.PrimaryUrl);
+    }
+
+    [Fact]
+    public async Task List503ExposesPrimaryUrl()
+    {
+        using var client = Client(_ =>
+        {
+            var response = Json(HttpStatusCode.ServiceUnavailable, """{"message":"standby"}""");
+            response.Headers.Add("X-Scada-Primary", "http://primary:5080");
+            return response;
+        });
+
+        var exception = await Assert.ThrowsAsync<ApiException>(() => client.GetScreensAsync("token"));
+        Assert.Equal("http://primary:5080", exception.PrimaryUrl);
     }
 
     private static ServerApiClient Client(Func<HttpRequestMessage, HttpResponseMessage> responder) =>

@@ -357,8 +357,8 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
         public virtual async Task DisposeAsync()
         {
             if (_factory is not null) await _factory.DisposeAsync();
-            TestSqlite.ClearPools(_root);
-            try { Directory.Delete(_root, true); } catch { }
+            // 宿主停止后句柄释放是异步的：给一个自适应窗口，删不掉再交给进程退出兜底。
+            await TestSqlite.TryDeleteDirectoryAsync(_root);
         }
     }
 }

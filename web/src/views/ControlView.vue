@@ -118,123 +118,9 @@
     </el-tabs>
   </div>
 
-  <el-dialog v-model="pointVisible" :title="$t('controlView.k754e7b', [pointForm ? tagName(pointForm.tagId) : ''])" width="560px" :before-close="pointEditor.beforeClose" :close-on-click-modal="!savingPoint" :close-on-press-escape="!savingPoint" :show-close="!savingPoint" data-test="point-dialog" @keydown="pointEditor.onKey">
-    <el-alert v-if="pointError" :title="pointError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="point-save-error" />
-    <el-form v-if="pointForm" label-width="120px" size="small" :disabled="savingPoint">
-      <el-form-item :label="$t('controlView.k2f3719')"><el-switch v-model="pointForm.requireConfirm" /><span class="tiny muted">　{{ $t('controlView.k613065') }}</span></el-form-item>
-      <el-form-item :label="$t('controlView.kfabc6b')"><el-switch v-model="pointForm.dualApproval" data-test="point-dual" />　{{ $t('controlView.k222460') }} <template v-if="pointForm.dualApproval"><el-input-number v-model="pointForm.approvalTimeoutSec" :min="30" :max="3600" /> {{ $t('controlView.keb6aab') }}</template></el-form-item>
-      <el-form-item :label="$t('controlView.kb3bb3c')"><el-input-number v-model="pointForm.limitMin" :controls="false" :placeholder="$t('controlView.kaf3af1')" style="width: 110px" /> ～ <el-input-number v-model="pointForm.limitMax" :controls="false" :placeholder="$t('controlView.k0517c1')" style="width: 110px" data-test="point-max" /></el-form-item>
-      <el-form-item :label="$t('controlView.k2a415d')"><el-input-number v-model="pointForm.maxStep" :controls="false" :min="0" :placeholder="$t('controlView.k09c4fc')" style="width: 110px" /></el-form-item>
-      <el-form-item :label="$t('controlView.k0f7d64')"><el-input v-model="pointForm.permitExpression" :placeholder="$t('controlView.k89c17f')" data-test="point-permit" /></el-form-item>
-      <el-form-item v-if="pointForm.permitExpression?.trim()" :label="$t('controlView.k296eb0')"><el-input v-model="pointForm.permitMessage" maxlength="200" :placeholder="$t('controlView.k0aa008')" /></el-form-item>
-      <el-form-item :label="$t('controlView.k463dc4')"><el-input v-model="pointForm.feedbackExpression" :placeholder="$t('controlView.k79b797')" /></el-form-item>
-      <el-form-item v-if="pointForm.feedbackExpression?.trim()" :label="$t('controlView.k7ca8c6')"><el-input-number v-model="pointForm.feedbackTimeoutMs" :min="100" :max="600000" :step="1000" /> {{ $t('controlView.kf3c3d5') }}</el-form-item>
-    </el-form>
-    <template #footer><el-button :disabled="savingPoint" @click="pointEditor.close()">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingPoint" data-test="point-save" @click="savePoint()">{{ $t('controlView.kfadf24') }}</el-button></template>
-  </el-dialog>
+  <ControlPointDialog ref="pointDialog" :points="points" :tag-name="tagName" @saved="reloadPoints" />
 
-  <el-dialog v-model="sequenceVisible" :title="sequenceForm.id ? $t('controlView.k38ca13') : $t('controlView.k69e7ba')" width="1240px" :before-close="sequenceEditor.beforeClose" :close-on-click-modal="!savingSequence" :close-on-press-escape="!savingSequence" :show-close="!savingSequence" data-test="sequence-dialog" @keydown="sequenceEditor.onKey">
-    <el-alert v-if="sequenceError" :title="sequenceError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="sequence-save-error" />
-    <div :inert="savingSequence" :aria-busy="savingSequence">
-    <el-form label-width="90px" size="small" :disabled="savingSequence">
-      <el-form-item :label="$t('controlView.k1be7ae')"><el-input v-model="sequenceForm.name" maxlength="100" data-test="sequence-name" /></el-form-item>
-      <el-form-item :label="$t('controlView.k17fc93')"><el-select v-model="sequenceForm.areaId" style="width: 200px" data-test="sequence-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select>
-        <el-checkbox v-model="sequenceForm.dualApproval" style="margin-left: 16px">{{ $t('controlView.kf88a83') }}</el-checkbox></el-form-item>
-      <el-form-item :label="$t('controlView.k26670d')"><el-input v-model="sequenceForm.description" maxlength="500" /></el-form-item>
-    </el-form>
-    <div class="toolbar">
-      <el-radio-group v-model="editorMode" size="small" data-test="sequence-editor-mode"><el-radio-button value="flow">{{ $t('controlView.k3bffba') }}</el-radio-button><el-radio-button value="table">{{ $t('controlView.k150074') }}</el-radio-button></el-radio-group>
-      <template v-if="editorMode === 'flow'">
-        <el-dropdown trigger="click" @command="(type: ControlStepType) => addStep(type)"><el-button size="small" data-test="flow-add">{{ $t('controlView.k2517d1') }}</el-button>
-          <template #dropdown><el-dropdown-menu><el-dropdown-item v-for="(label, key) in stepTypeLabels" :key="key" :command="key" :data-test="`flow-add-${key}`">{{ label }}</el-dropdown-item></el-dropdown-menu></template>
-        </el-dropdown>
-      </template>
-      <span class="spacer" />
-      <el-tag v-if="validation" size="small" :type="validation.ok ? 'success' : 'danger'" data-test="sequence-validation">{{ validation.ok ? $t('controlView.k7035f8') : validation.message }}</el-tag>
-    </div>
-    <div v-if="editorMode === 'flow'" class="flow-editor">
-      <SequenceFlow v-model="selectedStepId" :steps="sequenceForm.steps" :editable="!savingSequence" :error-ids="validation?.stepIds ?? []" :describe="describeStep" :height="520" style="flex: 1; min-width: 0" @changed="scheduleValidate()" />
-      <div class="flow-props" data-test="flow-props">
-        <template v-if="selectedStep">
-          <el-form label-width="76px" size="small">
-            <el-form-item :label="$t('controlView.k9f42da')"><el-input :model-value="selectedStep.id ?? ''" data-test="prop-id" @change="(v: string) => renameStep(selectedStep!, v)" /></el-form-item>
-            <el-form-item :label="$t('controlView.ke4e46c')"><el-select v-model="selectedStep.type" data-test="prop-type" @change="scheduleValidate()"><el-option v-for="(label, key) in stepTypeLabels" :key="key" :value="key" :label="label" /></el-select></el-form-item>
-            <el-form-item :label="$t('controlView.k07d0b5')"><el-input v-model="selectedStep.name" data-test="prop-name" /></el-form-item>
-            <template v-if="selectedStep.type === 'write'">
-              <el-form-item :label="$t('controlView.kc570f0')"><el-select v-model="selectedStep.tagId" filterable data-test="prop-tag" @change="scheduleValidate()"><el-option v-for="t in configurableTags" :key="t.id" :value="t.id" :label="tagName(t.id)" /></el-select></el-form-item>
-              <el-form-item :label="$t('controlView.k5ae08a')"><el-input-number v-model="selectedStep.value" :controls="false" data-test="prop-value" @change="scheduleValidate()" /></el-form-item>
-              <el-form-item :label="$t('controlView.k04d7bd')"><el-input v-model="selectedStep.confirmExpression" :placeholder="$t('controlView.kc64017')" @change="scheduleValidate()" /></el-form-item>
-            </template>
-            <el-form-item v-if="selectedStep.type === 'wait' || selectedStep.type === 'condition'" :label="$t('controlView.k72f1cf')"><el-input v-model="selectedStep.expression" :placeholder="$t('controlView.kc135ba')" data-test="prop-expression" @change="scheduleValidate()" /></el-form-item>
-            <template v-if="selectedStep.type === 'condition'">
-              <el-form-item :label="$t('controlView.kd90926')"><el-select v-model="selectedStep.then" clearable @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
-              <el-form-item :label="$t('controlView.k640232')"><el-select v-model="selectedStep.else" clearable :placeholder="$t('controlView.kea0ef2')" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
-            </template>
-            <template v-if="selectedStep.type === 'parallel'">
-              <el-form-item :label="$t('controlView.k2f6f9d')"><el-select v-model="selectedStep.branches" multiple @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
-              <el-form-item :label="$t('controlView.k871c34')"><el-select v-model="selectedStep.join" @change="scheduleValidate()"><el-option v-for="id in joinIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
-            </template>
-            <el-form-item v-if="selectedStep.type === 'join'" :label="$t('controlView.k2607fc')"><el-radio-group v-model="selectedStep.joinMode" @change="scheduleValidate()"><el-radio-button value="all">{{ $t('controlView.k778fc8') }}</el-radio-button><el-radio-button value="any">{{ $t('controlView.k31af9a') }}</el-radio-button></el-radio-group></el-form-item>
-            <template v-if="selectedStep.type === 'jump'">
-              <el-form-item :label="$t('controlView.kfb25a9')"><el-select v-model="selectedStep.target" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
-              <el-form-item :label="$t('controlView.k046305')"><el-input-number v-model="selectedStep.maxIterations" :min="1" :max="1000" data-test="prop-max" @change="scheduleValidate()" /></el-form-item>
-            </template>
-            <el-form-item v-if="['write', 'wait', 'join'].includes(selectedStep.type ?? 'write')" :label="$t('controlView.kea0ef2')"><el-select v-model="selectedStep.next" clearable :placeholder="$t('controlView.k25bc02')" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></el-form-item>
-            <el-form-item v-if="['write', 'wait'].includes(selectedStep.type ?? 'write')" :label="$t('controlView.k16436e')"><el-input-number v-model="selectedStep.timeoutMs" :min="100" :max="600000" :step="1000" data-test="prop-timeout" @change="scheduleValidate()" /></el-form-item>
-            <el-form-item v-if="!['end', 'join'].includes(selectedStep.type ?? 'write')" :label="$t('controlView.kb05bd8')">
-              <el-select v-model="selectedStep.onFailure" clearable :placeholder="$t('controlView.ka17f70')" style="width: 90px" data-test="prop-failure" @change="scheduleValidate()"><el-option value="stop" :label="$t('controlView.ka17f70')" /><el-option value="continue" :label="$t('controlView.k1fc1af')" /><el-option value="goto" :label="$t('controlView.kfb25a9')" /></el-select>
-              <el-select v-if="selectedStep.onFailure === 'goto'" v-model="selectedStep.onFailureGoto" style="width: 90px" @change="scheduleValidate()"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
-            </el-form-item>
-          </el-form>
-          <el-button size="small" type="danger" data-test="prop-delete" @click="deleteStep(selectedStep!)">{{ $t('controlView.k3a4b3d') }}</el-button>
-        </template>
-        <p v-else class="tiny muted">{{ $t('controlView.kb0349e') }}</p>
-      </div>
-    </div>
-    <el-table v-else :data="sequenceForm.steps" size="small" data-test="sequence-steps">
-      <el-table-column :label="$t('controlView.k9f42da')" width="90"><template #default="{ row }"><el-input v-model="row.id" size="small" /></template></el-table-column>
-      <el-table-column :label="$t('controlView.ke4e46c')" width="105"><template #default="{ row }"><el-select v-model="row.type" size="small" data-test="step-type"><el-option v-for="(label, key) in stepTypeLabels" :key="key" :value="key" :label="label" /></el-select></template></el-table-column>
-      <el-table-column :label="$t('controlView.k07d0b5')" width="120"><template #default="{ row }"><el-input v-model="row.name" size="small" /></template></el-table-column>
-      <el-table-column :label="$t('controlView.k163aec')" min-width="330"><template #default="{ row }">
-        <div v-if="row.type === 'write'" class="step-fields">
-          <el-select v-model="row.tagId" filterable size="small" style="width: 170px" :placeholder="$t('controlView.kc570f0')"><el-option v-for="t in configurableTags" :key="t.id" :value="t.id" :label="tagName(t.id)" /></el-select>
-          ← <el-input-number v-model="row.value" :controls="false" size="small" style="width: 70px" />
-          <el-input v-model="row.confirmExpression" size="small" :placeholder="$t('controlView.k0ce1d5')" style="width: 170px" />
-        </div>
-        <div v-else-if="row.type === 'wait'" class="step-fields"><el-input v-model="row.expression" size="small" :placeholder="$t('controlView.kd41546')" style="width: 260px" /></div>
-        <div v-else-if="row.type === 'condition'" class="step-fields">
-          <el-input v-model="row.expression" size="small" :placeholder="$t('controlView.k2be2e1')" style="width: 150px" data-test="step-expression" />
-          {{ $t('controlView.kd90926') }}<el-select v-model="row.then" size="small" style="width: 90px" data-test="step-then"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
-          {{ $t('controlView.k640232') }}<el-select v-model="row.else" size="small" clearable :placeholder="$t('controlView.kea0ef2')" style="width: 90px" data-test="step-else"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
-        </div>
-        <div v-else-if="row.type === 'parallel'" class="step-fields">
-          {{ $t('controlView.k2f6f9d') }}<el-select v-model="row.branches" multiple size="small" style="width: 170px"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
-          {{ $t('controlView.k871c34') }}<el-select v-model="row.join" size="small" style="width: 90px"><el-option v-for="id in joinIds" :key="id" :value="id" :label="id" /></el-select>
-        </div>
-        <div v-else-if="row.type === 'join'" class="step-fields"><el-radio-group v-model="row.joinMode" size="small"><el-radio-button value="all">{{ $t('controlView.k79236c') }}</el-radio-button><el-radio-button value="any">{{ $t('controlView.kf690a1') }}</el-radio-button></el-radio-group></div>
-        <div v-else-if="row.type === 'jump'" class="step-fields">
-          {{ $t('controlView.kfb25a9') }}<el-select v-model="row.target" size="small" style="width: 90px"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
-          {{ $t('controlView.k4c5dfc') }}<el-input-number v-model="row.maxIterations" :min="1" :max="1000" size="small" style="width: 90px" />{{ $t('controlView.k5e5b81') }}
-        </div>
-        <span v-else class="tiny muted">{{ $t('controlView.k4f4393') }}</span>
-      </template></el-table-column>
-      <el-table-column :label="$t('controlView.kea0ef2')" width="95"><template #default="{ row }"><el-select v-if="['write', 'wait', 'join'].includes(row.type)" v-model="row.next" size="small" clearable :placeholder="$t('controlView.k25bc02')"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select></template></el-table-column>
-      <el-table-column :label="$t('controlView.k16436e')" width="90"><template #default="{ row }"><el-input-number v-if="['write', 'wait'].includes(row.type)" v-model="row.timeoutMs" :controls="false" size="small" style="width: 75px" /></template></el-table-column>
-      <el-table-column :label="$t('controlView.kb05bd8')" width="170"><template #default="{ row }">
-        <template v-if="!['end', 'join'].includes(row.type)">
-          <el-select v-model="row.onFailure" size="small" style="width: 75px" clearable :placeholder="$t('controlView.ka17f70')"><el-option value="stop" :label="$t('controlView.ka17f70')" /><el-option value="continue" :label="$t('controlView.k1fc1af')" /><el-option value="goto" :label="$t('controlView.kfb25a9')" /></el-select>
-          <el-select v-if="row.onFailure === 'goto'" v-model="row.onFailureGoto" size="small" style="width: 80px"><el-option v-for="id in stepIds" :key="id" :value="id" :label="id" /></el-select>
-        </template>
-      </template></el-table-column>
-      <el-table-column label="" width="70"><template #default="{ $index }">
-        <el-button size="small" link :disabled="$index === 0" @click="moveStep($index)">↑</el-button><el-button size="small" link type="danger" @click="sequenceForm.steps.splice($index, 1)">{{ $t('controlView.k38cadf') }}</el-button>
-      </template></el-table-column>
-    </el-table>
-    <el-button v-if="editorMode === 'table'" size="small" style="margin-top: 8px" data-test="sequence-add-step" @click="addStep()">{{ $t('controlView.k926319') }}</el-button>
-    <p class="tiny muted">{{ $t('controlView.k9ae2cd') }}</p>
-    </div>
-    <template #footer><el-button :disabled="savingSequence" @click="sequenceEditor.close()">{{ $t('controlView.k4d0b46') }}</el-button><el-button type="primary" :loading="savingSequence" data-test="sequence-save" @click="saveSequence()">{{ $t('controlView.kfadf24') }}</el-button></template>
-  </el-dialog>
+  <SequenceEditorDialog ref="sequenceDialog" :areas="configurableAreas" :tags="configurableTags" :tag-name="tagName" :describe-step="describeStep" @saved="reloadSequences" />
 
   <el-dialog v-model="runFlowVisible" :title="runFlow ? $t('controlView.k27f0ec', [runFlow.id, runFlow.sequenceName, runLabels[runFlow.status] ?? runFlow.status]) : ''" width="1000px" data-test="run-flow-dialog" @opened="fitRunFlow">
     <template v-if="runFlow && runFlowSteps">
@@ -267,16 +153,17 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
-import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type ControlStepType, type DeviceControlState } from '../api/control'
+import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type DeviceControlState } from '../api/control'
 import { commandErrorMessage, continueFrom, errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import SequenceFlow from '../components/sequence/SequenceFlow.vue'
+import ControlPointDialog from '../components/control/ControlPointDialog.vue'
+import SequenceEditorDialog from '../components/control/SequenceEditorDialog.vue'
 import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
 import { usePolling } from '../composables/usePolling'
-import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
 import { registerShortcuts } from '../shortcuts/registry'
 import { modalOpen } from '../ui/overlay'
@@ -328,7 +215,6 @@ const configurableAreas = computed(() => areas.value.filter(a => canConfigureAre
 type ControlRequestRow = { request: ControlRequest; sequenceName: string | null; recipe?: RecipeDownload | null; mine: boolean }
 const requests = ref<ControlRequestRow[]>([])
 const loadError = ref(''), areasError = ref(''), requestsError = ref(''), runsError = ref(''), actionError = ref('')
-const pointError = ref(''), sequenceError = ref('')
 // 六类错误合并为一条状态条：失败多的场景下不再把页签内容顶到首屏之外。
 const pageIssues = computed<PageIssue[]>(() => {
   const issues: PageIssue[] = []
@@ -391,8 +277,8 @@ const writableTags = computed(() => tags.value.filter(x => x.writable && x.devic
 const configurableTags = computed(() => writableTags.value.filter(t => canConfigureTag(t.id)))
 const controllableTags = computed(() => writableTags.value.filter(t => canControlTag(t.id)))
 const controllableDevices = computed(() => devices.value.filter(d => canControlDevice(d.id)))
-const statusLabels: Record<string, string> = { Pending: tr('controlView.k4607ba'), Executed: tr('controlView.kab1f36'), Failed: tr('controlView.k3e3c80'), Rejected: tr('controlView.ke944e4'), Expired: tr('controlView.k411ebf'), Cancelled: tr('controlView.kc05f5f') }
-const statusType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { Pending: 'warning', Executed: undefined, Failed: 'danger', Rejected: 'info', Expired: 'info', Cancelled: 'info' }
+const statusLabels: Record<string, string> = { Pending: tr('controlView.k4607ba'), Executing: tr('controlView.k1f425b'), Executed: tr('controlView.kab1f36'), Failed: tr('controlView.k3e3c80'), Rejected: tr('controlView.ke944e4'), Expired: tr('controlView.k411ebf'), Cancelled: tr('controlView.kc05f5f') }
+const statusType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { Pending: 'warning', Executing: 'warning', Executed: undefined, Failed: 'danger', Rejected: 'info', Expired: 'info', Cancelled: 'info' }
 const runLabels: Record<string, string> = { Running: tr('controlView.k594249'), Completed: tr('controlView.k33246f'), Failed: tr('controlView.k3e3c80'), Aborted: tr('controlView.k5c1747') }
 const runType: Record<string, 'warning' | 'danger' | 'info' | undefined> = { Running: 'warning', Completed: undefined, Failed: 'danger', Aborted: 'info' }
 const stepLabels: Record<string, string> = { pending: tr('controlView.k25d23b'), running: tr('controlView.k1f425b'), done: tr('controlView.k33246f'), failed: tr('controlView.k3e3c80'), skipped: tr('controlView.k31a985') }
@@ -538,31 +424,11 @@ async function toggleMode(deviceId: number): Promise<void> {
   } finally { changingModes.delete(deviceId) }
 }
 
-const pointVisible = ref(false), savingPoint = ref(false), pointTag = ref<number | null>(null), pointForm = ref<ControlPoint | null>(null)
-const optionalText = (value: string | null | undefined): string | null => value === '' || value == null ? null : value
-const pointEditor = useEditDialog({ visible: pointVisible, saving: savingPoint, snapshot: () => JSON.stringify(pointForm.value && {
-  ...pointForm.value,
-  permitExpression: optionalText(pointForm.value.permitExpression),
-  permitMessage: optionalText(pointForm.value.permitMessage),
-  feedbackExpression: optionalText(pointForm.value.feedbackExpression)
-}), save: savePoint })
-function editPoint(tagId: number): void {
-  if (savingPoint.value) return
-  const existing = points.value.find(x => x.tagId === tagId)
-  pointError.value = ''
-  pointForm.value = existing ? { ...existing } : { tagId, requireConfirm: true, dualApproval: false, approvalTimeoutSec: 300, permitExpression: null, permitMessage: null, limitMin: null, limitMax: null, maxStep: null, feedbackExpression: null, feedbackTimeoutMs: 10000 }
-  pointVisible.value = true
-}
-async function savePoint(): Promise<void> {
-  if (!pointForm.value || savingPoint.value || disposed || !pointVisible.value) return
-  const payload = { ...pointForm.value }
-  savingPoint.value = true
-  try {
-    if (await guard(() => controlApi.savePoint(payload), tr('controlView.k40525a'), pointError) && !disposed) {
-      ElMessage.success(tr('controlView.kcdfab9')); pointVisible.value = false
-      await guard(async () => { points.value = await controlApi.points() }, tr('controlView.kf6b7a4'), loadError)
-    }
-  } finally { savingPoint.value = false }
+const pointTag = ref<number | null>(null)
+const pointDialog = ref<InstanceType<typeof ControlPointDialog>>()
+function editPoint(tagId: number): void { pointDialog.value?.open(tagId) }
+async function reloadPoints(): Promise<void> {
+  await guard(async () => { points.value = await controlApi.points() }, tr('controlView.kf6b7a4'), loadError)
 }
 async function removePoint(tagId: number): Promise<void> {
   try { await ElMessageBox.confirm(tr('controlView.k71549f', [tagName(tagId)]), tr('controlView.k3755f5'), { type: 'warning' }) } catch { return }
@@ -570,47 +436,10 @@ async function removePoint(tagId: number): Promise<void> {
 }
 
 const stepTypeLabels: Record<string, string> = { write: tr('controlView.kc570f0'), wait: tr('controlView.k25d23b'), condition: tr('controlView.k315a7e'), parallel: tr('controlView.k090e93'), join: tr('controlView.k871c34'), jump: tr('controlView.k817b2f'), end: tr('controlView.k76b988') }
-const stepIds = computed(() => sequenceForm.steps.map(x => x.id).filter((x): x is string => !!x))
-const joinIds = computed(() => sequenceForm.steps.filter(x => x.type === 'join').map(x => x.id).filter((x): x is string => !!x))
-function addStep(type: ControlStepType = 'write'): void {
-  const used = new Set(stepIds.value); let n = sequenceForm.steps.length + 1; while (used.has(`s${n}`)) n++
-  const step: ControlStep = { id: `s${n}`, type, name: type === 'write' ? tr('controlView.k182817', [n]) : `${stepTypeLabels[type]}${n}`, tagId: configurableTags.value[0]?.id ?? 0, value: 0, confirmExpression: null, timeoutMs: 10000, delayMs: 0, joinMode: 'all', maxIterations: 3 }
-  // 图形模式下新节点放在现有节点下方，避免与自动布局重叠。
-  if (editorMode.value === 'flow') { const ys = sequenceForm.steps.map(s => s.y ?? 0); step.x = 20; step.y = (ys.length ? Math.max(...ys) : 0) + 112 }
-  sequenceForm.steps.push(step); selectedStepId.value = step.id!; scheduleValidate()
-}
-const editorMode = ref<'flow' | 'table'>('flow')
-const selectedStepId = ref<string | null>(null)
-const selectedStep = computed(() => sequenceForm.steps.find(s => s.id === selectedStepId.value) ?? null)
-const validation = ref<{ ok: boolean; message: string | null; stepIds: string[] } | null>(null)
-let validateTimer: number | undefined
-function scheduleValidate(): void {
-  window.clearTimeout(validateTimer)
-  validateTimer = window.setTimeout(async () => {
-    if (!sequenceForm.steps.length) { validation.value = null; return }
-    try { validation.value = await controlApi.validateSequence({ ...sequenceForm, name: sequenceForm.name || 'x', steps: cleanSteps() }) } catch { /* 校验接口失败时不阻断编辑，保存时后端仍会校验 */ }
-  }, 300)
-}
-// 改编号时同步改写其他步骤对它的引用，避免断链。
-function renameStep(step: ControlStep, value: string): void {
-  const old = step.id, id = value.trim(); if (!id || id === old) return
-  if (sequenceForm.steps.some(s => s.id === id)) { sequenceError.value = tr('controlView.kd6486a', [id]); return }
-  step.id = id
-  for (const s of sequenceForm.steps) {
-    for (const k of ['next', 'then', 'else', 'join', 'target', 'onFailureGoto'] as const) if (s[k] === old) s[k] = id
-    if (s.branches) s.branches = s.branches.map(b => (b === old ? id : b))
-  }
-  selectedStepId.value = id; scheduleValidate()
-}
-function deleteStep(step: ControlStep): void {
-  const i = sequenceForm.steps.indexOf(step); if (i < 0) return
-  sequenceForm.steps.splice(i, 1)
-  for (const s of sequenceForm.steps) {
-    for (const k of ['next', 'then', 'else', 'join', 'target'] as const) if (s[k] === step.id) s[k] = null
-    if (s.onFailureGoto === step.id) { s.onFailureGoto = null; s.onFailure = null }
-    if (s.branches) s.branches = s.branches.filter(b => b !== step.id)
-  }
-  selectedStepId.value = null; scheduleValidate()
+const sequenceDialog = ref<InstanceType<typeof SequenceEditorDialog>>()
+function editSequence(row?: ControlSequence): void { sequenceDialog.value?.open(row) }
+async function reloadSequences(): Promise<void> {
+  await guard(async () => { sequences.value = await controlApi.sequences() }, tr('controlView.kf6b7a4'), loadError)
 }
 const runFlowVisible = ref(false), runFlowId = ref<number | null>(null)
 const runFlow = computed(() => runs.value.find(r => r.id === runFlowId.value) ?? null)
@@ -649,43 +478,6 @@ function fitRunFlow(): void {
 function rerunRun(row: ControlRun): void {
   const sequence = sequences.value.find(s => s.id === row.sequenceId)
   if (sequence) void startSequence(sequence)
-}
-function moveStep(i: number): void { const [s] = sequenceForm.steps.splice(i, 1); sequenceForm.steps.splice(i - 1, 0, s!) }
-const sequenceVisible = ref(false), savingSequence = ref(false)
-const sequenceForm = reactive<{ id?: number; name: string; areaId: number; description: string | null; dualApproval: boolean; revision: number; steps: ControlStep[] }>({ name: '', areaId: 1, description: null, dualApproval: false, revision: 0, steps: [] })
-const sequenceEditor = useEditDialog({ visible: sequenceVisible, saving: savingSequence, snapshot: () => JSON.stringify({
-  ...sequenceForm,
-  description: optionalText(sequenceForm.description),
-  steps: sequenceForm.steps.map(step => ({
-    ...step,
-    confirmExpression: optionalText(step.confirmExpression), expression: optionalText(step.expression),
-    next: optionalText(step.next), then: optionalText(step.then), else: optionalText(step.else),
-    join: optionalText(step.join), target: optionalText(step.target),
-    onFailure: optionalText(step.onFailure), onFailureGoto: optionalText(step.onFailureGoto)
-  }))
-}), save: saveSequence })
-function editSequence(row?: ControlSequence): void {
-  if (savingSequence.value) return
-  const areaId = configurableAreas.value[0]?.id
-  if (!row && areaId == null) return
-  Object.assign(sequenceForm, row ? { id: row.id, name: row.name, areaId: row.areaId, description: row.description, dualApproval: row.dualApproval, revision: row.revision, steps: JSON.parse(JSON.stringify(row.steps)) }
-    : { id: undefined, name: '', areaId, description: null, dualApproval: false, revision: 0, steps: [] })
-  selectedStepId.value = null; validation.value = null; sequenceError.value = ''; sequenceVisible.value = true
-  if (row) scheduleValidate()
-}
-function cleanSteps(): ControlStep[] {
-  return sequenceForm.steps.map(s => ({ ...s, confirmExpression: s.confirmExpression || null, expression: s.expression || null, next: s.next || null, else: s.else || null, onFailure: s.onFailure || null, onFailureGoto: s.onFailure === 'goto' ? s.onFailureGoto || null : null, tagId: (s.type ?? 'write') === 'write' ? s.tagId : null }))
-}
-async function saveSequence(): Promise<void> {
-  if (savingSequence.value || disposed || !sequenceVisible.value) return
-  const payload = JSON.parse(JSON.stringify({ ...sequenceForm, steps: cleanSteps() }))
-  savingSequence.value = true
-  try {
-    if (await guard(() => controlApi.saveSequence(payload), tr('controlView.k40525a'), sequenceError) && !disposed) {
-      ElMessage.success(tr('controlView.kcdfab9')); sequenceVisible.value = false
-      await guard(async () => { sequences.value = await controlApi.sequences() }, tr('controlView.kf6b7a4'), loadError)
-    }
-  } finally { savingSequence.value = false }
 }
 async function removeSequence(row: ControlSequence): Promise<void> {
   try { await ElMessageBox.confirm(tr('controlView.ke80fda', [row.name]), tr('controlView.k3755f5'), { type: 'warning' }) } catch { return }
@@ -862,7 +654,6 @@ onBeforeUnmount(() => {
 .control-kbd-hint { margin: 0 0 6px; }
 :deep(.control-row-focused) { --el-table-tr-bg-color: var(--scada-primary-soft); }
 :deep(.control-row-focused td:first-child) { box-shadow: inset 3px 0 0 var(--scada-primary); }
-.step-fields { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 h4 { margin: 16px 0 6px; }
 /* 失败摘要块：红节点表达不出原因与「现场动到哪一步」 */
 .run-failure { margin-bottom: 10px; padding: 8px 12px; border: 1px solid var(--scada-border); border-left: 3px solid var(--scada-danger); border-radius: var(--scada-radius-sm); background: var(--scada-panel-muted); }
@@ -870,10 +661,4 @@ h4 { margin: 16px 0 6px; }
 .run-failure-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .run-failure-reason { margin: 6px 0 0; word-break: break-word; }
 .run-failure-advice { margin: 4px 0 0; color: var(--scada-text-muted); }
-.flow-editor { display: flex; gap: 10px; align-items: stretch; }
-.flow-props { width: 300px; flex-shrink: 0; border: 1px solid var(--el-border-color-lighter); border-radius: 4px; padding: 8px; overflow: auto; max-height: 560px; }
-@media (max-width: 900px) {
-  .flow-editor { flex-direction: column; }
-  .flow-props { box-sizing: border-box; width: 100%; max-height: none; }
-}
 </style>

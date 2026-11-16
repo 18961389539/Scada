@@ -22,7 +22,7 @@ namespace Scada.Server.Mcp;
 public sealed class McpMasterDataTools(
     AccessModelProvider accessModels,
     IDbContextFactory<ConfigDbContext> factory,
-    ConfigReloader reloader,
+    AlarmRuleCommandService alarmRules,
     TagCommandService tags,
     DeviceCommandService deviceCommands,
     IDeviceCredentials deviceCredentials,
@@ -346,34 +346,19 @@ public sealed class McpMasterDataTools(
                 throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
             if (suppressMode != AlarmSuppressMode.None && suppressTagId is not int conditionId)
                 throw new McpToolException(McpErrorCodes.InvalidArgument, "suppressTagId is required when suppressMode is not None.");
-            var rule = new AlarmRule
-            {
-                TagId = tagId, Type = type, ActiveWhen = AlarmRuleText.NormalizeActiveWhen(type, activeWhen),
-                Threshold = threshold, Level = level, Category = category, Consequence = consequence,
-                ResponseTimeSec = responseTimeSec, AutoPriority = autoPriority, DelaySec = delaySec,
-                RecoverDeadband = recoverDeadband, Enabled = enabled,
-                Message = string.IsNullOrWhiteSpace(message) ? null : message.Trim(),
-                Cause = string.IsNullOrWhiteSpace(cause) ? null : cause.Trim(),
-                Action = string.IsNullOrWhiteSpace(action) ? null : action.Trim(),
-                OffDelaySec = offDelaySec,
-                BitIndex = bitIndex,
-                Expression = string.IsNullOrWhiteSpace(expression) ? null : expression.Trim(),
-                SuppressTagId = suppressMode == AlarmSuppressMode.None ? null : suppressTagId,
-                SuppressMode = suppressMode
-            };
-            rule.ApplyAutoPriority();
-            var error = EndpointHelpers.ValidateAlarmRule(rule);
+            var (rule, error) = await alarmRules.PrepareAsync(db, new AlarmRuleRequest(
+                tagId, type, threshold, level, delaySec, recoverDeadband, enabled,
+                message, offDelaySec, suppressTagId, suppressMode, cause, action,
+                activeWhen, category, consequence, responseTimeSec, autoPriority,
+                BitIndex: bitIndex, Expression: expression), excludeRuleId: null, cancellationToken);
             if (error is not null) return new McpAlarmRuleSaved(0, false, error, tagId, ScadaTime.NowMs());
-            if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, rule, null, cancellationToken) is { } targetError)
-                return new McpAlarmRuleSaved(0, false, targetError, tagId, ScadaTime.NowMs());
-            if (rule.SuppressTagId is int suppress && !await db.Tags.AnyAsync(x => x.Id == suppress, cancellationToken))
+            if (rule!.SuppressTagId is int suppress && !await db.Tags.AnyAsync(x => x.Id == suppress, cancellationToken))
                 return new McpAlarmRuleSaved(0, false, $"条件测点不存在：{suppress}", tagId, ScadaTime.NowMs());
             if (await ValidateExpressionTagsAsync(db, rule, cancellationToken) is { } expressionError)
                 return new McpAlarmRuleSaved(0, false, expressionError, tagId, ScadaTime.NowMs());
             db.AlarmRules.Add(rule);
-            // 审计由 AuditInterceptor 自动写。
-            await db.SaveChangesAsync(cancellationToken);
-            await reloader.ReloadAsync(cancellationToken);
+            // 审计由 AuditInterceptor 自动写；落库与热加载由命令服务成对执行，避免只改库不重载。
+            await alarmRules.SaveAsync(db, cancellationToken);
             return new McpAlarmRuleSaved(rule.Id, true, "Created.", rule.TagId, ScadaTime.NowMs());
         });
 
@@ -394,44 +379,42 @@ public sealed class McpMasterDataTools(
         var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
         // 在完整实体上修改：旧实现对部分字段重建对象，表达式/位报警规则一更新就被残缺对象校验挡回去。
-        var updated = (AlarmRule)db.Entry(rule).CurrentValues.ToObject();
-        var targetTagId = tagId ?? updated.TagId;
+        var current = (AlarmRule)db.Entry(rule).CurrentValues.ToObject();
+        var targetTagId = tagId ?? current.TagId;
         if (!await db.Tags.AnyAsync(x => x.Id == targetTagId, cancellationToken))
             throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
-        var mode = suppressMode ?? updated.SuppressMode;
-        updated.TagId = targetTagId;
-        updated.Type = type ?? updated.Type;
-        updated.ActiveWhen = AlarmRuleText.NormalizeActiveWhen(updated.Type, activeWhen ?? updated.ActiveWhen);
-        updated.Threshold = threshold ?? updated.Threshold;
-        updated.Level = level ?? updated.Level;
-        updated.Category = category ?? updated.Category;
-        updated.Consequence = consequence ?? updated.Consequence;
-        updated.ResponseTimeSec = responseTimeSec ?? updated.ResponseTimeSec;
-        updated.AutoPriority = autoPriority ?? updated.AutoPriority;
-        updated.DelaySec = delaySec ?? updated.DelaySec;
-        updated.RecoverDeadband = recoverDeadband ?? updated.RecoverDeadband;
-        updated.Enabled = enabled ?? updated.Enabled;
-        updated.Message = message is null ? updated.Message : (string.IsNullOrWhiteSpace(message) ? null : message.Trim());
-        updated.Cause = cause is null ? updated.Cause : (string.IsNullOrWhiteSpace(cause) ? null : cause.Trim());
-        updated.Action = action is null ? updated.Action : (string.IsNullOrWhiteSpace(action) ? null : action.Trim());
-        updated.OffDelaySec = offDelaySec ?? updated.OffDelaySec;
-        if (bitIndex is int bit) updated.BitIndex = bit;
-        if (expression is not null) updated.Expression = string.IsNullOrWhiteSpace(expression) ? null : expression.Trim();
-        updated.SuppressTagId = mode == AlarmSuppressMode.None ? null : (suppressTagId ?? updated.SuppressTagId);
-        updated.SuppressMode = mode;
-        updated.ApplyAutoPriority();
-        var error = EndpointHelpers.ValidateAlarmRule(updated);
+        var mode = suppressMode ?? current.SuppressMode;
+        var (updated, error) = await alarmRules.PrepareAsync(db, new AlarmRuleRequest(
+            targetTagId,
+            type ?? current.Type,
+            threshold ?? current.Threshold,
+            level ?? current.Level,
+            delaySec ?? current.DelaySec,
+            recoverDeadband ?? current.RecoverDeadband,
+            enabled ?? current.Enabled,
+            message is null ? current.Message : (string.IsNullOrWhiteSpace(message) ? null : message.Trim()),
+            offDelaySec ?? current.OffDelaySec,
+            mode == AlarmSuppressMode.None ? null : (suppressTagId ?? current.SuppressTagId),
+            mode,
+            cause is null ? current.Cause : (string.IsNullOrWhiteSpace(cause) ? null : cause.Trim()),
+            action is null ? current.Action : (string.IsNullOrWhiteSpace(action) ? null : action.Trim()),
+            activeWhen ?? current.ActiveWhen,
+            category ?? current.Category,
+            consequence ?? current.Consequence,
+            responseTimeSec ?? current.ResponseTimeSec,
+            autoPriority ?? current.AutoPriority,
+            current.MessageEn, current.CauseEn, current.ActionEn,
+            bitIndex ?? current.BitIndex,
+            expression is null ? current.Expression : (string.IsNullOrWhiteSpace(expression) ? null : expression.Trim())),
+            excludeRuleId: ruleId, cancellationToken);
         if (error is not null) return new(ruleId, false, error, targetTagId, ScadaTime.NowMs());
-        if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(db, updated, ruleId, cancellationToken) is { } targetError)
-            return new(ruleId, false, targetError, targetTagId, ScadaTime.NowMs());
-        if (updated.SuppressTagId is int conditionId && !await db.Tags.AnyAsync(x => x.Id == conditionId, cancellationToken))
+        if (updated!.SuppressTagId is int conditionId && !await db.Tags.AnyAsync(x => x.Id == conditionId, cancellationToken))
             return new(ruleId, false, $"条件测点不存在：{conditionId}", targetTagId, ScadaTime.NowMs());
         if (await ValidateExpressionTagsAsync(db, updated, cancellationToken) is { } expressionError)
             return new(ruleId, false, expressionError, targetTagId, ScadaTime.NowMs());
         rule.ApplyEditableFrom(updated);
-        // 审计由 AuditInterceptor 自动写。
-        await db.SaveChangesAsync(cancellationToken);
-        await reloader.ReloadAsync(cancellationToken);
+        // 审计由拦截器写；落库与热加载由命令服务成对执行。
+        await alarmRules.SaveAsync(db, cancellationToken);
         return new(rule.Id, true, "Updated.", rule.TagId, ScadaTime.NowMs());
     }
 
@@ -455,9 +438,8 @@ public sealed class McpMasterDataTools(
         var rule = await db.AlarmRules.FirstOrDefaultAsync(x => x.Id == ruleId, cancellationToken)
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Alarm rule does not exist.");
         db.AlarmRules.Remove(rule);
-        // 审计由 AuditInterceptor 自动写。
-        await db.SaveChangesAsync(cancellationToken);
-        await reloader.ReloadAsync(cancellationToken);
+        // 审计由 AuditInterceptor 自动写；落库与热加载由命令服务成对执行。
+        await alarmRules.SaveAsync(db, cancellationToken);
         return new(ruleId, true, "Deleted.", ScadaTime.NowMs());
     }
 

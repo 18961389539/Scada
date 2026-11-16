@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Data.Auditing;
@@ -23,6 +24,9 @@ public static class DataServiceCollectionExtensions
         var runtimeConnection = RuntimeConnectionString(settings);
         // 迁移阶段的搬迁目标必须与上面这条连接指向同一个文件，否则升级会把运行数据搬进另一个库。
         OperationalDataMover.RegisterRuntimePath(settings.ConfigDbPath, ResolveRuntimePath(settings));
+
+        // 授权配额的计数缓存：拦截器随 DbContext 重建，计数必须放在单例上才能跨请求复用。
+        services.TryAddSingleton<LicenseQuotaCounter>();
 
         services.AddDbContextFactory<ConfigDbContext>((sp, options) =>
             options.UseSqlite(configConnection)

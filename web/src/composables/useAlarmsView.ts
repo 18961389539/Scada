@@ -2,15 +2,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type InputInstance, type TableInstance } from 'element-plus'
 import { annunciatorApi } from '../api/annunciators'
-import { alarmApi, deviceApi, ruleApi, tagApi } from '../api'
+import { alarmApi, ruleApi } from '../api'
 import { screenApi } from '../api/screens'
 import type { ScreenNode } from '../screens/model'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
-import type { AlarmCategory, AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline, Device, Tag } from '../types'
-import { alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, alarmTrendQuery, canAckAlarmEvent, formatTime, formatValue, levelLabel, levelType, localizedText } from '../utils'
-import { can } from '../access/policies'
+import type { AlarmCategory, AlarmEvent, AlarmLevel, AlarmListState, AlarmPageQuery, AlarmShelve, AlarmSummary, AlarmTimeline } from '../types'
+import { alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, alarmTrendQuery, formatTime, levelLabel, levelType, localizedText } from '../utils'
 import { runBatch, summarizeBatch, type BatchReport } from '../composables/batchRunner'
+import { useAlarmSourceCatalog } from '../composables/useAlarmSourceCatalog'
+import { can } from '../access/policies'
 import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
@@ -24,50 +25,13 @@ import { modalOpen } from '../ui/overlay'
 
 export function useAlarmsView() {
   const auth = useAuthStore()
-  const canAck = computed(() => can(auth.user, 'AckAlarm'))
-  const deviceAreas = ref<Map<number, number>>(new Map())
-  const sourceDevices = ref(new Map<number, Device>())
-  const sourceTags = ref(new Map<number, Tag>())
-  const sourceCatalogLoading = ref(false), sourceCatalogError = ref('')
-  function alarmSource(alarm: AlarmEvent): string {
-    const tag = alarm.tagId ? sourceTags.value.get(alarm.tagId) : undefined
-    const deviceId = alarm.deviceId ?? tag?.deviceId
-    const device = deviceId ? sourceDevices.value.get(deviceId) : undefined
-    return [device?.name ?? (deviceId ? tr('alarmListReview.deviceId', [deviceId]) : ''),
-      tag?.name ?? (alarm.tagId ? tr('alarmListReview.tagId', [alarm.tagId]) : '')]
-      .filter(Boolean).join(' / ') || tr('overviewStatus.systemEvent')
-  }
+  let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
+  const {
+    canAck, deviceAreas, sourceDevices, sourceTags, sourceCatalogLoading, sourceCatalogError,
+    alarmSource, alarmValueText, loadSourceCatalog, canAckAlarm, canSilencePanel
+  } = useAlarmSourceCatalog(auth, () => disposed)
   // 从报警跳趋势要带上「报警前后那一段」：见 utils.alarmTrendQuery（与总览页同源）。
   const trendQuery = alarmTrendQuery
-  // 报警值必须带单位：一屏里压力、温度、流量混排，只写「500.00」无法判断量级。
-  // 数字量报警显示 0/1 而不套两位小数——「1.00」会让开关量看着像模拟量。
-  function alarmValueText(alarm: AlarmEvent): string {
-    const tag = alarm.tagId ? sourceTags.value.get(alarm.tagId) : undefined
-    if (tag?.dataType === 'Bool') return alarm.value ? '1' : '0'
-    const text = formatValue(alarm.value)
-    return tag?.unit ? `${text} ${tag.unit}` : text
-  }
-  async function loadSourceCatalog(): Promise<void> {
-    if (disposed || sourceCatalogLoading.value) return
-    sourceCatalogLoading.value = true
-    try {
-      const [devices, tags] = await Promise.allSettled([deviceApi.list(), tagApi.list()])
-      if (disposed) return
-      if (devices.status === 'fulfilled') {
-        sourceDevices.value = new Map(devices.value.map(device => [device.id, device]))
-        deviceAreas.value = new Map(devices.value.filter(device => device.areaId != null).map(device => [device.id, device.areaId!]))
-      }
-      if (tags.status === 'fulfilled') sourceTags.value = new Map(tags.value.map(tag => [tag.id, tag]))
-      sourceCatalogError.value = [devices, tags].flatMap(result => result.status === 'rejected' ? [errorMessage(result.reason)] : []).join(' · ')
-    } finally { sourceCatalogLoading.value = false }
-  }
-  function canAckAlarm(row: AlarmEvent): boolean {
-    return canAckAlarmEvent(auth.user, row, deviceAreas.value)
-  }
-  function canSilencePanel(areaId: number | null): boolean {
-    if (!canAck.value) return false
-    return areaId == null || can(auth.user, 'AckAlarm', areaId)
-  }
   const tab = ref<'live' | 'shelved' | 'history'>('live')
   const alarms = ref<AlarmEvent[]>([])
   const HISTORY_PAGE_SIZE = 100
@@ -184,7 +148,6 @@ export function useAlarmsView() {
   let filterTimer: number | undefined
   let disposeAlarmHandler: (() => void) | undefined
   let disposeShortcuts: (() => void) | undefined
-  let listSeq = 0, summarySeq = 0, timelineSeq = 0, disposed = false
 
   // 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
   // 这里曾有一份自建 AudioContext 的发声实现：它绕过了静音开关，并且与 AppLayout 的订阅

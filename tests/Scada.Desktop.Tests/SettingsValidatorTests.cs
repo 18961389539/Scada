@@ -53,6 +53,14 @@ public sealed class SettingsValidatorTests
     }
 
     [Fact]
+    public void AllowsWorkspaceTargetWithoutId()
+    {
+        var settings = ValidSettings();
+        settings.Target = new DesktopTarget { Kind = "workspace" };
+        Assert.Null(SettingsValidator.Validate(settings, requirePassword: false));
+    }
+
+    [Fact]
     public void RequiresPasswordWhenSavingIsEnabled()
     {
         var settings = ValidSettings();

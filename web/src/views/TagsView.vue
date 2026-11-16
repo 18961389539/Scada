@@ -246,182 +246,10 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="batchVisible" :title="$t('tagsView.k5342be')" width="760px" data-test="tag-batch-dialog" :close-on-click-modal="!batchSaving" :close-on-press-escape="!batchSaving" :show-close="!batchSaving" :before-close="batchGuard.beforeClose" @keydown="batchGuard.onKey">
-      <el-alert v-if="batchError" :title="batchError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="tag-batch-error" />
-      <el-form :disabled="batchSaving" label-width="90px" @submit.prevent="saveBatch">
-        <el-row :gutter="12">
-          <el-col :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.k01f2c1')" required>
-              <el-select v-model="batchForm.deviceId" data-test="tag-batch-device" style="width: 100%" @change="selectBatchDevice">
-                <el-option v-for="device in batchableDevices" :key="device.id" :label="device.name" :value="device.id" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.ke736e9')">
-              <el-select v-model="batchForm.area" data-test="tag-batch-area" style="width: 100%" @change="syncBatchWritableByArea">
-                <el-option v-for="(label, value) in batchAreas" :key="value" :label="label" :value="value" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item :label="$t('tagsView.kae79aa')">
-              <el-input-number v-model="batchForm.startAddress" :min="0" :max="65535" :controls="false" style="width: 100%" data-test="tag-batch-start" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item :label="$t('tagsView.kb9ae89')">
-              <el-input-number v-model="batchForm.count" :min="1" :max="500" style="width: 100%" data-test="tag-batch-count" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item :label="$t('tagsView.kac69f5')">
-              <el-input-number v-model="batchForm.step" :min="1" :max="1000" style="width: 100%" data-test="tag-batch-step" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item :label="$t('tagsView.kdd4f17')">
-              <el-input v-model="batchForm.prefix" maxlength="40" data-test="tag-batch-prefix" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item :label="$t('tagsView.kf1eef0')">
-              <el-input-number v-model="batchForm.startIndex" :min="1" :max="999999" style="width: 100%" data-test="tag-batch-index" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
-            <el-form-item :label="$t('tagsView.k1e078c')">
-              <el-input-number v-model="batchForm.pad" :min="0" :max="6" style="width: 100%" data-test="tag-batch-pad" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.kb031dc')">
-              <el-select v-model="batchForm.dataType" data-test="tag-batch-data-type" style="width: 100%">
-                <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col v-if="batchForm.dataType !== 'Bool'" :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.k8ec8c8')">
-              <el-input v-model="batchForm.unit" maxlength="32" placeholder="℃ / MPa" />
-            </el-form-item>
-          </el-col>
-          <el-col v-if="batchIsS7 && batchForm.area === 'DataBlock'" :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.kaf82d3')">
-              <el-input-number v-model="batchForm.dbNumber" :min="1" :max="65535" style="width: 100%" data-test="tag-batch-db" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.ka4edb9')">
-              <el-select v-model="batchForm.archiveMode" data-test="tag-batch-archive" style="width: 100%">
-                <el-option v-for="(label, value) in archiveModeLabels" :key="value" :label="label" :value="value" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col v-if="!batchReadOnlyArea" :xs="24" :sm="12">
-            <el-form-item :label="$t('tagsView.k26ae2c')">
-              <el-switch v-model="batchForm.writable" data-test="tag-batch-writable" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-      </el-form>
-      <el-alert v-if="batchAddressOverflow" :title="$t('tagsView.ke6c5b3')" type="warning" :closable="false" show-icon style="margin-bottom: 8px" />
-      <el-alert v-if="batchNameError" :title="batchNameError" type="warning" :closable="false" show-icon style="margin-bottom: 8px" />
-      <p class="tiny muted">{{ $t('tagsView.k7ae149', [batchRows.length]) }}</p>
-      <el-table :data="batchRows" size="small" max-height="260" data-test="tag-batch-preview">
-        <el-table-column type="index" label="#" width="50" />
-        <el-table-column :label="$t('tagsView.k1be7ae')" min-width="220">
-          <template #default="{ row }"><el-input v-model="row.name" size="small" maxlength="100" :data-test="`tag-batch-name-${row.address}`" /></template>
-        </el-table-column>
-        <el-table-column :label="$t('tagsView.k67d2d7')" width="100" show-overflow-tooltip><template #default="{ row }"><span class="mono">{{ row.address }}</span></template></el-table-column>
-        <el-table-column :label="$t('tagsView.k17fc93')" width="120" show-overflow-tooltip><template #default>{{ areaLabels[batchForm.area] }}</template></el-table-column>
-        <el-table-column :label="$t('tagsView.kb031dc')" width="100" show-overflow-tooltip><template #default>{{ dataTypeLabels[batchForm.dataType] }}</template></el-table-column>
-      </el-table>
-      <template #footer>
-        <el-button :disabled="batchSaving" @click="batchGuard.close">{{ $t('tagsView.k4d0b46') }}</el-button>
-        <el-button type="primary" :loading="batchSaving" :disabled="!canSaveBatch" data-test="tag-batch-save" @click="saveBatch">{{ $t('tagsView.k8c0eab', [batchRows.length]) }}</el-button>
-      </template>
-    </el-dialog>
+    <TagBatchDialog ref="batchDialog" :devices="batchableDevices" :initial-device-id="appliedDeviceId" @saved="onBatchSaved" />
 
-    <el-dialog v-model="previewVisible" :title="$t('tagsView.kdea846')" width="480px">
-      <el-alert type="info" :closable="false" show-icon :title="$t('tagsView.kd7595e')" style="margin-bottom: 12px" />
-      <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" show-icon style="margin-bottom: 12px" data-test="tag-preview-error" />
-      <el-form label-width="100px">
-        <el-form-item :label="$t('tagsView.k01f2c1')">
-          <el-select v-model="previewDevice" data-test="tag-preview-device" style="width: 100%" @change="selectPreviewDevice">
-            <el-option v-for="device in controllableDevices" :key="device.id" :label="device.name" :value="device.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('tagsView.k17fc93')">
-          <el-select v-model="previewForm.area" style="width: 100%">
-            <el-option v-for="(label, value) in previewAreas" :key="value" :label="label" :value="value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="!previewIsOpc && !previewText" :label="$t('tagsView.k67d2d7')">
-          <el-input-number v-model="previewForm.address" :min="0" :max="65535" style="width: 100%" />
-        </el-form-item>
-        <el-form-item v-if="previewIsOpc" label="NodeId"><el-input v-model="previewForm.nodeId" /></el-form-item>
-        <el-form-item v-if="previewText" :label="$t('tagsView.k67d2d7')"><el-input v-model="previewForm.nodeId" :placeholder="previewText.addressPlaceholder" /></el-form-item>
-        <el-form-item :label="$t('tagsView.kb031dc')">
-          <el-select v-model="previewForm.dataType" style="width: 100%">
-            <el-option v-for="(label, value) in dataTypeLabels" :key="value" :label="label" :value="value" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="previewIsS7 && previewForm.area === 'DataBlock'" :label="$t('tagsView.kaf82d3')"><el-input-number v-model="previewForm.dbNumber" :min="1" :max="65535" /></el-form-item>
-        <el-form-item v-if="previewIsS7 && previewForm.dataType === 'Bool'" :label="$t('tagsView.k08ca6d')"><el-input-number v-model="previewForm.bitOffset" :min="0" :max="7" /></el-form-item>
-      </el-form>
-      <el-alert
-        v-if="previewResult"
-        :type="previewGood ? 'success' : 'error'"
-        :closable="false"
-        show-icon
-        :title="previewGood ? $t('tagsView.k2d7a00', [formatValue(previewResult.value)]) : previewResult.message || $t('configurationUx.testUnknown')"
-      />
-      <ConnectionGuidance v-if="previewResult && !previewGood" :message="previewResult.message" :quality="previewResult.quality" :protocol="previewDeviceRow?.protocol">
-        <el-button v-if="previewDeviceRow && can(auth.user, 'Configure', previewDeviceRow.areaId)" link type="primary" @click="diagnosticsVisible = true">{{ $t('devicesView.ke7a75c') }}</el-button>
-      </ConnectionGuidance>
-      <template #footer>
-        <el-button @click="previewVisible = false">{{ $t('tagsView.k6c14bd') }}</el-button>
-        <el-button type="primary" :loading="previewing" @click="runPreview">{{ $t('tagsView.k591670') }}</el-button>
-      </template>
-    </el-dialog>
-    <CollectorDiagnosticsDialog v-if="previewDeviceRow && can(auth.user, 'Configure', previewDeviceRow.areaId)" v-model="diagnosticsVisible" :device="previewDeviceRow" />
-    <el-dialog v-model="usageVisible" :title="$t('tagUsage.title')" width="680px" data-test="tag-usage-dialog" @closed="onUsageClosed">
-      <div class="usage-head">
-        <strong>{{ usageTag?.name }}</strong><span class="tiny muted">#{{ usageTag?.id }}</span><span class="spacer" />
-        <el-button size="small" :loading="usageLoading" data-test="tag-usage-refresh" @click="loadUsage">{{ $t('tagUsage.refresh') }}</el-button>
-      </div>
-      <p class="tiny muted">{{ $t('tagUsage.hint') }}</p>
-      <el-alert v-if="usageError" :title="usageError" type="error" :closable="false" show-icon data-test="tag-usage-error" />
-      <el-alert v-if="usage?.unreadable" :title="$t('tagUsage.unreadable')" type="warning" :closable="false" show-icon />
-      <div v-loading="usageLoading" class="usage-body">
-        <el-empty v-if="!usageLoading && !usage?.references.length" :description="$t('tagUsage.empty')" :image-size="48" />
-        <section v-for="group in usageGroups" :key="group.key" class="usage-group" :data-test="`tag-usage-${group.key}`">
-          <h4>{{ group.label }} <small>{{ group.items.length }}</small></h4>
-          <ul>
-            <li v-for="item in group.items" :key="`${group.key}-${item.id}-${item.name}`">
-              <span>{{ item.name }}<small v-if="item.detail"> · {{ item.detail }}</small></span>
-              <el-tag v-if="!item.editable" size="small" type="info">{{ $t('tagUsage.noPermission') }}</el-tag>
-              <el-tag v-else-if="item.requiresRepublish" size="small" type="warning">{{ $t('tagUsage.republish') }}</el-tag>
-            </li>
-          </ul>
-        </section>
-      </div>
-      <el-alert v-if="usageBlocked" :title="$t('tagUsage.calculatedBlocked')" type="warning" :closable="false" show-icon />
-      <el-alert v-else-if="usageHasForbidden" :title="$t('tagUsage.notEditable')" type="warning" :closable="false" show-icon />
-      <el-alert v-if="rebindNotice" :title="rebindNotice" :type="rebindPublished.length ? 'warning' : 'success'" :closable="false" show-icon data-test="tag-usage-result">
-        <ul v-if="rebindPublished.length"><li v-for="item in rebindPublished" :key="item.id">{{ item.name }}</li></ul>
-      </el-alert>
-      <section v-if="usage?.references.length" class="usage-replace">
-        <strong>{{ $t('tagUsage.target') }}</strong>
-        <el-select v-model="usageTargetId" filterable clearable :placeholder="$t('tagUsage.targetPlaceholder')" data-test="tag-usage-target" style="width: 100%">
-          <el-option v-for="item in usageTargets" :key="item.id" :label="`#${item.id} · ${item.name}`" :value="item.id" />
-        </el-select>
-        <p class="tiny muted">{{ $t('tagUsage.publishedHint') }}</p>
-        <el-button type="primary" :loading="usageBusy" :disabled="!usageTargetId || usageBlocked || usageHasForbidden" data-test="tag-usage-replace" @click="rebind">{{ $t('tagUsage.replace') }}</el-button>
-      </section>
-      <template #footer><el-button @click="usageVisible = false">{{ $t('tagUsage.close') }}</el-button></template>
-    </el-dialog>
+    <TagPreviewDialog ref="previewDialog" :devices="controllableDevices" :initial-device-id="appliedDeviceId" />
+    <TagUsageDialog ref="usageDialog" :can-configure-tag="canConfigureTag" :fallback-candidates="tags" @changed="load" />
   </div>
 </template>
 
@@ -430,11 +258,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox, type DropdownInstance, type FormInstance, type FormRules, type TableInstance } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search, View } from '@element-plus/icons-vue'
-import { deviceApi, tagApi, type TagRebindResult, type TagUsage, type TagUsageRef } from '../api'
+import { deviceApi, tagApi } from '../api'
 import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
-import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
+import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, protocolAreas } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { tr } from '../i18n'
 import { isMobile } from '../mobile'
@@ -445,39 +273,16 @@ import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMa
 import { positiveQueryId } from '../nav/query'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 import { useCatalogQuery } from '../composables/useCatalogQuery'
-import ConnectionGuidance from '../components/ConnectionGuidance.vue'
-import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
 import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
+import TagBatchDialog from '../components/tags/TagBatchDialog.vue'
+import TagPreviewDialog from '../components/tags/TagPreviewDialog.vue'
+import TagUsageDialog from '../components/tags/TagUsageDialog.vue'
+import { emptyTagInput, tagToInput } from '../components/tags/tagInput'
 
 const auth = useAuthStore()
 const route = useRoute()
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
-const usageVisible = ref(false), usageTag = ref<Tag | null>(null), usage = ref<TagUsage | null>(null)
-const usageLoading = ref(false), usageError = ref(''), usageTargetId = ref<number | null>(null), usageBusy = ref(false)
-const usageCandidates = ref<Tag[]>([])
-const rebindNotice = ref(''), rebindPublished = ref<TagUsageRef[]>([])
-const usageCategoryLabels: Record<string, string> = {
-  screenDraft: tr('tagUsage.category.screenDraft'),
-  screenPublished: tr('tagUsage.category.screenPublished'),
-  template: tr('tagUsage.category.template'),
-  alarmRule: tr('tagUsage.category.alarmRule'),
-  sequence: tr('tagUsage.category.sequence'),
-  recipe: tr('tagUsage.category.recipe'),
-  calculatedTag: tr('tagUsage.category.calculatedTag')
-}
-const usageGroups = computed(() => {
-  const groups = new Map<string, TagUsageRef[]>()
-  for (const reference of usage.value?.references ?? []) {
-    const items = groups.get(reference.category) ?? []
-    items.push(reference)
-    groups.set(reference.category, items)
-  }
-  return [...groups].map(([key, items]) => ({ key, label: usageCategoryLabels[key] ?? key, items }))
-})
-const usageTargets = computed(() => usageCandidates.value.filter(tag => tag.id !== usageTag.value?.id && tag.kind === 'Physical' && canConfigureTag(tag)))
-const usageBlocked = computed(() => (usage.value?.references ?? []).some(reference => reference.category === 'calculatedTag'))
-const usageHasForbidden = computed(() => (usage.value?.references ?? []).some(reference => !reference.editable))
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
 const catalog = useCatalogQuery({ deviceId: '', search: '' })
 const page = computed({
@@ -547,7 +352,6 @@ const loading = ref(false)
 const loadError = ref('')
 const devicesError = ref('')
 const actionError = ref('')
-const previewError = ref('')
 // 加载、设备目录和操作错误统一交给状态条：单条原位展开，多条折叠，避免首屏被多条 alert 占满。
 const pageIssues = computed<PageIssue[]>(() => {
   const issues: PageIssue[] = []
@@ -571,26 +375,7 @@ const selected = ref<Tag[]>([])
 const formRef = ref<FormInstance>()
 const fieldErrors = reactive<FieldErrorMap>({})
 
-const emptyForm = (): TagInput => ({
-  deviceId: 0,
-  name: '',
-  description: '',
-  area: 'HoldingRegister',
-  address: 0,
-  dbNumber: 1, bitOffset: 0, nodeId: '',
-  dataType: 'Float',
-  textLength: 0,
-  scale: 1,
-  offset: 0,
-  unit: '',
-  writable: false,
-  archiveMode: 'OnChange',
-  deadband: 0,
-  archivePeriodSec: 600,
-  scanRateMs: null,
-  minValue: null,
-  maxValue: null
-})
+const emptyForm = emptyTagInput
 const form = reactive<TagInput>(emptyForm())
 const router = useRouter()
 const editDialog = useEditDialog({ visible: dialogVisible, saving, form: formRef, snapshot: () => JSON.stringify(form), initialField: 'name', save })
@@ -624,141 +409,26 @@ const canSave = computed(() => {
   return true
 })
 
-// 批量建点：按连续地址和命名规则生成预览，逐行可改名称后一次提交。
-const batchVisible = ref(false)
-const batchSaving = ref(false)
-const batchError = ref('')
+// 批量建点只对支持连续地址的协议开放；弹窗内部维护表单与校验。
 const batchableDevices = computed(() => configurableDevices.value.filter(d => d.protocol !== 'OpcUa' && !protocolDef(d.protocol)))
-const batchForm = reactive({
-  deviceId: 0,
-  area: 'HoldingRegister' as TagInput['area'],
-  startAddress: 0,
-  count: 10,
-  step: 1,
-  dataType: 'Float' as TagInput['dataType'],
-  prefix: '',
-  startIndex: 1,
-  pad: 0,
-  unit: '',
-  archiveMode: 'OnChange' as TagInput['archiveMode'],
-  writable: false,
-  dbNumber: 1
-})
-const batchRows = ref<{ name: string; address: number }[]>([])
-// 批量建点是一屏多字段 + 可逐行改名的表单，误按 Esc 丢掉整批配置代价很高
-const batchGuard = useEditDialog({
-  visible: batchVisible,
-  saving: batchSaving,
-  snapshot: () => JSON.stringify({ form: batchForm, names: batchRows.value.map(row => row.name) }),
-  save: saveBatch
-})
-const batchDevice = computed(() => devices.value.find(d => d.id === batchForm.deviceId))
-const batchIsS7 = computed(() => batchDevice.value?.protocol === 'SiemensS7')
-const batchAreas = computed(() => protocolAreas(batchDevice.value?.protocol))
-const batchAddressOverflow = computed(() => batchRows.value.some(row => row.address > 65535))
-const batchNameError = computed(() => {
-  const names = batchRows.value.map(row => row.name.trim())
-  if (names.some(name => !name)) return tr('tagsView.k8a830b')
-  if (names.some(name => name.length > 100)) return tr('tagsView.kd010b6')
-  if (new Set(names).size !== names.length) return tr('tagsView.kb92888')
-  return ''
-})
-const canSaveBatch = computed(() => batchRows.value.length > 0 && !batchAddressOverflow.value && !batchNameError.value && batchForm.deviceId > 0)
+const batchDialog = ref<InstanceType<typeof TagBatchDialog>>()
+const previewDialog = ref<InstanceType<typeof TagPreviewDialog>>()
+const usageDialog = ref<InstanceType<typeof TagUsageDialog>>()
 
-function generateBatchRows(): void {
-  const count = Math.max(1, Math.min(500, Math.floor(Number(batchForm.count) || 0)))
-  const rows: { name: string; address: number }[] = []
-  for (let i = 0; i < count; i++) {
-    const sequence = batchForm.startIndex + i
-    const suffix = batchForm.pad > 0 ? String(sequence).padStart(batchForm.pad, '0') : String(sequence)
-    rows.push({ name: `${batchForm.prefix}${suffix}`, address: batchForm.startAddress + i * batchForm.step })
-  }
-  batchRows.value = rows
+async function onBatchSaved(deviceId: number, created: number): Promise<void> {
+  const deviceLabel = deviceName(deviceId)
+  catalog.draft.deviceId = String(deviceId)
+  catalog.draft.search = ''
+  const filtered = await catalog.apply()
+  ElMessage.success(filtered ? tr('tagsUx.batchCreatedFiltered', [created, deviceLabel]) : tr('tagsView.k5e1fa9', [created]))
+  if (!filtered) await load()
 }
 
-function selectBatchDevice(): void {
-  batchForm.area = (Object.keys(protocolAreas(batchDevice.value?.protocol))[0] ?? 'HoldingRegister') as TagInput['area']
-  syncBatchWritableByArea()
-  batchForm.startAddress = 0
-  batchError.value = ''
-  generateBatchRows()
-}
-
-function openBatch(): void {
-  batchError.value = ''
-  const rememberedDevice = readLastNumber('tag-batch-device')
-  batchForm.deviceId = (appliedDeviceId.value && batchableDevices.value.some(d => d.id === appliedDeviceId.value)
-    ? appliedDeviceId.value
-    : rememberedDevice != null && batchableDevices.value.some(d => d.id === rememberedDevice) ? rememberedDevice : batchableDevices.value[0]?.id) ?? 0
-  batchForm.count = 10
-  batchForm.step = 1
-  batchForm.dataType = 'Float'
-  batchForm.prefix = readLastText('tag-batch-prefix')
-  batchForm.startIndex = 1
-  batchForm.pad = 0
-  batchForm.unit = ''
-  batchForm.archiveMode = 'OnChange'
-  batchForm.writable = false
-  batchForm.dbNumber = 1
-  selectBatchDevice()
-  batchVisible.value = true
-}
-
-async function saveBatch(): Promise<void> {
-  if (!canSaveBatch.value || batchSaving.value) return
-  batchSaving.value = true
-  batchError.value = ''
-  try {
-    const base = emptyForm()
-    const payload = batchRows.value.map(row => ({
-      ...base,
-      deviceId: batchForm.deviceId,
-      name: row.name.trim(),
-      address: row.address,
-      area: batchForm.area,
-      dbNumber: batchIsS7.value && batchForm.area === 'DataBlock' ? batchForm.dbNumber : 1,
-      dataType: batchForm.dataType,
-      textLength: batchForm.dataType === 'String' ? 32 : 0,
-      unit: batchForm.unit,
-      writable: batchReadOnlyArea.value ? false : batchForm.writable,
-      archiveMode: batchForm.archiveMode
-    }))
-    const result = await tagApi.batchCreate(batchForm.deviceId, payload)
-    rememberNumber('tag-batch-device', batchForm.deviceId)
-    rememberText('tag-batch-prefix', batchForm.prefix)
-    // 新建的测点 id 最大、排在列表末尾，若还停在上一个筛选里等于「建完就找不见」。
-    // 直接筛到刚建的设备并在提示里说清楚，比让用户自己回想筛选条件可靠。
-    const deviceLabel = deviceName(batchForm.deviceId)
-    catalog.draft.deviceId = String(batchForm.deviceId)
-    catalog.draft.search = ''
-    const filtered = await catalog.apply()
-    batchVisible.value = false
-    ElMessage.success(filtered ? tr('tagsUx.batchCreatedFiltered', [result.created, deviceLabel]) : tr('tagsView.k5e1fa9', [result.created]))
-    if (!filtered) await load()
-  } catch (error) {
-    batchError.value = errorMessage(error, tr('tagsView.kb16b27'))
-  } finally {
-    batchSaving.value = false
-  }
-}
-
-watch(() => [batchForm.startAddress, batchForm.count, batchForm.step, batchForm.prefix, batchForm.startIndex, batchForm.pad], generateBatchRows)
-
-const previewVisible = ref(false)
-const previewing = ref(false)
-const previewDevice = ref<number | undefined>()
-const previewDeviceRow = computed(() => devices.value.find(device => device.id === previewDevice.value))
-const diagnosticsVisible = ref(false)
-const previewForm = reactive({ area: 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
 const formIsS7 = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'SiemensS7')
 const formIsNumeric = computed(() => form.dataType !== 'Bool' && form.dataType !== 'String')
-const previewIsS7 = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'SiemensS7')
 const formIsOpc = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'OpcUa')
-const previewIsOpc = computed(() => devices.value.find(x => x.id === previewDevice.value)?.protocol === 'OpcUa')
 const formAreas = computed(() => protocolAreas(devices.value.find(x => x.id === form.deviceId)?.protocol))
-const previewAreas = computed(() => protocolAreas(devices.value.find(x => x.id === previewDevice.value)?.protocol))
 const formText = computed(() => protocolDef(devices.value.find(x => x.id === form.deviceId)?.protocol))
-const previewText = computed(() => protocolDef(devices.value.find(x => x.id === previewDevice.value)?.protocol))
 // 只读区域（离散输入、输入寄存器、S7 输入）不允许设置可写，隐藏开关并在保存时强制为否。
 const readOnlyAreas = ['DiscreteInput', 'InputRegister', 'Input']
 const formReadOnlyArea = computed(() => readOnlyAreas.includes(form.area))
@@ -772,17 +442,8 @@ const wordBitAddress = computed(() => {
   return false
 })
 watch(wordBitAddress, locked => { if (locked) form.writable = false })
-const batchReadOnlyArea = computed(() => readOnlyAreas.includes(batchForm.area))
 function syncWritableByArea(): void { if (formReadOnlyArea.value) form.writable = false }
-function syncBatchWritableByArea(): void { if (batchReadOnlyArea.value) batchForm.writable = false }
 function selectFormDevice(): void { form.area = formText.value ? 'Address' : formIsOpc.value ? 'OpcNode' : formIsS7.value ? 'DataBlock' : 'HoldingRegister'; form.bitOffset = 0; syncWritableByArea(); clearFieldErrors(fieldErrors) }
-function selectPreviewDevice(): void { previewForm.area = previewText.value ? 'Address' : previewIsOpc.value ? 'OpcNode' : previewIsS7.value ? 'DataBlock' : 'HoldingRegister'; previewForm.bitOffset = 0 }
-const previewResult = ref<Awaited<ReturnType<typeof deviceApi.test>> | null>(null)
-const previewGood = computed(() => previewResult.value?.connected && (!previewResult.value.quality || previewResult.value.quality === 'Good'))
-let previewVersion = 0
-watch([previewDevice, previewVisible, () => JSON.stringify(previewForm)], () => {
-  previewVersion++; previewResult.value = null; previewing.value = false
-}, { flush: 'sync' })
 
 function canSelect(row: Tag): boolean { return row.kind === 'Physical' && canConfigureTag(row) }
 function onSelect(rows: Tag[]): void { selected.value = rows.filter(canSelect) }
@@ -802,31 +463,7 @@ function addressLabel(tag: Tag): string {
   return String(tag.address)
 }
 
-function toInput(tag: Tag, patch: Partial<TagInput> = {}): TagInput {
-  return {
-    deviceId: tag.deviceId!,
-    name: tag.name,
-    description: tag.description ?? '',
-    area: tag.area,
-    address: tag.address,
-    dbNumber: tag.dbNumber,
-    bitOffset: tag.bitOffset,
-    textLength: tag.textLength ?? 0,
-    nodeId: tag.nodeId,
-    dataType: tag.dataType,
-    scale: tag.scale,
-    offset: tag.offset,
-    unit: tag.unit ?? '',
-    writable: tag.writable,
-    archiveMode: tag.archiveMode,
-    deadband: tag.deadband,
-    archivePeriodSec: tag.archivePeriodSec,
-    scanRateMs: tag.scanRateMs ?? null,
-    minValue: tag.minValue ?? null,
-    maxValue: tag.maxValue ?? null,
-    ...patch
-  }
-}
+const toInput = tagToInput
 
 let loadVersion = 0, disposed = false
 async function load(): Promise<void> {
@@ -849,7 +486,7 @@ async function load(): Promise<void> {
   }
 }
 watch(() => JSON.stringify(requestedQuery.value), () => { void load() })
-onBeforeUnmount(() => { disposed = true; loadVersion++; previewVersion++ })
+onBeforeUnmount(() => { disposed = true; loadVersion++ })
 function onSearchKey(event: KeyboardEvent): void { event.preventDefault(); if (!event.isComposing && event.keyCode !== 229) void applyQuery() }
 async function applyQuery(): Promise<void> { if (!await catalog.apply()) await load() }
 async function resetFilters(): Promise<void> { if (!await catalog.apply(true)) await load() }
@@ -952,62 +589,10 @@ async function save(): Promise<void> {
 }
 
 function openUsage(tag: Tag): void {
-  usageTag.value = tag
-  usage.value = null
-  usageCandidates.value = tags.value
-  usageError.value = ''
-  usageTargetId.value = null
-  rebindNotice.value = ''
-  rebindPublished.value = []
-  usageVisible.value = true
-  void loadUsage()
-  void loadUsageCandidates()
+  usageDialog.value?.open(tag)
 }
-async function loadUsageCandidates(): Promise<void> {
-  try { usageCandidates.value = await tagApi.list() } catch { /* 保留当前页测点作为候选 */ }
-}
-function onUsageClosed(): void {
-  usageTag.value = null
-  usage.value = null
-  usageError.value = ''
-  usageTargetId.value = null
-  rebindNotice.value = ''
-  rebindPublished.value = []
-}
-async function loadUsage(): Promise<void> {
-  const tag = usageTag.value
-  if (!tag) return
-  usageLoading.value = true
-  usageError.value = ''
-  try { usage.value = await tagApi.usage(tag.id) }
-  catch (error) { usageError.value = tr('tagUsage.loadFailed', [errorMessage(error, tr('tagsView.k72250c'))]) }
-  finally { usageLoading.value = false }
-}
-async function rebind(): Promise<void> {
-  const tag = usageTag.value, targetId = usageTargetId.value
-  if (!tag || !targetId) return
-  const target = usageCandidates.value.find(item => item.id === targetId)
-  const count = usage.value?.references.length ?? 0
-  try {
-    await ElMessageBox.confirm(
-      tr('tagUsage.replaceConfirm', [count, tag.name, target?.name ?? `#${targetId}`]),
-      tr('tagUsage.replace'),
-      { type: 'warning', confirmButtonText: tr('tagUsage.replace'), cancelButtonText: tr('tagsView.k4d0b46') })
-  } catch { return }
-  usageBusy.value = true
-  usageError.value = ''
-  try {
-    const result: TagRebindResult = await tagApi.rebind(tag.id, targetId)
-    rebindPublished.value = result.publishedScreens ?? []
-    const replaced = result.screens + result.templates + result.alarmRules + result.sequences + result.recipes
-    rebindNotice.value = rebindPublished.value.length
-      ? tr('tagUsage.replaceDone', [replaced, rebindPublished.value.length])
-      : tr('tagUsage.replaceDoneNoPublish', [replaced])
-    usageTargetId.value = null
-    await Promise.all([load(), loadUsage()])
-  } catch (error) {
-    usageError.value = tr('tagUsage.replaceFailed', [errorMessage(error, tr('tagsView.k72250c'))])
-  } finally { usageBusy.value = false }
+function openBatch(): void {
+  batchDialog.value?.open()
 }
 async function remove(tag: Tag): Promise<void> {
   actionError.value = ''
@@ -1114,36 +699,7 @@ async function importTags(file: File): Promise<void> {
 }
 
 function openPreview(): void {
-  previewVisible.value = true
-  previewError.value = ''
-  previewResult.value = null
-  previewDevice.value = controllableDevices.value.find(d => d.id === appliedDeviceId.value)?.id ?? controllableDevices.value[0]?.id
-  selectPreviewDevice()
-}
-
-async function runPreview(): Promise<void> {
-  if (!previewDevice.value) {
-    previewError.value = tr('tagsView.k61f337')
-    return
-  }
-  previewError.value = ''
-
-  const version = ++previewVersion
-  previewing.value = true
-  try {
-    const result = await deviceApi.test(
-      previewDevice.value,
-      previewForm.area,
-      previewForm.address,
-      previewForm.dataType, previewForm.dbNumber, previewForm.dataType === 'Bool' ? previewForm.bitOffset : 0, previewForm.nodeId,
-      previewForm.dataType === 'String' ? 32 : 0
-    )
-    if (version === previewVersion) previewResult.value = result
-  } catch (error) {
-    if (version === previewVersion) previewResult.value = { connected: false, message: errorMessage(error, tr('tagsView.kd9f607')) }
-  } finally {
-    if (version === previewVersion) previewing.value = false
-  }
+  previewDialog.value?.open()
 }
 
 async function loadDevices(): Promise<void> {
@@ -1164,13 +720,6 @@ onMounted(async () => { await Promise.all([loadDevices(), load()]) })
 }
 .hidden-file { display: none; }
 .more-caret { margin-left: 4px; }
-.usage-head { display: flex; align-items: center; gap: 8px; }
-.usage-head .spacer { flex: 1; }
-.usage-body { min-height: 80px; max-height: 320px; overflow: auto; margin: 10px 0; }
-.usage-group h4 { margin: 12px 0 4px; font-size: 13px; }
-.usage-group ul { margin: 0; padding-left: 18px; }
-.usage-group li { display: flex; align-items: center; justify-content: space-between; gap: 8px; line-height: 1.8; font-size: 13px; }
-.usage-replace { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--scada-border); }
 
 @media (max-width: 768px) {
   .tag-form :deep(.el-form-item__label) {

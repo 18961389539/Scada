@@ -110,9 +110,14 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             if (manifest is null) return new BackupVerification(false, ["manifest.json 无法解析"], null);
 
             var problems = new List<string>();
+            // manifest 里的路径不可信：../ 或绝对路径会让 Path.Combine 指向宿主任意文件，
+            // 随后 Hash(full) 会把它读进内存（zip 自身的遍历防护管不到清单内容）。
+            var root = Path.GetFullPath(extract) + Path.DirectorySeparatorChar;
             foreach (var file in manifest.Files)
             {
-                var full = Path.Combine(extract, file.Path.Replace('/', Path.DirectorySeparatorChar));
+                if (string.IsNullOrWhiteSpace(file.Path)) { problems.Add("清单包含空路径"); continue; }
+                var full = Path.GetFullPath(Path.Combine(extract, file.Path.Replace('/', Path.DirectorySeparatorChar)));
+                if (!full.StartsWith(root, StringComparison.OrdinalIgnoreCase)) { problems.Add($"清单路径越界：{file.Path}"); continue; }
                 if (!File.Exists(full)) { problems.Add($"缺少文件：{file.Path}"); continue; }
                 var info = new FileInfo(full);
                 if (info.Length != file.Bytes) { problems.Add($"大小不符：{file.Path}（清单 {file.Bytes}，实际 {info.Length}）"); continue; }

@@ -55,8 +55,7 @@ public sealed class AreaMigrationTests
         }
         finally
         {
-            TestSqlite.ClearPools(root);
-            try { Directory.Delete(root, true); } catch { }
+            TestSqlite.TryDeleteDirectory(root);
         }
     }
 }

@@ -61,7 +61,7 @@
         <button type="button" class="runtime-popup-close" :aria-label="$t('screenUx.closeDialog')" @click="popupVisible = false">×</button>
       </div>
       <div class="runtime-popup-body">
-        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" :replay-at="replayMode ? replayAt : null" toolbar-mode="embedded" @screen-loaded="onPopupLoaded" />
+        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" :replay-at="replayMode ? replayAt : null" toolbar-mode="embedded" :navigate-mode="navigateMode === 'tabs' ? 'tabs' : 'router'" @navigate="onPopupNavigate" @screen-loaded="onPopupLoaded" />
       </div>
     </div>
     </Teleport>
@@ -122,8 +122,11 @@ async function publishedRevisions(): Promise<{ id: number; publishedRevision: nu
 }
 const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; publishedPreview?: boolean; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
-  navigateMode?: 'router' | 'emit'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
-  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null; autoRefresh?: boolean }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false })
+  // tabs：导航交给外层标签页宿主，弹窗仍在本实例内处理。
+  navigateMode?: 'router' | 'emit' | 'tabs'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
+  toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null; autoRefresh?: boolean
+  // 多页面宿主切换到其他标签时置为 true，关闭当前实例的浮动弹窗，避免残留到其他页面。
+  suspended?: boolean }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false, suspended: false })
 const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const commandError = ref('')
@@ -257,7 +260,7 @@ watch(alarmError, message => { if (message) reportRuntime('alarmLoadFailed', mes
 watch(historyError, message => { if (message) reportRuntime('historyLoadFailed', message) })
 watch(connected, (value, previous) => { if (!value && previous) reportRuntime('connectionLost', tr('screenRuntime.reconnectingSnapshotRefresh')) })
 const hasStatus = computed(() => !!(replayMode.value || error.value || valueError.value || alarmError.value || alarmLimited.value || historyError.value || oeeError.value || (library.error && usesLibrary.value) || (deviceError.value && needsDeviceCatalog.value) || tagError.value || unverifiedCount.value || sequenceError.value || recipeError.value || commandError.value || newerRevision.value))
-watch(boundIds, () => { void resubscribe(); void poll() })
+watch(boundIds, () => { if (props.suspended) return; void resubscribe(); void poll() })
 watch(lineTagIds, () => { void loadHistory() })
 let replayAuxAt = 0
 watch(() => props.replayAt, async (at, previous) => {
@@ -516,8 +519,12 @@ async function activate(node: ScreenNode): Promise<void> {
   if (node.action.type === 'script') { await startScript(node); return }
   if (node.action.type === 'recipe') { if (node.action.recipeId) openRecipeDownload(node, node.action.recipeId); return }
   if (isPreview.value && node.action.type === 'command') { commandError.value = tr('screenRuntime.previewModeHint'); return }
-  if (props.navigateMode === 'emit' && !isPreview.value && (node.action.type === 'navigate' || node.action.type === 'popup') && node.action.screenId) {
-    if (node.action.type === 'navigate') emit('navigate', node.action.screenId); else emit('popup', node.action.screenId)
+  if (props.navigateMode !== 'router' && !isPreview.value && node.action.type === 'navigate' && node.action.screenId) {
+    emit('navigate', node.action.screenId)
+    return
+  }
+  if (props.navigateMode === 'emit' && !isPreview.value && node.action.type === 'popup' && node.action.screenId) {
+    emit('popup', node.action.screenId)
     return
   }
   if (node.action.type === 'navigate' && node.action.screenId) {
@@ -678,6 +685,43 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
 function onPopupLoaded(screen: { id: number; name: string } | null): void {
   if (screen && screen.id === popupId.value) popupTitle.value = screen.name
 }
+function onPopupNavigate(screenId: number): void {
+  popupVisible.value = false
+  emit('navigate', screenId)
+}
+function startRevisionPolling(): void {
+  if (disposed || revisionTimer) return
+  revisionTimer = setInterval(() => void checkNewerRevision(), 20000)
+}
+function stopRevisionPolling(): void {
+  clearInterval(revisionTimer)
+  revisionTimer = undefined
+}
+// 多页面宿主切到其他标签时暂停实时订阅、轮询和辅助定时器；返回时重新拉取快照后恢复。
+watch(() => props.suspended, suspended => {
+  if (suspended) {
+    popupVisible.value = false
+    subscription?.dispose()
+    subscription = undefined
+    subscriptionSeq++
+    stopRevisionPolling()
+    stopAuxTimers()
+    return
+  }
+  if (disposed) return
+  void (async () => {
+    await load()
+    if (disposed) return
+    if (props.suspended) {
+      subscription?.dispose()
+      subscription = undefined
+      subscriptionSeq++
+      return
+    }
+    startAuxTimers()
+    startRevisionPolling()
+  })()
+})
 function startPopupMove(event: PointerEvent): void {
   if ((event.target as HTMLElement).closest('button')) return
   const handle = event.currentTarget as HTMLElement
@@ -694,7 +738,7 @@ function startPopupMove(event: PointerEvent): void {
 async function previewHome(): Promise<void> { previewTargetId.value = undefined; await load() }
 watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 // 兜底轮询：未连接、或距上次 HTTP 快照超过 5s 时拉取；lastSnapshot 只由 poll() 更新，因此连接正常时仍约每 5s 补拉一次，画面切到后台自动暂停。
-usePolling(() => { if (replayMode.value) return; if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000)
+usePolling(() => { if (replayMode.value) return; if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000, { enabled: () => !props.suspended })
 
 onMounted(async () => {
   if (isMobile.value) void loadClientPolicy()
@@ -704,10 +748,16 @@ onMounted(async () => {
   await load(); if (disposed) return
   await resubscribe()
   if (disposed) return
-  startAuxTimers()
-  revisionTimer = setInterval(() => void checkNewerRevision(), 20000)
+  if (props.suspended) {
+    subscription?.dispose()
+    subscription = undefined
+    subscriptionSeq++
+  } else {
+    startAuxTimers()
+    startRevisionPolling()
+  }
   // 重连后共享模块已恢复订阅，这里只补快照，避免断线期间的值缺口
-  disposeReconnected = onHubReconnected(() => { if (!disposed) void poll() })
+  disposeReconnected = onHubReconnected(() => { if (!disposed && !props.suspended) void poll() })
   window.addEventListener('blur', releaseAllJogs)
   window.addEventListener('pagehide', releaseAllJogs)
   window.document.addEventListener('visibilitychange', onVisibilityChange)

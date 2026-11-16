@@ -1,6 +1,4 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import Moveable from 'moveable'
-import Selecto from 'selecto'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { screenApi, type ScreenPublicationResult } from '../api/screens'
@@ -11,9 +9,10 @@ import { recipeApi, type Recipe, type RecipeTemplate } from '../api/recipes'
 import { controlApi, type ControlSequence } from '../api/control'
 import { calcJobApi, type CalcJobInfo } from '../api/calcJobs'
 import { errorMessage } from '../api/http'
-import { arrangeNodes, clampNode, cleanNode, controlTypes, createNode, createSymbolNode, createTemplateNode, defaultFontSizes, EditHistory, emptyDocument, fontSizeTypes, palette, pipeGeometry, portPoint, readableDocument, SEPARATOR, translateNodes } from '../screens/model'
-import type { ArrangeOperation, LibraryItem, NodeType, ScreenAction, ScreenAnimation, ScreenDetail, ScreenDocument, ScreenIssue, ScreenNode, ScreenPort, ScreenSummary } from '../screens/model'
+import { arrangeNodes, clampNode, cleanNode, controlTypes, createNode, createSymbolNode, createTemplateNode, defaultFontSizes, EditHistory, emptyDocument, fontSizeTypes, palette, pipeGeometry, readableDocument, SEPARATOR, translateNodes } from '../screens/model'
+import type { ArrangeOperation, LibraryItem, NodeType, ScreenAnimation, ScreenDocument, ScreenIssue, ScreenNode, ScreenPort, ScreenSummary } from '../screens/model'
 import type { DesignerPanelApi, PanelIssue } from '../screens/designerPanelApi'
+import { hasFeature, typesWith } from '../screens/nodeSpecs'
 import { builtinSymbols, symbolCategories, type BuiltinSymbol } from '../screens/symbols'
 import { useLibraryStore } from '../stores/library'
 import { runtimeReturnPath } from '../screens/navigation'
@@ -23,6 +22,9 @@ import type { Device, Tag } from '../types'
 import { formatTime, formatValue, qualityLabels } from '../utils'
 import { useDesignerTagValues } from '../composables/useDesignerTagValues'
 import { useDesignerDraft } from '../composables/useDesignerDraft'
+import { useDesignerGestures } from '../composables/useDesignerGestures'
+import { useDesignerConflict } from '../composables/useDesignerConflict'
+import { useDesignerNodeEditing } from '../composables/useDesignerNodeEditing'
 import { tr } from '../i18n'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
 import { ArrowDown, ArrowUp, Close, Hide, Lock, Menu as MenuIcon, Operation, Setting, Unlock, View } from '@element-plus/icons-vue'
@@ -40,15 +42,6 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   const warningConfirmVisible = ref(false), pendingWarnings = ref<ScreenIssue[]>([])
   let warningConfirmResolve: ((accepted: boolean) => void) | null = null
   let warningConfirmSettled = false
-  interface ConflictRow { key: string; nodeId: string; kind: 'local' | 'server' | 'modified'; label: string; keep: boolean; choice: 'local' | 'server' | '' }
-  const publishDiffVisible = ref(false)
-  const publishDiff = ref<{ added: string[]; removed: string[]; changed: string[] }>({ added: [], removed: [], changed: [] })
-  const publishDiffExtra = computed(() => Math.max(0, publishDiff.value.added.length + publishDiff.value.removed.length + publishDiff.value.changed.length - 24))
-  let publishDiffResolve: ((accepted: boolean) => void) | null = null
-  let publishDiffSettled = false
-  const conflictVisible = ref(false), conflict = ref<{ server: ScreenDetail; rows: ConflictRow[] } | null>(null)
-  const conflictRows = computed(() => conflict.value?.rows ?? [])
-  const conflictNeedsChoice = computed(() => conflictRows.value.some(row => row.kind === 'modified' && !row.choice))
   const versionsVisible = ref(false), versionsSubmitting = ref(false), rollbackSucceeded = ref(false), rollbackWarning = ref('')
   function setVersionsBusy(value: boolean): void { versionsSubmitting.value = value; busy.value = value }
   function applyRollback(result: ScreenPublicationResult): void {
@@ -56,16 +49,15 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     actionError.value = ''; rollbackSucceeded.value = true; rollbackWarning.value = result.warning ?? ''
   }
   const history = reactive(new EditHistory()), savedSnapshot = ref('')
-  let stableSnapshot = '', clipboard: ScreenNode[] = [], drag: { x: number; y: number; nodes: ScreenNode[]; resize: boolean; moved: boolean } | null = null
-  let moveable: Moveable | null = null, selecto: Selecto | null = null
+  let stableSnapshot = '', clipboard: ScreenNode[] = []
   let disposed = false
   const selected = computed(() => document.value.nodes.find(n => n.id === selectedIds.value[0]))
   const selectedNodes = computed(() => document.value.nodes.filter(node => selectedIds.value.includes(node.id)))
   const isControlSelected = computed(() => !!selected.value && controlTypes.includes(selected.value.type))
   // 只在真正使用单测点的图元上显示数据/量程字段，避免文本、时钟、图表等出现无关配置。
-  const dataBindingTypes: NodeType[] = ['value', 'symbol', 'pump', 'valve', 'tank', 'gauge', 'dial', 'motor', 'fan', 'led', 'progress', 'kpi', 'equipment-panel', 'pipe', 'polyline']
-  const typeSettingTypes: NodeType[] = ['polyline', 'pipe', 'symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'gauge', 'dial', 'equipment-panel', 'image', 'chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge', 'table', 'history-table', 'oee-kpi', 'selector', 'knob', 'reset', 'silence', 'recipe']
-  const labelTypes: NodeType[] = ['text', 'button', 'rectangle', 'ellipse', 'marquee', 'symbol', 'pump', 'valve', 'motor', 'fan', 'tank', 'equipment-panel', 'input', 'kpi']
+  const dataBindingTypes: NodeType[] = typesWith('dataBinding')
+  const typeSettingTypes: NodeType[] = typesWith('typeSettings')
+  const labelTypes: NodeType[] = typesWith('labelText')
   const hasDataSection = computed(() => !!selected.value && (isControlSelected.value || dataBindingTypes.includes(selected.value.type)))
   const hasActionSection = computed(() => !!selected.value && !isControlSelected.value && !['template', 'reset', 'silence', 'recipe'].includes(selected.value.type))
   const hasTypeSection = computed(() => !!selected.value && (selected.value.type === 'template' || typeSettingTypes.includes(selected.value.type)))
@@ -73,82 +65,17 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   const showFontSize = computed(() => !!selected.value && fontSizeTypes.includes(selected.value.type))
   const batchShowFontSize = computed(() => selectedNodes.value.some(node => fontSizeTypes.includes(node.type)))
   // 文字样式作用于主文字图元；形状样式作用于矩形/按钮/椭圆。
-  const textStyleNodeTypes: NodeType[] = ['text', 'value', 'button', 'rectangle', 'ellipse']
-  const shapeStyleNodeTypes: NodeType[] = ['rectangle', 'button', 'ellipse']
+  const textStyleNodeTypes: NodeType[] = typesWith('textStyle')
+  const shapeStyleNodeTypes: NodeType[] = typesWith('shapeStyle')
   const showTextStyle = computed(() => !!selected.value && textStyleNodeTypes.includes(selected.value.type))
   const showShapeStyle = computed(() => !!selected.value && shapeStyleNodeTypes.includes(selected.value.type))
   const showStyleSection = computed(() => showTextStyle.value || showShapeStyle.value)
-  function setAlign(value: string | number | boolean | undefined): void {
-    if (!selected.value) return
-    selected.value.align = value === 'left' || value === 'right' ? value : null
-    commitField('align')
-  }
-  function setStyleFlag(key: 'wrap' | 'autoFit' | 'bold', value: string | number | boolean | undefined): void {
-    if (!selected.value) return
-    selected.value[key] = value ? true : null
-    commitField(key)
-  }
-  function setStyleNumber(key: 'opacity' | 'borderWidth' | 'radius', value: number | undefined): void {
-    if (!selected.value) return
-    selected.value[key] = value ?? null
-    commitField(key)
-  }
-  const controlRangeTypes: NodeType[] = ['slider', 'spinner', 'input']
-  const stateLimit = computed(() => selected.value && (selected.value.type === 'selector' || selected.value.type === 'knob') ? 8 : 16)
-  const multiTagTypes: NodeType[] = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'table', 'history-table']
-  function sameValue<T>(values: T[]): T | undefined { return values.length > 0 && values.every(value => value === values[0]) ? values[0] : undefined }
-  function commonOf<K extends keyof ScreenNode>(key: K): ScreenNode[K] | undefined { return sameValue(selectedNodes.value.map(node => node[key])) }
-  function mixedOf<K extends keyof ScreenNode>(key: K): boolean {
-    const list = selectedNodes.value
-    return list.length > 1 && !list.every(node => node[key] === list[0][key])
-  }
-  function commonAction<T>(get: (action: ScreenAction) => T): T | undefined { return sameValue(selectedNodes.value.map(node => get(node.action))) }
-  function mixedAction<T>(get: (action: ScreenAction) => T): boolean {
-    const list = selectedNodes.value
-    return list.length > 1 && !list.every(node => get(node.action) === get(list[0].action))
-  }
-  function applyAll<K extends keyof ScreenNode>(key: K, value: ScreenNode[K]): void {
-    if (busy.value) return
-    for (const node of selectedNodes.value) Object.assign(node, { [key]: value })
-    commit(`batch:${selectedIds.value.join(',')}:${String(key)}`)
-  }
-  function applyNumber(key: 'rotation' | 'decimals', value: number | undefined): void {
-    if (value === undefined) return
-    applyAll(key, value)
-  }
-  function applyAction(patch: Partial<ScreenAction>): void {
-    if (busy.value) return
-    for (const node of selectedNodes.value) node.action = { ...node.action, ...patch }
-    commit(`batch:${selectedIds.value.join(',')}:action:${Object.keys(patch).join(',')}`)
-  }
-  // 动作类型与目标字段的唯一对应表，切换类型时清掉无关目标，避免保存出指向错误对象的残留字段。
-  const actionTargets: Record<ScreenAction['type'], (keyof ScreenAction)[]> = {
-    none: [], navigate: ['screenId'], popup: ['screenId'], command: ['tagId', 'bind'], sequence: ['sequenceId'], recipe: ['recipeId'], script: ['jobId']
-  }
-  function clearActionTargets(action: ScreenAction, type: ScreenAction['type']): void {
-    const keep = actionTargets[type]
-    for (const field of ['screenId', 'tagId', 'sequenceId', 'recipeId', 'jobId', 'bind'] as const)
-      if (!keep.includes(field)) action[field] = null
-  }
-  function setActionType(type: ScreenAction['type']): void {
-    const action = selected.value?.action
-    if (!action) return
-    action.type = type
-    clearActionTargets(action, type)
-    commitField('action-type')
-  }
-  function setBatchActionType(type: ScreenAction['type']): void {
-    if (busy.value) return
-    for (const node of selectedNodes.value) { node.action = { ...node.action, type }; clearActionTargets(node.action, type) }
-    commit(`batch:${selectedIds.value.join(',')}:action:type`)
-  }
-  const batchActionType = computed(() => commonAction(action => action.type))
-  const batchShowsTarget = computed(() => batchActionType.value === 'navigate' || batchActionType.value === 'popup')
-  const batchShowsCommand = computed(() => batchActionType.value === 'command')
+  const controlRangeTypes: NodeType[] = typesWith('controlRange')
+  const stateLimit = computed(() => selected.value && hasFeature(selected.value.type, 'positional') ? 8 : 16)
+  const multiTagTypes: NodeType[] = typesWith('multiTag')
   const pipeEnds = ['source', 'target'] as const, pipePorts: ScreenPort['port'][] = ['left', 'right', 'top', 'bottom']
   const pipeEndUpdates = { source: (value: string | null) => setPipeEnd('source', value), target: (value: string | null) => setPipeEnd('target', value) }
   const pipePortUpdates = { source: (value: ScreenPort['port']) => setPipePort('source', value), target: (value: ScreenPort['port']) => setPipePort('target', value) }
-  let waypointGesture: AbortController | undefined
   function setPipePort(end: 'source' | 'target', port: ScreenPort['port']): void { const connection = selected.value?.[end]; if (connection) { connection.port = port; commit() } }
   function setPipeEnd(end: 'source' | 'target', value: string | null | undefined): void {
     const node = selected.value; if (!node) return
@@ -175,44 +102,11 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     node.commands ??= []; const first = node.commands.length === 0
     node.commands.push({ key: `cmd${crypto.randomUUID().slice(0, 8)}`, label: tr(first ? 'hmi.start' : 'hmi.stop'), tagId: null, value: first ? 1 : 0 }); commit()
   }
-  function beginWaypoint(rendered: ScreenNode, index: number, event: PointerEvent): void {
-    if (busy.value || event.button !== 0 || rendered.rotation !== 0) return
-    const node = document.value.nodes.find(item => item.id === rendered.id); if (!node?.points) return
-    commit(); waypointGesture?.abort(); const controller = new AbortController(); waypointGesture = controller
-    const move = (pointer: PointerEvent) => {
-      const point = canvasPoint(pointer); if (!point || pointer.pointerId !== event.pointerId) return
-      node.points![index] = { x: Math.max(0, Math.min(100, (point.x - node.x) / node.width * 100)), y: Math.max(0, Math.min(100, (point.y - node.y) / node.height * 100)) }
-    }
-    window.addEventListener('pointermove', move, { signal: controller.signal })
-    window.addEventListener('pointerup', pointer => {
-      if (pointer.pointerId !== event.pointerId) return
-      move(pointer)
-      if (index === 0 || index === node.points!.length - 1) {
-        const point = canvasPoint(pointer)
-        let nearest: ScreenPort | null = null, distance = 18 / zoom.value
-        if (point) for (const target of document.value.nodes.filter(item => item.id !== node.id && !['polyline', 'template'].includes(item.type))) for (const port of pipePorts) {
-          const connection = { nodeId: target.id, port }, anchor = portPoint(connection, document.value.nodes)!
-          const next = Math.hypot(anchor.x - point.x, anchor.y - point.y)
-          if (next < distance) { distance = next; nearest = connection }
-        }
-        if (nearest) node[index === 0 ? 'source' : 'target'] = nearest
-      }
-      controller.abort(); commit()
-    }, { signal: controller.signal })
-    window.addEventListener('pointercancel', () => { controller.abort(); commit() }, { signal: controller.signal, once: true })
-  }
   const mobilePanel = ref<'palette' | 'properties' | null>(null)
   watch(selectedIds, () => {
     if (mobilePanel.value === 'palette') mobilePanel.value = null
     // 切换图元时重新展开分区，避免上一次折叠状态把相关字段藏起来。
     void nextTick(() => { for (const group of propertiesPanel.value?.querySelectorAll<HTMLDetailsElement>('details.prop-group') ?? []) group.open = true })
-  })
-  const guides = ref<{ vertical: number[]; horizontal: number[] } | null>(null)
-  const marquee = ref<{ startX: number; startY: number; x: number; y: number; baseIds: string[]; originalIds: string[] } | null>(null)
-  const selectionBox = computed(() => {
-    const box = marquee.value
-    if (!box || Math.max(Math.abs(box.x - box.startX), Math.abs(box.y - box.startY)) * zoom.value < 3) return null
-    return { x: Math.min(box.x, box.startX), y: Math.min(box.y, box.startY), width: Math.abs(box.x - box.startX), height: Math.abs(box.y - box.startY) }
   })
   // 快照作为 computed 缓存：脏状态、本地备份和撤销共享同一次序列化，避免拖动时重复 stringify 整份文档。
   const areaId = ref<number | null>(null)
@@ -250,65 +144,6 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   }
   function commitField(field: string): void { commit(`${selectedIds.value.join(',') || 'canvas'}:${field}`) }
   function fieldLabel(base: string, unit?: string | null): string { return unit ? tr('screenDesignerView.fieldWithUnit', [base, unit]) : base }
-  function resetAppearance(): void {
-    const node = selected.value
-    if (!node) return
-    const defaults = createNode(node.type, node.x, node.y)
-    node.color = defaults.color
-    node.activeColor = defaults.activeColor
-    node.rotation = 0
-    node.fontSize = null
-    node.align = null
-    node.wrap = null
-    node.autoFit = null
-    node.bold = null
-    node.opacity = null
-    node.borderWidth = null
-    node.radius = null
-    commitField('reset-appearance')
-  }
-  function resetData(): void {
-    const node = selected.value
-    if (!node) return
-    const defaults = createNode(node.type, node.x, node.y)
-    node.unit = ''
-    node.min = defaults.min
-    node.max = defaults.max
-    node.decimals = defaults.decimals
-    node.activeThreshold = defaults.activeThreshold
-    node.releaseValue = defaults.releaseValue
-    node.pulseMs = defaults.pulseMs
-    node.maxHoldMs = defaults.maxHoldMs
-    node.resetMode = defaults.resetMode
-    node.silenceMinutes = defaults.silenceMinutes
-    node.recipeTemplateId = defaults.recipeTemplateId
-    commitField('reset-data')
-  }
-  function resetAction(): void {
-    if (!selected.value) return
-    selected.value.action = { type: 'none', screenId: null, tagId: null, value: 1 }
-    commitField('reset-action')
-  }
-  function resetAnimation(): void {
-    if (!selected.value) return
-    selected.value.animation = null
-    commitField('reset-animation')
-  }
-  // 矢量动画配置：类型切换时给出合理默认区间（rotate 角度、level 比例、flow 状态触发）。
-  function setAnimType(value: string): void {
-    if (!selected.value) return
-    if (value === 'none') { selected.value.animation = null; commitField('animation-type'); return }
-    const type = value as ScreenAnimation['type']
-    const outTo = type === 'level' ? 1 : selected.value.type === 'valve' ? 90 : 360
-    selected.value.animation = { type, source: type === 'flow' ? 'state' : 'value', tagId: selected.value.animation?.tagId ?? null,
-      from: 0, to: 100, outFrom: 0, outTo }
-    commitField('animation-type')
-  }
-  function setAnimField<K extends keyof ScreenAnimation>(key: K, value: ScreenAnimation[K]): void {
-    if (!selected.value?.animation) return
-    selected.value.animation = { ...selected.value.animation, [key]: value }
-    commitField(`animation-${key}`)
-  }
   function restore(state: string | undefined): void { if (!state) return; const parsed = JSON.parse(state); name.value = parsed.name; document.value = parsed.document; stableSnapshot = state; selectedIds.value = []; notify() }
   function undo(): void { commit(); restore(history.undo(snapshot.value)) }
   function redo(): void { restore(history.redo(snapshot.value)) }
@@ -345,6 +180,30 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     if (additive) selectedIds.value = selectedIds.value.includes(nodeId) ? selectedIds.value.filter(id => !members.includes(id)) : [...new Set([...selectedIds.value, ...members])]
     else selectedIds.value = members
   }
+  const {
+    commonOf, mixedOf, commonAction, mixedAction, applyAll, applyNumber, applyAction,
+    clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand,
+    setAlign, setStyleFlag, setStyleNumber, resetAppearance, resetData, resetAction, resetAnimation,
+    setAnimType, setAnimField, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag
+  } = useDesignerNodeEditing({ selected, selectedNodes, selectedIds, busy, commit, commitField })
+  const {
+    conflictVisible, conflict, conflictRows, conflictNeedsChoice,
+    publishDiffVisible, publishDiff, publishDiffExtra,
+    conflictLabel, sameNode, conflictRowsFor, openConflict,
+    reloadServerDraft, overwriteServerDraft, mergeConflict,
+    diffLabels, settlePublishDiff, confirmPublishDiff
+  } = useDesignerConflict({
+    screenId: id, document, name, revision, publishedRevision, selectedIds, savedSnapshot, snapshot,
+    setStableSnapshot: value => { stableSnapshot = value }, actionError, save
+  })
+  const {
+    guides, marquee, selectionBox, canvasPoint, beginWaypoint, beginDrag, beginSelection,
+    startTransform, snapAlignment, updateGuides, transformNodes, finishTransform,
+    syncInteractionTargets, initializeInteractions, disposeInteractions
+  } = useDesignerGestures({
+    document, selectedIds, busy, zoom, snap, stage, canvasViewport, groupMembers, select, commit,
+    isDisposed: () => disposed
+  })
   function block(message: string): void { guardError.value = message }
   function add(type: NodeType, x = 60 + document.value.nodes.length % 8 * 20, y = 60 + document.value.nodes.length % 8 * 20): void {
     if (busy.value) return
@@ -714,148 +573,6 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     if (!palette.some(p => p.type === type)) return
     add(type, Math.round((event.clientX - rect.left) / zoom.value), Math.round((event.clientY - rect.top) / zoom.value))
   }
-  function beginDrag(node: ScreenNode, event: MouseEvent | TouchEvent): void {
-    if ('button' in event && event.button !== 0 || busy.value) return
-    const target = document.value.nodes.find(item => item.id === node.id)
-    if (target?.locked) return
-    event.preventDefault()
-    stage.value?.focus({ preventScroll: true })
-    if (event.shiftKey) { select(node.id, true); return }
-    commit(); if (!selectedIds.value.includes(node.id)) selectedIds.value = [node.id]
-    syncInteractionTargets(); moveable?.dragStart(event)
-  }
-  function canvasPoint(event: { clientX: number; clientY: number }): { x: number; y: number } | null {
-    const bounds = stage.value?.querySelector('.screen-canvas')?.getBoundingClientRect()
-    if (!bounds) return null
-    return { x: Math.max(0, Math.min(document.value.width, (event.clientX - bounds.left) / zoom.value)),
-      y: Math.max(0, Math.min(document.value.height, (event.clientY - bounds.top) / zoom.value)) }
-  }
-  function beginSelection(event: PointerEvent): void {
-    if (busy.value || event.button !== 0) return
-    stage.value?.focus({ preventScroll: true })
-  }
-  function startTransform(event: { clientX: number; clientY: number }, resize = false): void {
-    if (busy.value) return
-    commit()
-    drag = { x: event.clientX, y: event.clientY, nodes: JSON.parse(JSON.stringify(document.value.nodes.filter(node => selectedIds.value.includes(node.id)))), resize, moved: false }
-  }
-  function snapAlignment(originals: ScreenNode[], dx: number, dy: number): { dx: number; dy: number } {
-    const threshold = Math.max(2, 6 / zoom.value)
-    const selected = new Set(originals.map(node => node.id))
-    const others = document.value.nodes.filter(node => !selected.has(node.id) && !node.hidden)
-    const xs: number[] = [0, document.value.width / 2, document.value.width]
-    const ys: number[] = [0, document.value.height / 2, document.value.height]
-    for (const node of others) { xs.push(node.x, node.x + node.width / 2, node.x + node.width); ys.push(node.y, node.y + node.height / 2, node.y + node.height) }
-    let snapDx = dx, snapDy = dy, bestX = threshold + 1, bestY = threshold + 1
-    for (const node of originals) {
-      for (const value of [node.x + dx, node.x + dx + node.width / 2, node.x + dx + node.width]) for (const target of xs) {
-        const delta = target - value
-        if (Math.abs(delta) <= threshold && Math.abs(delta) < Math.abs(bestX)) { bestX = delta; snapDx = dx + delta }
-      }
-      for (const value of [node.y + dy, node.y + dy + node.height / 2, node.y + dy + node.height]) for (const target of ys) {
-        const delta = target - value
-        if (Math.abs(delta) <= threshold && Math.abs(delta) < Math.abs(bestY)) { bestY = delta; snapDy = dy + delta }
-      }
-    }
-    return { dx: snapDx, dy: snapDy }
-  }
-  function updateGuides(moved: ScreenNode[]): void {
-    const threshold = Math.max(1, 2 / zoom.value)
-    const selected = new Set(drag?.nodes.map(node => node.id) ?? [])
-    const others = document.value.nodes.filter(node => !selected.has(node.id) && !node.hidden)
-    const vertical = new Set<number>(), horizontal = new Set<number>()
-    for (const node of moved) {
-      const xs = [node.x, node.x + node.width / 2, node.x + node.width]
-      const ys = [node.y, node.y + node.height / 2, node.y + node.height]
-      for (const other of others) {
-        for (const x of xs) for (const ox of [other.x, other.x + other.width / 2, other.x + other.width]) if (Math.abs(x - ox) <= threshold) vertical.add(Number(x.toFixed(1)))
-        for (const y of ys) for (const oy of [other.y, other.y + other.height / 2, other.y + other.height]) if (Math.abs(y - oy) <= threshold) horizontal.add(Number(y.toFixed(1)))
-      }
-    }
-    guides.value = vertical.size || horizontal.size ? { vertical: [...vertical], horizontal: [...horizontal] } : null
-  }
-  function transformNodes(event: { clientX: number; clientY: number }): void {
-    if (!drag || busy.value) return
-    const grid = snap.value ? 10 : 1
-    let dx = Math.round((event.clientX - drag.x) / zoom.value / grid) * grid, dy = Math.round((event.clientY - drag.y) / zoom.value / grid) * grid
-    if (snap.value && !drag.resize) ({ dx, dy } = snapAlignment(drag.nodes, dx, dy))
-    const moved = drag.resize
-      ? drag.nodes.map(original => clampNode({ ...original, width: original.width + dx, height: original.height + dy }, document.value))
-      : translateNodes(drag.nodes, document.value, dx, dy)
-    for (const node of moved) {
-      const index = document.value.nodes.findIndex(original => original.id === node.id)
-      document.value.nodes[index] = node
-    }
-    if (snap.value && !drag.resize) updateGuides(moved); else guides.value = null
-    if (moved.some((node, index) => { const original = drag!.nodes[index]; return node.x !== original.x || node.y !== original.y || node.width !== original.width || node.height !== original.height })) drag.moved = true
-  }
-  function finishTransform(): void { guides.value = null; if (drag?.moved) commit(); drag = null; syncInteractionTargets() }
-  // 设计器画布在滚动容器内，只渲染视口附近图元；选中图元始终保留，避免拖拽/缩放目标丢失。
-  function updateCanvasViewport(): void {
-    const viewport = stage.value
-    const canvas = viewport?.querySelector<SVGElement>('.screen-canvas')
-    if (!viewport || !canvas) return
-    const z = zoom.value || 1
-    const view = viewport.getBoundingClientRect(), box = canvas.getBoundingClientRect()
-    canvasViewport.x = Math.max(0, (view.left - box.left) / z)
-    canvasViewport.y = Math.max(0, (view.top - box.top) / z)
-    canvasViewport.width = view.width / z
-    canvasViewport.height = view.height / z
-  }
-  function syncInteractionTargets(): void {
-    updateCanvasViewport()
-    if (!moveable || !stage.value || disposed) return
-    if (!drag) {
-      const targets = selectedIds.value.flatMap(id => {
-        const node = document.value.nodes.find(item => item.id === id)
-        if (!node || node.locked || node.hidden) return []
-        const element = stage.value!.querySelector<SVGElement>(`.screen-canvas > g[data-node-id="${CSS.escape(id)}"]`)
-        return element ? [element] : []
-      })
-      moveable.setState({ target: busy.value ? [] : targets.length === 1 ? targets[0] : targets, resizable: !busy.value && targets.length === 1 })
-    }
-    moveable.updateRect()
-  }
-  function initializeInteractions(): void {
-    const viewport = stage.value
-    if (!viewport) return
-    moveable = new Moveable(viewport, { container: viewport, draggable: true, resizable: true, origin: false,
-      renderDirections: ['se'], throttleDrag: 0, throttleResize: 0, preventDefault: true })
-    moveable.on('dragStart', event => { if (busy.value) event.stop(); else startTransform(event) })
-      .on('drag', transformNodes).on('dragEnd', finishTransform)
-      .on('dragGroupStart', event => { if (busy.value) event.stop(); else startTransform(event) })
-      .on('dragGroup', transformNodes).on('dragGroupEnd', finishTransform)
-      .on('resizeStart', event => { if (busy.value) event.stop(); else startTransform(event, true) })
-      .on('resize', transformNodes).on('resizeEnd', finishTransform)
-    selecto = new Selecto({ container: viewport, dragContainer: viewport, className: 'designer-selecto',
-      selectableTargets: ['.screen-canvas > g[data-node-id]:not(.inner)'], selectByClick: false, selectFromInside: false,
-      hitRate: 0, checkInput: true, boundContainer: viewport })
-    selecto.on('dragStart', event => {
-      const target = event.inputEvent.target as Element | null
-      if (busy.value || !target?.closest('.screen-canvas') || target.closest('[data-node-id]')) { event.stop(); return }
-      const point = canvasPoint(event.inputEvent); if (!point) { event.stop(); return }
-      commit(); drag = null; viewport.focus({ preventScroll: true })
-      marquee.value = { startX: point.x, startY: point.y, ...point, baseIds: event.inputEvent.shiftKey ? [...selectedIds.value] : [], originalIds: [...selectedIds.value] }
-      selecto?.setSelectedTargets([])
-      if (!event.inputEvent.shiftKey) selectedIds.value = []
-    }).on('drag', event => {
-      const point = canvasPoint(event.inputEvent)
-      if (marquee.value && point) { marquee.value.x = point.x; marquee.value.y = point.y }
-    }).on('select', event => {
-      if (!marquee.value || busy.value) return
-      selectedIds.value = [...new Set([...marquee.value.baseIds, ...event.selected.flatMap(element => {
-        const id = element.getAttribute('data-node-id')
-        const node = id ? document.value.nodes.find(item => item.id === id) : undefined
-        return id && node && !node.locked && !node.hidden ? groupMembers(id) : []
-      })])]
-    }).on('dragEnd', () => { marquee.value = null })
-    viewport.addEventListener('scroll', syncInteractionTargets)
-    window.addEventListener('resize', syncInteractionTargets)
-    syncInteractionTargets()
-  }
-  watch([selectedIds, zoom, busy], () => syncInteractionTargets(), { flush: 'post' })
-  // Moveable 只依赖几何与层级顺序；文字、颜色、测点等属性变化不再触发整份文档深度监听。
-  watch(() => document.value.nodes.map(node => `${node.id}:${node.x}:${node.y}:${node.width}:${node.height}:${node.rotation}`), () => syncInteractionTargets(), { flush: 'post' })
   function detachConnections(removed: Set<string>): void {
     document.value.nodes = document.value.nodes.map(node => {
       if (!removed.has(node.source?.nodeId ?? '') && !removed.has(node.target?.nodeId ?? '')) return node
@@ -893,27 +610,6 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
       if (picked.has(nodes[index].id) && !picked.has(nodes[neighbor].id)) [nodes[index], nodes[neighbor]] = [nodes[neighbor], nodes[index]]
     }
     document.value.nodes = nodes; commit()
-  }
-  const groupedSelection = computed(() => selectedNodes.value.some(node => node.groupId))
-  function groupSelection(): void {
-    if (busy.value || selectedNodes.value.length < 2) return
-    commit()
-    const groupId = `g${crypto.randomUUID().slice(0, 12)}`
-    for (const node of selectedNodes.value) node.groupId = groupId
-    commit()
-  }
-  function ungroupSelection(): void {
-    if (busy.value || !groupedSelection.value) return
-    commit(); for (const node of selectedNodes.value) node.groupId = null; commit()
-  }
-  function toggleNodeFlag(node: ScreenNode, key: 'locked' | 'hidden'): void {
-    if (busy.value) return
-    commit(); node[key] = node[key] ? null : true; commit()
-  }
-  function toggleSelectionFlag(key: 'locked' | 'hidden'): void {
-    if (busy.value || !selectedNodes.value.length) return
-    const next = !selectedNodes.value.every(node => node[key])
-    commit(); for (const node of selectedNodes.value) node[key] = next ? true : null; commit()
   }
   function startLayerDrag(nodeId: string, event: DragEvent): void { event.dataTransfer?.setData('application/scada-layer', nodeId); if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move' }
   function dropLayer(targetId: string, event: DragEvent): void {
@@ -1001,101 +697,6 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
     warningConfirmSettled = false
     warningConfirmVisible.value = true
     return await new Promise<boolean>(resolve => { warningConfirmResolve = resolve })
-  }
-  async function openConflict(): Promise<void> {
-    try {
-      const server = await screenApi.get(id, true)
-      conflict.value = { server, rows: conflictRowsFor(server.document) }
-      conflictVisible.value = true
-      actionError.value = tr('screenDesignerView.conflictHint', [server.revision, revision.value])
-    } catch { actionError.value = tr('screenDesignerView.conflictUnavailable') }
-  }
-  function conflictLabel(node: ScreenNode): string {
-    return `${node.text || palette.find(item => item.type === node.type)?.label || node.type} · #${node.id.slice(0, 6)}`
-  }
-  function sameNode(left: ScreenNode, right: ScreenNode): boolean {
-    return JSON.stringify(cleanNode(left)) === JSON.stringify(cleanNode(right))
-  }
-  function conflictRowsFor(server: ScreenDocument): ConflictRow[] {
-    const local = new Map(document.value.nodes.map(node => [node.id, node])), remote = new Map(server.nodes.map(node => [node.id, node]))
-    const rows: ConflictRow[] = []
-    for (const [id, node] of local) {
-      const other = remote.get(id)
-      if (!other) rows.push({ key: id, nodeId: id, kind: 'local', label: conflictLabel(node), keep: true, choice: 'local' })
-      else if (!sameNode(node, other)) rows.push({ key: id, nodeId: id, kind: 'modified', label: conflictLabel(node), keep: true, choice: '' })
-    }
-    for (const [id, node] of remote) if (!local.has(id)) rows.push({ key: id, nodeId: id, kind: 'server', label: conflictLabel(node), keep: true, choice: 'server' })
-    return rows
-  }
-  function reloadServerDraft(): void {
-    const server = conflict.value?.server
-    if (!server) return
-    document.value = server.document
-    name.value = server.name
-    revision.value = server.revision
-    stableSnapshot = snapshot.value; savedSnapshot.value = stableSnapshot
-    selectedIds.value = []; conflictVisible.value = false; actionError.value = ''
-  }
-  function overwriteServerDraft(): void {
-    const server = conflict.value?.server
-    if (!server) return
-    revision.value = server.revision
-    conflictVisible.value = false
-    void save()
-  }
-  function mergeConflict(): void {
-    const server = conflict.value?.server
-    if (!server || conflictNeedsChoice.value) return
-    const remote = new Map(server.document.nodes.map(node => [node.id, node]))
-    const rows = new Map(conflict.value!.rows.map(row => [row.nodeId, row]))
-    const next = document.value.nodes.flatMap(node => {
-      const row = rows.get(node.id)
-      if (!row) return [node]
-      if (row.kind === 'local') return row.keep ? [node] : []
-      if (row.kind === 'modified' && row.choice === 'server') { const other = remote.get(node.id); return other ? [JSON.parse(JSON.stringify(other)) as ScreenNode] : [node] }
-      return [node]
-    })
-    for (const row of conflict.value!.rows) {
-      if (row.kind === 'server' && row.keep) { const other = remote.get(row.nodeId); if (other) next.push(JSON.parse(JSON.stringify(other)) as ScreenNode) }
-    }
-    document.value = { ...document.value, nodes: next }
-    revision.value = server.revision
-    conflictVisible.value = false
-    void save()
-  }
-  function diffLabels(local: ScreenDocument, remote: ScreenDocument): { added: string[]; removed: string[]; changed: string[] } {
-    const left = new Map(local.nodes.map(node => [node.id, node])), right = new Map(remote.nodes.map(node => [node.id, node]))
-    const added: string[] = [], removed: string[] = [], changed: string[] = []
-    for (const [nodeId, node] of left) {
-      const other = right.get(nodeId)
-      if (!other) added.push(conflictLabel(node))
-      else if (!sameNode(node, other)) changed.push(conflictLabel(node))
-    }
-    for (const [nodeId, node] of right) if (!left.has(nodeId)) removed.push(conflictLabel(node))
-    if (local.width !== remote.width || local.height !== remote.height || local.background !== remote.background) changed.push(tr('screenDesignerView.canvas'))
-    return { added, removed, changed }
-  }
-  function settlePublishDiff(accepted: boolean): void {
-    if (publishDiffSettled) return
-    publishDiffSettled = true
-    publishDiffVisible.value = false
-    publishDiffResolve?.(accepted)
-    publishDiffResolve = null
-  }
-  async function confirmPublishDiff(): Promise<boolean> {
-    if (!publishedRevision.value) return true
-    let remote: ScreenDocument
-    try { remote = (await screenApi.get(id, false)).document }
-    catch (e) {
-      actionError.value = tr('screenDesignerView.publishCheckDiffFailed', [errorMessage(e, tr('screenDesignerView.publishFailed'))])
-      return false
-    }
-    const diff = diffLabels(document.value, remote)
-    if (!diff.added.length && !diff.removed.length && !diff.changed.length) return true
-    publishDiff.value = diff
-    publishDiffSettled = false
-    publishDiffVisible.value = true
-    return await new Promise<boolean>(resolve => { publishDiffResolve = resolve })
   }
   async function save(): Promise<boolean> {
     if (props.embedded) { commit(); emit('save'); return false }
@@ -1274,7 +875,7 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   })
   watch(() => props.bindingTags, tagsToUse => { if (props.embedded && tagsToUse) tags.value = tagsToUse })
   watch(() => props.disabled, disabled => { if (props.embedded) busy.value = disabled })
-  onBeforeUnmount(() => { unregisterShortcuts?.(); waypointGesture?.abort(); persistLocalDraft(); disposeDraftTimer(); disposed = true; stage.value?.removeEventListener('scroll', syncInteractionTargets); window.removeEventListener('resize', syncInteractionTargets); moveable?.destroy(); selecto?.destroy(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
+  onBeforeUnmount(() => { unregisterShortcuts?.(); persistLocalDraft(); disposeDraftTimer(); disposed = true; disposeInteractions(); window.removeEventListener('keydown', keydown); window.removeEventListener('beforeunload', beforeUnload); window.removeEventListener('pagehide', persistLocalDraft) })
   return {
     route, router, id, returnToRuntime, runtimePath, document, name, areaId, screenAreas, canClearArea, revision, publishedRevision, loading, loadError, actionError, guardError, busy, zoom, snap, canvasViewport, selectedIds, tags, devices, screens, stage, propertiesPanel, recipeTemplates, recipes, sequences, calcJobs, previewVisible, issuesVisible, issues, warnings, issuesError, savedAt, publishDiffVisible, publishDiff, publishDiffExtra, conflictVisible, conflict, conflictRows, conflictNeedsChoice, versionsVisible, versionsSubmitting, rollbackSucceeded, rollbackWarning, setVersionsBusy, applyRollback, history, savedSnapshot, selected, selectedNodes, isControlSelected, dataBindingTypes, typeSettingTypes, labelTypes, hasDataSection, hasActionSection, hasTypeSection, showEnglishText, showFontSize, batchShowFontSize, textStyleNodeTypes, shapeStyleNodeTypes, showTextStyle, showShapeStyle, showStyleSection, setAlign, setStyleFlag, setStyleNumber, controlRangeTypes, stateLimit, multiTagTypes, applyNumber, applyAction, clearActionTargets, setActionType, setBatchActionType, batchActionType, batchShowsTarget, batchShowsCommand, pipeEnds, pipeEndUpdates, pipePortUpdates, setPipePort, setPipeEnd, addPipePoint, addCommonStates, addState, addPanelCommand, beginWaypoint, mobilePanel, guides, marquee, selectionBox, snapshot, dirty, savedNodes, nodeChanged, selectedNodeChanged, selectedChangedCount, recoverableDraft, draftError, localSavedAt, draftBaseChanged, findLocalDraft, clearLocalBackup, persistLocalDraft, restoreLocalDraft, discardLocalDraft, setLeavingDiscarded, disposeDraftTimer, notify, commit, commitField, fieldLabel, resetAppearance, resetData, resetAction, resetAnimation, setAnimType, restore, undo, redo, tagLabel, typeLabel, bindingChanged, setControlTag, setResetTag, syncControlTag, groupMembers, select, block, add, library, locale, userSymbols, templates, symbolName, symbolCategoryLabel, componentQuery, layerQuery, expandedGroups, paletteTab, collapsedGroups, renamingId, renameDraft, layerTitle, toggleGroup, startRename, commitRename, openCanvasSettings, matches, filteredPalette, filteredSymbols, filteredUserSymbols, filteredTemplates, componentTotal, componentCount, symbolGroups, tagNames, tagsById, selectedIssues, fieldError, focusField, fieldForIssue, displayedTagIds, tagValues, tagValuesError, startTagValues, loadRecipeCatalog, loadSequenceCatalog, loadScriptCatalog, tagLiveText, tagLiveClass, tagLiveTitle, animationSummary, filteredLayers, layerLimit, visibleLayers, layerEntries, zoomOptions, fitCanvas, changeZoom, revealSelection, selectLayer, englishText, pushNode, nextPos, addSymbol, addTemplate, syncBindings, startSymbolDrag, templateVisible, templateError, templateForm, openTemplateDialog, createTemplate, startPaletteDrag, drop, beginDrag, canvasPoint, beginSelection, startTransform, snapAlignment, updateGuides, transformNodes, finishTransform, syncInteractionTargets, initializeInteractions, detachConnections, remove, copy, paste, duplicate, reorder, moveLayer, groupedSelection, groupSelection, ungroupSelection, toggleNodeFlag, toggleSelectionFlag, startLayerDrag, dropLayer, reorderLayer, arrangeOperations, arrange, resizeCanvas, closePanel, panelApi, failureIssues, issueOwner, issueLabel, issueDigest, showIssues, openConflict, conflictLabel, sameNode, conflictRowsFor, reloadServerDraft, overwriteServerDraft, mergeConflict, diffLabels, settlePublishDiff, confirmPublishDiff, settlePublishWarnings, confirmPublishWarnings, warningConfirmVisible, pendingWarnings, save, validate, confirmPublishUsage, publish, focusIssue, keydown, beforeUnload, confirmLeave, requireDocument, ref, palette, formatTime, openShortcutHelp
   }

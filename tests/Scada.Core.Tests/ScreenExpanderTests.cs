@@ -86,6 +86,83 @@ public class ScreenExpanderTests
         Assert.Equal(2, inner.Points!.Count);
     }
 
+    [Fact]
+    public void ExpandedNodeDoesNotShareNestedCollectionsWithTemplate()
+    {
+        var inner = new ScreenNode
+        {
+            Id = "inner", Type = "chart-line",
+            Texts = new Dictionary<string, string> { ["en-US"] = "Power" },
+            States = [new(0, "停", "#111111")],
+            GaugeBands = [new(0, 50, "#00ff00")],
+            TableColumns = ["name", "value"],
+            ChartOptions = new ScreenChartOptions { TargetLines = [new(60, "#ff0000", "上限")] },
+            Animation = new ScreenAnimation { TagId = 11 }
+        };
+        var instance = new ScreenNode { Id = "inst", Type = "template", TemplateKey = "tpl", Width = 100, Height = 100 };
+
+        var node = Assert.Single(ScreenExpander.Expand(Document(instance), _ => Template(inner)).Nodes);
+        node.Texts!["en-US"] = "changed";
+        node.States!.Add(new(1, "运行", "#222222"));
+        node.GaugeBands!.Clear();
+        node.TableColumns!.Clear();
+        node.ChartOptions!.TargetLines!.Add(new(70, "#00ff00", "下限"));
+        node.Animation!.TagId = 99;
+
+        Assert.Equal("Power", inner.Texts!["en-US"]);
+        Assert.Single(inner.States!);
+        Assert.Single(inner.GaugeBands!);
+        Assert.Equal(2, inner.TableColumns!.Count);
+        Assert.Single(inner.ChartOptions!.TargetLines!);
+        Assert.Equal(11, inner.Animation!.TagId);
+    }
+
+    [Fact]
+    public void ExpandClearsTemplateAndEditingFields()
+    {
+        var inner = new ScreenNode
+        {
+            Id = "inner", Type = "symbol", TemplateKey = "nested", Locked = true, GroupId = "group-1",
+            Bindings = [new ScreenBinding { Key = "act", TagId = 12 }], Bind = "act", AlarmBind = "act",
+            TagBinds = ["act"], AnimationBind = "act"
+        };
+        var instance = new ScreenNode
+        {
+            Id = "inst", Type = "template", TemplateKey = "tpl", Width = 100, Height = 100,
+            Bindings = [new ScreenBinding { Key = "act", TagId = 12 }]
+        };
+
+        var node = Assert.Single(ScreenExpander.Expand(Document(instance), _ => Template(inner)).Nodes);
+
+        Assert.Null(node.Locked);
+        Assert.Null(node.GroupId);
+        Assert.Null(node.TemplateKey);
+        Assert.Null(node.Bindings);
+        Assert.Null(node.Bind);
+        Assert.Null(node.AlarmBind);
+        Assert.Null(node.TagBinds);
+        Assert.Null(node.AnimationBind);
+        Assert.Equal(12, node.TagId);
+        Assert.Equal(12, node.AlarmTagId);
+        Assert.Equal([12], node.Tags);
+    }
+
+    [Fact]
+    public void ExpandGivesMissingActionADefault()
+    {
+        // 历史文档/模板里可能写入 action:null；展开结果必须始终带一个默认动作。
+        var inner = new ScreenNode { Id = "inner", Type = "value", Action = null! };
+        var instance = new ScreenNode { Id = "inst", Type = "template", TemplateKey = "tpl", Width = 100, Height = 100 };
+
+        var node = Assert.Single(ScreenExpander.Expand(Document(instance), _ => Template(inner)).Nodes);
+
+        Assert.NotNull(node.Action);
+        Assert.Equal("none", node.Action.Type);
+        Assert.Null(node.Action.TagId);
+        Assert.Null(node.Action.Bind);
+    }
+
+
     private static string Json(object? value) => JsonSerializer.Serialize(value, new JsonSerializerOptions(JsonSerializerDefaults.Web));
 
     private static void Fill(ScreenNode n)

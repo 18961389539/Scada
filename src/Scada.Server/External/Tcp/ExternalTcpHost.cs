@@ -26,6 +26,8 @@ public sealed class ExternalTcpHost(
     private readonly ConcurrentDictionary<Guid, Session> _sessions = new();
     private TcpListener? _listener;
     private X509Certificate2? _tlsCert;
+    // 推送失败是客户端断开时的常态，但持续失败意味着订阅端收不到更新；按累计数限流记录，不刷屏。
+    private long _pushFailures;
 
     public int ConnectionCount => _sessions.Count;
 
@@ -320,12 +322,19 @@ public sealed class ExternalTcpHost(
                     }
                     if (updates.Count == 0) continue;
                     try { await SendAsync(session, new TcpMessage { Type = "update", Data = updates }, ct); }
-                    catch { }
+                    catch (Exception ex) when (ex is not OperationCanceledException) { ReportPushFailure(ex); }
                 }
             }
             catch (OperationCanceledException) { break; }
-            catch { }
+            catch (Exception ex) { ReportPushFailure(ex); }
         }
+    }
+
+    private void ReportPushFailure(Exception ex)
+    {
+        var count = Interlocked.Increment(ref _pushFailures);
+        if (count == 1 || count % 100 == 0)
+            logger.LogWarning(ex, "TCP 对外推送失败 {Count} 次（累计），订阅方可能收不到实时更新", count);
     }
 
     private static void EnsureAuth(Session session)

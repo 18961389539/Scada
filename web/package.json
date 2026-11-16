@@ -21,7 +21,7 @@
     "api:types": "node scripts/generate-api-types.mjs",
     "api:types:check": "node scripts/check-api-contract.mjs",
     "api:types:update": "node scripts/check-api-contract.mjs --update",
-    "test:unit": "vitest run && node --test scripts/access-check.test.mjs scripts/draft-backup.test.mjs"
+    "test:unit": "vitest run --coverage && node --test scripts/access-check.test.mjs scripts/draft-backup.test.mjs && node scripts/check-mock-contract.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -42,6 +42,7 @@
     "@playwright/test": "^1.64.1",
     "@types/node": "^22.10.5",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vitest/coverage-v8": "^3.2.7",
     "eslint": "^10.14.0",
     "eslint-plugin-vue": "^10.12.1",
     "jsdom": "^26.1.0",

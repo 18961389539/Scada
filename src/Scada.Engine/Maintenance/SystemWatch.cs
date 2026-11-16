@@ -1,8 +1,11 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Data;
 using Scada.Engine.History;
 
 namespace Scada.Engine.Maintenance;
@@ -27,13 +30,19 @@ public sealed class SystemWatch(
     ILogger<SystemWatch> logger,
     TimeProvider? timeProvider = null,
     Func<string, DiskCapacity>? diskProbe = null,
-    IHistoryBackend? history = null) : BackgroundService
+    IHistoryBackend? history = null,
+    IDbContextFactory<RuntimeDbContext>? runtime = null) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private const double BytesPerGb = 1024d * 1024 * 1024;
+    // 预聚合正常滞后不超过一个周期（5 分钟）。超过该值说明 OEE/报警统计已经缺最近数据，
+    // 但查询接口仍会返回"看起来合理"的数字——必须显式告警。
+    private const long RollupLagWarnMs = 6 * 3_600_000L;
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
     private readonly Queue<(DateTimeOffset At, long Bytes)> _sizes = new();
     private DateTimeOffset _lastSizeAt;
+    // -1 表示未知（未启用或从未跑过），只在后台循环里更新；Evaluate 是同步的，不能查库。
+    private long _rollupLagMs = -1;
 
     private volatile SystemSnapshot _current = new([], 0, 0, 0, 0);
     private readonly object _sync = new();
@@ -127,6 +136,13 @@ public sealed class SystemWatch(
             warnings.Add(new("history_spool_isolate_failed", $"损坏段隔离失败 {spool.IsolateFailures} 次（累计），该段会在每轮补传时重复报错"));
         }
 
+        // 预聚合卡住时统计接口仍会返回数字，只是偷偷少了一段；这里让"少了"变成可见事件。
+        var rollupLagMs = Interlocked.Read(ref _rollupLagMs);
+        if (rollupLagMs > RollupLagWarnMs)
+        {
+            warnings.Add(new("rollup_lag", $"统计预聚合已滞后 {rollupLagMs / 3_600_000d:F1} 小时（阈值 {RollupLagWarnMs / 3_600_000d:F0} 小时），OEE 与报警统计可能缺少最近数据"));
+        }
+
         _lastDropped = dropped;
         _lastHistoryRejected = historyRejected;
         _lastSpoolRejected = spoolRejected;
@@ -213,6 +229,7 @@ public sealed class SystemWatch(
             {
                 try
                 {
+                    await RefreshRollupLagAsync(stoppingToken);
                     Report(Evaluate());
                 }
                 catch (Exception ex)
@@ -224,6 +241,26 @@ public sealed class SystemWatch(
         catch (OperationCanceledException)
         {
             // normal shutdown
+        }
+    }
+
+    // 预聚合滞后只能在后台循环里查：Evaluate 是同步的，而 Current / /health 不能做同步 I/O。
+    private async Task RefreshRollupLagAsync(CancellationToken ct)
+    {
+        if (runtime is null) return;
+        try
+        {
+            await using var db = await runtime.CreateDbContextAsync(ct);
+            var alarmTs = await db.AlarmRollups.MaxAsync(x => (long?)x.BucketTs, ct);
+            var oeeTs = await db.OeeRollups.MaxAsync(x => (long?)x.BucketTs, ct);
+            var latest = Math.Max(alarmTs ?? 0, oeeTs ?? 0);
+            // 两张表都空说明从未跑过（新装或功能未启用），不算滞后。
+            Interlocked.Exchange(ref _rollupLagMs, latest == 0 ? -1 : Math.Max(0, ScadaTime.NowMs() - latest));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogDebug(ex, "读取预聚合滞后失败，下个周期重试");
+            Interlocked.Exchange(ref _rollupLagMs, -1);
         }
     }
 

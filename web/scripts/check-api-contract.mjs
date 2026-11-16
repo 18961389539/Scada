@@ -66,7 +66,8 @@ try {
   while (Date.now() < deadline && !healthy) {
     if (child.exitCode !== null) break
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) })
+      // /health 需要登录，且连续轮询会触发限流；/health/live 是匿名、不限流的存活探针。
+      const response = await fetch(`http://127.0.0.1:${port}/health/live`, { signal: AbortSignal.timeout(1000) })
       healthy = response.ok
     } catch { }
     if (!healthy) await new Promise(done => setTimeout(done, 200))

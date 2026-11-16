@@ -99,8 +99,7 @@ public sealed class HaClusterTests : IAsyncLifetime
         _monitor.Cancel();
         try { if (_monitorTask is not null) await _monitorTask; } catch { }
         _a.Kill(); _b.Kill();
-        TestSqlite.ClearPools(_root);
-        try { Directory.Delete(_root, true); } catch { }
+        TestSqlite.TryDeleteDirectory(_root);
         _http.Dispose();
     }
 

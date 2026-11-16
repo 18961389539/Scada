@@ -193,12 +193,104 @@ Exit codes: `0` normal exit, `1` crash (restarted), `2` configuration or authent
 failure (no automatic retry, to avoid account lockout), `3` missing WebView2 Runtime.
 
 Limitations: one display and one window per client; console `window.open` multi-monitor
-popups and file downloads are blocked; self-signed certificates are not bypassed, so
+popups remain blocked in this release; self-signed certificates are not bypassed, so
 install the internal CA in the Windows trusted root store. Auto-start begins after a
 Windows user logs in; Windows automatic logon and Assigned Access are outside this
 document. The client depends on the web client's `scada_token`, `scada_user`,
 `scada_token_expires`, `scada_workstation_id` and `scada_workstation` localStorage keys;
 upgrade it together with the web frontend.
+
+### Centralized Deployment and Operations
+
+The client supports a machine-wide non-secret configuration and a per-user secret:
+
+```text
+%ProgramData%\Scada\Desktop\client.json      server, target, display, downloads, locked fields
+%LOCALAPPDATA%\Scada\Desktop\settings.json   account, DPAPI password, ClientId
+%ProgramData%\Scada\Desktop\install.json     installer scope and managed autostart
+```
+
+Machine values override user values on every load. Fields listed in `locked` are disabled
+in the setup wizard; the installer locks all fields it provides by default. A machine
+configuration cannot contain a password: DPAPI CurrentUser ciphertext is not decryptable
+by another Windows account.
+
+Provision a machine or a user without the wizard:
+
+```powershell
+Scada.Desktop.exe --provision --config client.json --scope machine
+Get-Content .\password.txt | Scada.Desktop.exe --provision --config client.json --scope user --password-stdin
+```
+
+`--scope machine` requires an administrator and rejects passwords. `--scope user` writes
+the DPAPI secret; the password is accepted only through standard input, never as a
+command-line argument. User scope targets the profile of the account that runs the
+command, so an elevated prompt would configure the administrator instead of the operator;
+that case is refused unless `--allow-elevated-user` is passed explicitly.
+
+Build, install, upgrade, roll back and uninstall with the scripts under
+`tools/deployment/desktop`:
+
+```powershell
+pwsh -File tools/deployment/desktop/Build-DesktopPackage.ps1 -OutputPath D:\pkg\desktop -Version 1.1.0
+pwsh -File tools/deployment/desktop/Install-DesktopClient.ps1 -PackagePath D:\pkg\desktop -Scope CurrentUser
+pwsh -File tools/deployment/desktop/Upgrade-DesktopClient.ps1 -PackagePath D:\pkg\desktop-next -Version 1.2.0
+pwsh -File tools/deployment/desktop/Rollback-DesktopClient.ps1 -Version 1.1.0
+pwsh -File tools/deployment/desktop/Uninstall-DesktopClient.ps1 -Scope CurrentUser
+```
+
+The installer keeps versioned folders with a `current` junction and registers a logon
+scheduled task (`ScadaDesktop`) with restart-on-failure and `IgnoreNew`. It removes the
+per-user Run key so the task is the only autostart path. This is intentionally not a
+Windows service: services run in Session 0 and cannot host the interactive WebView2 UI.
+
+Clients send a heartbeat every `Scada:DesktopClient:HeartbeatSeconds` seconds (default 30,
+range 10–600) to `/api/desktop/heartbeat`. Users with System permission see online state,
+machine, account, target, version, WebView2 version, the active version policy and
+blocked/outdated counts in the **桌面客户端** panel on the Ops page. The registry is in
+memory and per node; it is repopulated within one heartbeat interval after a server
+restart. Heartbeats are not written to operation logs; an online → offline transition is
+logged once by the server-side monitor.
+
+The desktop client calls the server API with `UseProxy = false`: a system proxy on an
+enterprise image would otherwise intercept requests to a loopback/LAN server while the
+WebView2 page still loads, producing "browser works, client does not". Terminating TLS in
+a reverse proxy requires enabling `Scada:ReverseProxy` on the server; see
+[configuration](configuration.md#tls-与反向代理) — otherwise every terminal shares the
+proxy address and the per-terminal rate limit collapses into one bucket.
+
+Set `Scada:DesktopClient` in the site settings to enforce versions:
+
+```json
+{
+  "Scada": {
+    "DesktopClient": {
+      "MinimumVersion": "1.1.0",
+      "LatestVersion": "1.2.0",
+      "DownloadUrl": "https://scada.example.com/downloads/ScadaDesktop-latest.zip",
+      "HeartbeatSeconds": 30,
+      "OnlineThresholdSeconds": 90
+    }
+  }
+}
+```
+
+A client below `MinimumVersion` blocks before loading the screen and shows the download
+link. Unknown versions fail open. `LatestVersion` shows a clickable update notice in the
+client; without `DownloadUrl` it tells the operator to contact an administrator. This
+section is read through `IOptionsMonitor`, so editing the site settings file applies
+within one heartbeat without restarting the server. Silent auto-update is not
+implemented; deploy a new package and switch `current` with the upgrade script.
+
+Downloads stay disabled by default. When enabled in the wizard or machine configuration,
+WebView2 saves exports to the configured directory with sanitized file names and shows a
+non-blocking completion notice; otherwise the download is canceled and logged.
+
+The client follows HA role changes: if the configured node is standby and reports a
+`primaryUrl`, or a request returns `503` with `X-Scada-Primary`, it reconnects, logs in
+again and reloads the target. It does not automatically switch back. Prefer a stable
+VIP/hostname in production; origin-scoped preferences such as monitor mappings are lost
+across a switch.
 
 ## Site Identity, Login and First Setup
 

@@ -333,11 +333,14 @@ test('locating a distant multiselection fits the entire group without altering i
   await openDesigner(page, request)
   await zoomTo(page, '100%')
   const near = page.locator('[data-node-id="near-pump"]'), remote = page.locator('[data-node-id="remote-pump"]')
-  const positions = [await near.getAttribute('transform'), await remote.getAttribute('transform')]
-  await page.locator('[data-layer-id="near-pump"]').click()
-  await page.locator('[data-layer-id="remote-pump"]').click({ modifiers: ['Shift'] })
+  // 画布只渲染视口附近图元：先逐个选中让图层导航把节点滚入视口，再记录位置。
+  await page.locator('[data-layer-id="remote-pump"]').click()
+  const remotePosition = await remote.getAttribute('transform')
+  await page.locator('[data-layer-id="near-pump"]').click({ modifiers: ['Shift'] })
+  const nearPosition = await near.getAttribute('transform')
+  await page.getByRole('button', { name: '定位选中', exact: true }).click()
   await expectNodeInsideStage(page, 'near-pump'); await expectNodeInsideStage(page, 'remote-pump')
-  expect([await near.getAttribute('transform'), await remote.getAttribute('transform')]).toEqual(positions)
+  expect([await near.getAttribute('transform'), await remote.getAttribute('transform')]).toEqual([nearPosition, remotePosition])
   await expect(page.locator('[data-test="designer-layers"] button[aria-pressed="true"]')).toHaveCount(2)
   await expect(page.getByRole('button', { name: '撤销', exact: true })).toBeDisabled()
 })

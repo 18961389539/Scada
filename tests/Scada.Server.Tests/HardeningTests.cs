@@ -107,8 +107,7 @@ public sealed class HardeningTests : IClassFixture<AuthorizationTests.Site>
         }
         finally
         {
-            TestSqlite.ClearPools(root);
-            try { Directory.Delete(root, true); } catch { }
+            TestSqlite.TryDeleteDirectory(root);
         }
     }
 

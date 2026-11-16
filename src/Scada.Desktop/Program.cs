@@ -25,6 +25,8 @@ internal static class Program
         WireExceptionHandlers();
         DesktopLogger.Info($"客户端启动：{Environment.ProcessPath}");
 
+        if (ProvisionCommand.IsRequested(args)) return ProvisionCommand.Run(args, paths);
+
         var isClient = args.Any(arg => string.Equals(arg, "--client", StringComparison.OrdinalIgnoreCase));
         var parentProcessId = ParseParentProcessId(args);
         return isClient ? RunClient(paths, parentProcessId) : RunSupervisor(paths);
@@ -40,25 +42,34 @@ internal static class Program
         }
 
         var store = new SettingsStore(paths.SettingsFile);
-        var settings = store.Load(out var error);
-        if (settings is null)
+        var machineStore = new MachineSettingsStore(paths.MachineSettingsFile);
+        var user = store.Load(out var userError);
+        var machine = machineStore.Load(out var machineError);
+        var managedAutostart = InstallManifestStore.IsManagedAutostart(paths);
+        var resolved = DesktopConfigResolver.Resolve(user, machine, managedAutostart);
+        var settings = resolved?.Settings;
+        if (settings is null || resolved?.Error is not null || user is null)
         {
             try
             {
-                DesktopLogger.Info("显示首次配置窗口");
-                using var form = new SettingsForm(paths, store, null, error);
+                DesktopLogger.Info("显示配置窗口");
+                using var form = new SettingsForm(paths, store, settings, resolved?.Error ?? userError ?? machineError, machine);
                 var result = form.ShowDialog();
-                DesktopLogger.Info($"首次配置窗口返回：{result}");
+                DesktopLogger.Info($"配置窗口返回：{result}");
                 if (result != DialogResult.OK || form.SavedSettings is null) return ExitCodes.Success;
                 settings = form.SavedSettings;
             }
             catch (Exception exception)
             {
-                DesktopLogger.Error("首次配置窗口失败", exception);
+                DesktopLogger.Error("配置窗口失败", exception);
                 MessageBox.Show("无法打开桌面客户端设置：" + exception.Message, "SCADA 桌面客户端", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return ExitCodes.Configuration;
             }
         }
+
+        if (settings is null) return ExitCodes.Configuration;
+        ClientIdentity.Ensure(settings, store);
+        AutostartStartup.Apply(settings);
 
         using var context = new SupervisorContext(paths, store, settings);
         Application.Run(context);
@@ -71,25 +82,23 @@ internal static class Program
         if (!single.IsOwner) return ExitCodes.Success;
 
         var store = new SettingsStore(paths.SettingsFile);
-        var settings = store.Load(out var error);
-        if (settings is null)
+        var machine = new MachineSettingsStore(paths.MachineSettingsFile).Load(out var machineError);
+        var managedAutostart = InstallManifestStore.IsManagedAutostart(paths);
+        var user = store.Load(out var userError);
+        var resolved = DesktopConfigResolver.Resolve(user, machine, managedAutostart);
+        if (resolved is null || resolved.Error is not null)
         {
-            DesktopLogger.Error("画面进程启动失败：" + (error ?? "配置无效"));
-            MessageBox.Show(error ?? "桌面客户端配置无效，请重新配置。", "SCADA 桌面客户端", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            var error = resolved?.Error ?? userError ?? machineError ?? "桌面客户端配置无效";
+            DesktopLogger.Error("画面进程启动失败：" + error);
+            MessageBox.Show(error, "SCADA 桌面客户端", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return ExitCodes.Configuration;
         }
-
-        var validation = SettingsValidator.Validate(settings, requirePassword: false);
-        if (validation is not null)
-        {
-            DesktopLogger.Error("画面进程配置校验失败：" + validation);
-            MessageBox.Show(validation, "SCADA 桌面客户端", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            return ExitCodes.Configuration;
-        }
+        var settings = resolved.Settings;
+        ClientIdentity.Ensure(settings, store);
 
         try
         {
-            using var form = new ClientForm(settings, paths, parentProcessId);
+            using var form = new ClientForm(settings, paths, store, parentProcessId);
             Application.Run(form);
             return form.ResultCode;
         }

@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
@@ -62,6 +63,7 @@ public sealed class MaintenanceService : BackgroundService
             await _history.CleanupRetentionAsync(cancellationToken);
             await CleanupAlarmEventsAsync(cancellationToken);
             await CleanupOperationLogsAsync(cancellationToken);
+            await ReclaimSpaceAsync(cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -155,4 +157,57 @@ public sealed class MaintenanceService : BackgroundService
             _logger.LogWarning(ex, "清理过期操作审计失败");
         }
     }
+
+    /// <summary>
+    /// 回收已删除行的磁盘空间。SQLite 删除数据只是把页挂到 freelist，文件不会自动缩小；
+    /// 运行库的报警与操作日志按天清理，长期运行后文件会停在历史峰值大小，拖慢备份、诊断包与恢复演练。
+    ///
+    /// 新库在建库时已设 auto_vacuum=INCREMENTAL（见 SqlitePragmaInterceptor），这里触发增量回收；
+    /// 老库这条 PRAGMA 是 no-op，不报错，但需要人工执行一次 VACUUM 才会切换模式。
+    /// </summary>
+    private async Task ReclaimSpaceAsync(CancellationToken cancellationToken)
+    {
+        await ReclaimAsync<RuntimeDbContext>("运行库", _runtimeFactory.CreateDbContextAsync(cancellationToken), cancellationToken);
+        if (_configFactory is not null)
+            await ReclaimAsync<ConfigDbContext>("配置库", _configFactory.CreateDbContextAsync(cancellationToken), cancellationToken);
+    }
+
+    private async Task ReclaimAsync<TContext>(string label, Task<TContext> creating, CancellationToken cancellationToken)
+        where TContext : DbContext
+    {
+        try
+        {
+            await using var db = await creating;
+            var connection = (SqliteConnection)db.Database.GetDbConnection();
+            if (connection.State != ConnectionState.Open) await connection.OpenAsync(cancellationToken);
+
+            var before = FileLengthMb(connection.DataSource);
+            // 先 checkpoint 再回收：WAL 里还有未合并的页时，incremental_vacuum 释放的空间
+            // 不会立刻反映到主文件大小，看起来像"没回收"。
+            await ExecuteAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken);
+            await ExecuteAsync(connection, "PRAGMA incremental_vacuum;", cancellationToken);
+            var after = FileLengthMb(connection.DataSource);
+
+            if (before - after >= 1)
+                _logger.LogInformation("{Label}空间回收：{Before} MB → {After} MB", label, before, after);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // 回收是优化动作：锁冲突或库正被占用时跳过本轮即可。
+            // 备份与数据清理已经完成，不能因为收不了空间让整个维护任务判为失败。
+            _logger.LogWarning(ex, "{Label}空间回收失败，本轮跳过", label);
+        }
+    }
+
+    private static async Task ExecuteAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static long FileLengthMb(string? path) =>
+        string.IsNullOrEmpty(path) || path == ":memory:" || !File.Exists(path)
+            ? 0
+            : new FileInfo(path).Length / 1024 / 1024;
 }

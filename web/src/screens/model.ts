@@ -1,5 +1,6 @@
 import { tr } from '../i18n'
-export type NodeType = 'text' | 'value' | 'pump' | 'valve' | 'tank' | 'pipe' | 'rectangle' | 'ellipse' | 'button' | 'gauge' | 'motor' | 'fan' | 'symbol' | 'template' | 'led' | 'progress' | 'kpi' | 'clock' | 'image' | 'marquee' | 'dial' | 'chart-bar' | 'chart-pie' | 'chart-line' | 'chart-bar-horizontal' | 'chart-bar-stack' | 'chart-area' | 'chart-radar' | 'chart-funnel' | 'chart-gauge' | 'alarm-banner' | 'alarm-stats' | 'alarm-list' | 'table' | 'history-table' | 'oee-kpi' | 'switch' | 'slider' | 'spinner' | 'input' | 'polyline' | 'equipment-panel' | 'reset' | 'jog' | 'pulse' | 'silence' | 'selector' | 'knob' | 'recipe'
+import { EMPTY_COLLECTION_FIELDS, EMPTY_OBJECT_FIELDS, FALSEY_NODE_FLAGS, FONT_SIZE_ORDER, NODE_SPECS, NODE_TYPES, NULLABLE_NODE_FIELDS, PALETTE_ORDER, typesWith, type NodeType } from './nodeSpecs'
+export type { NodeType } from './nodeSpecs'
 export interface ScreenPoint { x: number; y: number }
 export interface ScreenState { value: number; label: string; color: string }
 // 仪表色带：在量程弧线上按数值区间着色，最多 6 条。
@@ -50,13 +51,10 @@ export interface ScreenNode {
   ownerId?: string
 }
 // 各控件类型的主文字默认字号；未设置 fontSize 时保持原有显示。
-export const defaultFontSizes: Partial<Record<NodeType, number>> = {
-  text: 16, value: 24, button: 16, rectangle: 16, ellipse: 16, marquee: 16, kpi: 28, progress: 14, clock: 26,
-  gauge: 15, dial: 15, switch: 11, slider: 12, spinner: 16, input: 13, 'equipment-panel': 13,
-  jog: 13, pulse: 13, selector: 12, knob: 12, reset: 14, silence: 14, recipe: 13,
-  symbol: 12, pump: 12, valve: 12, motor: 12, fan: 12, tank: 12, 'alarm-banner': 16, 'oee-kpi': 22
-}
-export const fontSizeTypes = Object.keys(defaultFontSizes) as NodeType[]
+export const defaultFontSizes: Partial<Record<NodeType, number>> = Object.fromEntries(
+  FONT_SIZE_ORDER.map(type => [type, NODE_SPECS[type].defaultFontSize])
+) as Partial<Record<NodeType, number>>
+export const fontSizeTypes: NodeType[] = [...FONT_SIZE_ORDER]
 export function nodeFontSize(node: ScreenNode, fallback: number): number {
   const value = node.fontSize
   return typeof value === 'number' && Number.isFinite(value) && value >= 8 && value <= 96 ? value : fallback
@@ -75,13 +73,13 @@ export interface LibraryItem {
 }
 export const SEPARATOR = '--'
 // 图表类图元（在画面内以 ECharts SVG 输出）。
-export const chartTypes: NodeType[] = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'chart-gauge', 'alarm-stats']
+export const chartTypes: NodeType[] = typesWith('chart')
 // 写交互控件（通过控制闭环下发运行期取值）。
-export const controlTypes: NodeType[] = ['switch', 'slider', 'spinner', 'input', 'jog', 'pulse', 'selector', 'knob']
+export const controlTypes: NodeType[] = typesWith('control')
 // 需要绑定多个测点（tags）的图元类型。
-const tagTypes: NodeType[] = ['chart-bar', 'chart-pie', 'chart-line', 'chart-bar-horizontal', 'chart-bar-stack', 'chart-area', 'chart-radar', 'chart-funnel', 'table', 'history-table']
+const tagTypes: NodeType[] = typesWith('multiTag')
 // 需要统计窗口（windowSec）的图元类型。
-const windowTypes: NodeType[] = ['chart-line', 'chart-area', 'history-table', 'oee-kpi']
+const windowTypes: NodeType[] = typesWith('window')
 // 与服务端 ScreenExpander 相同：模板实例展开为内部图元（编号“实例--内部”），按实例绑定解析占位符；实例自身保留为一个透明框（编辑选取用）。
 export function expandNodes(nodes: ScreenNode[], library: LibraryItem[]): ScreenNode[] {
   const out: ScreenNode[] = []
@@ -111,8 +109,10 @@ export function expandNodes(nodes: ScreenNode[], library: LibraryItem[]): Screen
 // 画面保存前去掉空的扩展字段，保持与旧格式一致。
 export function cleanNode(node: ScreenNode): ScreenNode {
   const copy: ScreenNode = { ...node, action: { ...node.action } }
-  for (const k of ['symbol', 'alarmTagId', 'templateKey', 'bindings', 'bind', 'alarmBind', 'texts', 'tags', 'tagBinds', 'animationBind', 'windowSec', 'lineId', 'animation', 'ownerId', 'points', 'states', 'source', 'target', 'commands', 'releaseValue', 'pulseMs', 'maxHoldMs', 'resetMode', 'silenceMinutes', 'recipeTemplateId', 'fontSize', 'align', 'opacity', 'borderWidth', 'radius', 'groupId', 'gaugeBands', 'setpoint', 'tableColumns', 'chartOptions'] as const) if (copy[k] == null || (k === 'texts' && !Object.keys(copy.texts ?? {}).length) || ((k === 'tags' || k === 'tagBinds' || k === 'gaugeBands' || k === 'tableColumns' || k === 'bindings') && !(copy[k] as unknown[] | null)?.length) || (k === 'chartOptions' && !Object.keys(copy.chartOptions ?? {}).length)) delete copy[k]
-  for (const k of ['wrap', 'autoFit', 'bold', 'locked', 'hidden'] as const) if (!copy[k]) delete copy[k]
+  for (const key of NULLABLE_NODE_FIELDS) if (copy[key] == null) delete copy[key]
+  for (const key of EMPTY_COLLECTION_FIELDS) if (copy[key] != null && !(copy[key] as unknown[] | null)?.length) delete copy[key]
+  for (const key of EMPTY_OBJECT_FIELDS) if (copy[key] != null && !Object.keys(copy[key] as object).length) delete copy[key]
+  for (const key of FALSEY_NODE_FLAGS) if (!copy[key]) delete copy[key]
   if (copy.action.bind == null) delete copy.action.bind
   if (copy.action.sequenceId == null) delete copy.action.sequenceId
   if (copy.action.recipeId == null) delete copy.action.recipeId
@@ -124,32 +124,7 @@ export interface ScreenRect { x: number; y: number; width: number; height: numbe
 export interface ScreenSummary { id: number; name: string; areaId?: number | null; revision: number; publishedRevision: number | null; updatedTs: number; updatedBy: string; hasDraftChanges: boolean; layoutCount?: number; layoutNames?: string[] }
 export interface ScreenDetail extends ScreenSummary { document: ScreenDocument; requiresRepublish?: boolean; message?: string | null }
 export interface ScreenIssue { nodeId: string; message: string }
-export const palette: { type: NodeType; label: string }[] = [
-  { type: 'polyline', label: tr('hmi.polyline') }, { type: 'equipment-panel', label: tr('hmi.panel') }, { type: 'input', label: tr('hmi.input') },
-  { type: 'text', label: tr('model.text') }, { type: 'value', label: tr('model.numericValue') },
-  { type: 'pump', label: tr('model.waterPump') }, { type: 'valve', label: tr('model.valves') },
-  { type: 'tank', label: tr('model.tanks') }, { type: 'pipe', label: tr('model.pipes') },
-  { type: 'motor', label: tr('model.motor') }, { type: 'fan', label: tr('model.fans') },
-  { type: 'gauge', label: tr('model.instruments') }, { type: 'dial', label: tr('model.dialGauge') },
-  { type: 'button', label: tr('model.button') },
-  { type: 'switch', label: tr('model.switch') }, { type: 'slider', label: tr('model.slider') }, { type: 'spinner', label: tr('model.stepper') },
-  { type: 'jog', label: tr('hmi.jog') }, { type: 'pulse', label: tr('hmi.pulse') },
-  { type: 'selector', label: tr('hmi.selector') }, { type: 'knob', label: tr('hmi.knob') },
-  { type: 'reset', label: tr('hmi.reset') }, { type: 'silence', label: tr('hmi.silence') },
-  { type: 'recipe', label: tr('hmi.recipe') },
-  { type: 'led', label: tr('model.statusLamp') }, { type: 'progress', label: tr('model.progressBar') },
-  { type: 'kpi', label: tr('model.kPICard') }, { type: 'clock', label: tr('model.clock') },
-  { type: 'image', label: tr('model.image') }, { type: 'marquee', label: tr('model.marquee') },
-  { type: 'chart-bar', label: tr('model.barChart') }, { type: 'chart-pie', label: tr('model.pieChart') },
-  { type: 'chart-line', label: tr('model.lineChart') },
-  { type: 'chart-bar-horizontal', label: tr('model.horizontalBarChart') }, { type: 'chart-bar-stack', label: tr('model.stackedBarChart') },
-  { type: 'chart-area', label: tr('model.areaChart') }, { type: 'chart-radar', label: tr('model.radarChart') },
-  { type: 'chart-funnel', label: tr('model.funnelChart') }, { type: 'chart-gauge', label: tr('model.ringGauge') },
-  { type: 'alarm-banner', label: tr('model.alarmBanner') }, { type: 'alarm-stats', label: tr('model.alarmStatistics') },
-  { type: 'alarm-list', label: tr('model.alarmList') }, { type: 'table', label: tr('model.dataTable') }, { type: 'history-table', label: tr('model.historyStats') },
-  { type: 'oee-kpi', label: tr('model.oEEDashboard') },
-  { type: 'rectangle', label: tr('model.rectangle') }, { type: 'ellipse', label: tr('model.circle') }
-]
+export const palette: { type: NodeType; label: string }[] = PALETTE_ORDER.map(type => ({ type, label: tr(NODE_SPECS[type].labelKey) }))
 export function emptyDocument(): ScreenDocument { return { schemaVersion: 1, width: 1200, height: 720, background: '#101b2d', nodes: [] } }
 
 // 服务端存的 document 是一段可演进的 JSON。缺 nodes 时若原样塞进画布，
@@ -171,10 +146,12 @@ export function readableDocument(value: unknown): ScreenDocument | null {
     nodes: candidate.nodes
   }
 }
-const nodeSize: Partial<Record<NodeType, [number, number]>> = { led: [72, 72], progress: [220, 40], kpi: [200, 112], clock: [240, 96], image: [200, 150], marquee: [320, 48], 'chart-bar': [280, 180], 'chart-pie': [240, 240], 'chart-line': [420, 200], 'chart-bar-horizontal': [280, 200], 'chart-bar-stack': [280, 180], 'chart-area': [420, 200], 'chart-radar': [240, 240], 'chart-funnel': [240, 240], 'chart-gauge': [220, 180], 'alarm-banner': [420, 48], 'alarm-stats': [280, 180], 'alarm-list': [380, 200], table: [320, 180], 'history-table': [440, 180], 'oee-kpi': [300, 200], switch: [120, 56], slider: [240, 56], spinner: [160, 56], jog: [120, 56], pulse: [120, 56], selector: [220, 72], knob: [140, 140], reset: [120, 56], silence: [120, 56], recipe: [300, 150] }
+const nodeSize: Partial<Record<NodeType, readonly [number, number]>> = Object.fromEntries(
+  NODE_TYPES.filter(type => NODE_SPECS[type].defaultSize).map(type => [type, NODE_SPECS[type].defaultSize])
+) as Partial<Record<NodeType, readonly [number, number]>>
 export function createNode(type: NodeType, x = 80, y = 80): ScreenNode {
   if (type === 'symbol') return createSymbolNode('isa:pump', 100, 100, tr('model.centrifugalPump'), x, y)
-  const box = type === 'polyline' ? [240, 120] : type === 'equipment-panel' ? [320, 300] : type === 'input' ? [220, 84] : nodeSize[type]
+  const box = nodeSize[type]
   const defaultText = palette.find(p => p.type === type)?.label ?? type
   return { id: crypto.randomUUID(), type, x, y, width: box ? box[0] : type === 'pipe' ? 200 : 140,
     height: box ? box[1] : ['text', 'value', 'button', 'pipe'].includes(type) ? 48 : 112,

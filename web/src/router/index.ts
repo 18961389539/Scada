@@ -29,6 +29,7 @@ const router = createRouter({
         { path: 'config/oee', component: () => import('../views/OeeConfigView.vue'), meta: { title: tr('navMenu.oeeConfig'), policy: 'any-configure' } },
         { path: 'config/object-templates/:id', component: () => import('../views/ObjectTemplateEditorView.vue'), meta: { title: tr('index.ka1ab09'), policy: 'global-configure' } },
         { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: tr('index.k8a1840') } },
+        { path: 'workspace', component: () => import('../views/ScreenWorkspaceView.vue'), meta: { title: tr('workspace.title') } },
         { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: tr('common.screenRun') } },
         { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: tr('index.k684331'), policy: 'any-configure' } },
         { path: 'license', name: 'license', component: () => import('../views/LicenseView.vue'), meta: { title: tr('license.title') } },

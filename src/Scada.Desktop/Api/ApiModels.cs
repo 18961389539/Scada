@@ -57,7 +57,7 @@ internal enum LoginStatus
     Protocol
 }
 
-internal sealed record LoginResult(LoginStatus Status, SessionData? Session, string Message, TimeSpan? RetryAfter = null)
+internal sealed record LoginResult(LoginStatus Status, SessionData? Session, string Message, TimeSpan? RetryAfter = null, string? PrimaryUrl = null)
 {
     public static LoginResult Success(SessionData session) =>
         session.MustChangePassword
@@ -65,7 +65,22 @@ internal sealed record LoginResult(LoginStatus Status, SessionData? Session, str
             : new LoginResult(LoginStatus.Success, session, string.Empty);
 }
 
-internal sealed class ApiException(string message, int? statusCode = null) : Exception(message)
+internal sealed class ApiException(string message, int? statusCode = null, string? primaryUrl = null) : Exception(message)
 {
     public int? StatusCode { get; } = statusCode;
+
+    /// <summary>备机 503 响应里的主机地址；客户端据此切换。</summary>
+    public string? PrimaryUrl { get; } = primaryUrl;
 }
+
+internal sealed record VersionPolicy(
+    string? MinimumVersion, string? LatestVersion, string? DownloadUrl, bool UpdateRequired, bool UpdateAvailable);
+
+internal sealed record HeartbeatPayload(
+    string ClientId, string MachineName, string WindowsUser, string AppVersion, string? WebView2Version,
+    string? BootId, string? TargetKind, int? TargetId, string? TargetName, string? ConfigScope, string? BlockedReason);
+
+internal sealed record HeartbeatResult(
+    bool Ok, long ServerTs, string? Node, string? HaRole, VersionPolicy? Policy, int HeartbeatSeconds);
+
+internal sealed record HaRoleInfo(bool Enabled, string? Node, string? Role, string? PrimaryUrl);

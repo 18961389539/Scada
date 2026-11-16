@@ -1,3 +1,6 @@
+using System.Net;
+using Scada.Core.Versioning;
+
 namespace Scada.Core.Options;
 
 /// <summary>
@@ -131,6 +134,8 @@ public static class ScadaSettingsValidation
         Int(nameof(settings.LogRetainedFiles), settings.LogRetainedFiles, 1, 10_000, "日志保留文件数须在 1～10000 之间");
         Int(nameof(settings.LogFileSizeLimitMb), settings.LogFileSizeLimitMb, 1, 10_240, "单日志文件上限须在 1～10240MB 之间");
         Int(nameof(settings.WatchdogStallSeconds), settings.WatchdogStallSeconds, 0, 86_400, "看门狗停滞阈值须在 0～86400 秒之间");
+        Int(nameof(settings.ClockCheckIntervalMinutes), settings.ClockCheckIntervalMinutes, 5, 1_440, "时钟校验周期须在 5～1440 分钟之间");
+        Int(nameof(settings.ClockSkewWarnMs), settings.ClockSkewWarnMs, 1_000, 3_600_000, "时钟偏差告警阈值须在 1000～3600000ms 之间");
 
         // 流量治理与传输：0 是合法的"关闭"，但负数会被下游 Math.Clamp 静默改写，
         // 配错的人看不出自己写错了；上传上限过小会让工程包导入直接 413。
@@ -142,6 +147,39 @@ public static class ScadaSettingsValidation
 
         if (!string.IsNullOrWhiteSpace(settings.ShiftTimeZone) && !TimeZoneInfo.TryFindSystemTimeZoneById(settings.ShiftTimeZone, out _))
             Fail("settings.shiftTimeZone", nameof(settings.ShiftTimeZone), $"时区名称无法识别：{settings.ShiftTimeZone}");
+
+        // 桌面客户端集中运维：心跳/离线阈值配错会被下游 clamp 静默改写；版本号写错会让门禁
+        // 永远不生效（比较时 fail-open），必须在启动时暴露，而不是等到现场发现"配了拦不住"。
+        var desktop = settings.DesktopClient;
+        Int("DesktopClient.HeartbeatSeconds", desktop.HeartbeatSeconds, 10, 600, "桌面客户端心跳周期须在 10～600 秒之间");
+        Int("DesktopClient.OnlineThresholdSeconds", desktop.OnlineThresholdSeconds, 30, 600, "桌面客户端离线阈值须在 30～600 秒之间");
+
+        var minimumOk = AppVersionRule.TryParse(desktop.MinimumVersion, out var minimum);
+        var latestOk = AppVersionRule.TryParse(desktop.LatestVersion, out var latest);
+        if (!string.IsNullOrWhiteSpace(desktop.MinimumVersion) && !minimumOk)
+            Fail("settings.desktopClient.minimumVersion", "DesktopClient.MinimumVersion", $"最低版本号无法识别：{desktop.MinimumVersion}");
+        if (!string.IsNullOrWhiteSpace(desktop.LatestVersion) && !latestOk)
+            Fail("settings.desktopClient.latestVersion", "DesktopClient.LatestVersion", $"最新版本号无法识别：{desktop.LatestVersion}");
+        if (minimumOk && latestOk && latest < minimum)
+            Fail("settings.desktopClient.versionOrder", "DesktopClient.LatestVersion", "最新版本不能低于最低版本");
+        if (!string.IsNullOrWhiteSpace(desktop.DownloadUrl)
+            && (!Uri.TryCreate(desktop.DownloadUrl.Trim(), UriKind.Absolute, out var download)
+                || (download.Scheme != Uri.UriSchemeHttp && download.Scheme != Uri.UriSchemeHttps)))
+            Fail("settings.desktopClient.downloadUrl", "DesktopClient.DownloadUrl", "下载地址须为 http/https 绝对地址");
+
+        // 反向代理：开了却不列可信代理，ForwardedHeaders 中间件会忽略转发头，
+        // 现场以为"配了"，实际限流仍按代理地址合并。
+        if (settings.ReverseProxy.Enabled)
+        {
+            if (settings.ReverseProxy.KnownProxies.Length == 0)
+                Fail("settings.reverseProxy.knownProxies", "ReverseProxy.KnownProxies",
+                    "启用反向代理时至少要列出一个可信代理 IP");
+            foreach (var proxy in settings.ReverseProxy.KnownProxies)
+            {
+                if (!IPAddress.TryParse(proxy?.Trim(), out _))
+                    Fail("settings.reverseProxy.knownProxies", "ReverseProxy.KnownProxies", $"可信代理地址无法识别：{proxy}");
+            }
+        }
 
         return issues;
     }

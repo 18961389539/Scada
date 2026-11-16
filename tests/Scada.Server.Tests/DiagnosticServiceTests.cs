@@ -123,7 +123,7 @@ public sealed class DiagnosticServiceTests
 
         public void Dispose()
         {
-            try { if (Directory.Exists(Root)) Directory.Delete(Root, true); } catch { }
+            TestSqlite.TryDeleteDirectory(Root);
         }
     }
 

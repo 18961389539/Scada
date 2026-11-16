@@ -198,7 +198,9 @@ public static class McpEndpoints
     {
         var options = app.Services.GetRequiredService<IOptions<McpOptions>>().Value;
         if (!options.Enabled) return;
-        app.UseRateLimiter();
+        // 不要再挂一次 UseRateLimiter：管道里已有全局中间件，端点的 RequireRateLimiting
+        // 会被每个 RateLimiter 中间件各取一次 lease，Mcp:RequestsPerMinute 实际减半。
+        // 来源校验与请求体限长仍然只在这里做（全局中间件对 MCP 路径已豁免配额）。
         app.Use(async (http, next) =>
         {
             if (!http.Request.Path.StartsWithSegments(Path))

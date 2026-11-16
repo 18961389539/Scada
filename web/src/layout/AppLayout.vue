@@ -159,10 +159,10 @@ import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyDisplay, applyTheme, currentDensity, currentDisplay, currentTheme, type DensityMode, type DisplayMode, type ThemeMode } from '../theme'
 import { alarmMessage, levelLabel, notificationType } from '../utils'
-import { handleAlarmPush, primeAlarmAudio, setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
+import { handleAlarmPush, primeAlarmAudio } from '../alarmAudio'
+import { useAlarmSound } from '../composables/useAlarmSound'
 import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
 import { errorMessage } from '../api/http'
-import { annunciatorApi } from '../api/annunciators'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 import { useSiteInfo } from '../composables/useSiteInfo'
@@ -231,7 +231,7 @@ const hubIssue = computed(() => {
   if (hubState.value === 'disconnected') return tr('appLayout.hubDisconnected')
   return ''
 })
-const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
+const { soundEnabled, schedule: scheduleAnnunciatorSound, start: startAlarmSound, dispose: disposeAlarmSound } = useAlarmSound()
 const healthAbnormal = computed(() => !!healthError.value || (!!health.value && health.value.status !== 'ok'))
 const showHeaderStatus = computed(() =>
   (!isMobile.value && (healthAbnormal.value || alarmFlood.value)) ||
@@ -272,43 +272,6 @@ const density = ref<DensityMode>(currentDensity())
 const display = ref<DisplayMode>(currentDisplay())
 let disposeAlarmHandler: (() => void) | undefined
 let disposeHubClosed: (() => void) | undefined
-
-watch(soundEnabled, (value) => {
-  localStorage.setItem('scada_sound', value ? 'on' : 'off')
-  setAlarmMute(!value)
-  if (!value) stopAlarmLoop()
-  else void refreshAnnunciatorSound()
-})
-
-let annunciatorTimer: number | undefined
-let annunciatorBusy = false
-
-async function refreshAnnunciatorSound(): Promise<void> {
-  if (!soundEnabled.value) { stopAlarmLoop(); return }
-  if (annunciatorBusy) return
-  annunciatorBusy = true
-  try {
-    const statuses = await annunciatorApi.status()
-    const active = statuses.filter((s) => s.enabled && s.soundKey && !s.silenced)
-    const rank = (k: string | null) => k === 'critical' ? 3 : k === 'warning' ? 2 : k === 'info' ? 1 : 0
-    const best = active.sort((a, b) => rank(b.soundKey) - rank(a.soundKey))[0]
-    if (best?.soundKey) startAlarmLoop(best.soundKey)
-    else stopAlarmLoop()
-  } catch {
-    // 状态取不到就沿用上一次的播音状态（正在响的继续响、原本静默的保持静默），下一条报警推送会再试。
-  } finally {
-    annunciatorBusy = false
-  }
-}
-
-// 报警洪峰时每条推送都要求重算播音状态：300ms 合批，听不出延迟也不会把请求翻倍。
-function scheduleAnnunciatorSound(): void {
-  if (annunciatorTimer !== undefined) window.clearTimeout(annunciatorTimer)
-  annunciatorTimer = window.setTimeout(() => {
-    annunciatorTimer = undefined
-    void refreshAnnunciatorSound()
-  }, 300)
-}
 
 let badgeTimer: number | undefined
 let badgeBusy = false
@@ -473,7 +436,7 @@ function unlockAudio(): void {
 usePolling(refreshBadges, 30000)
 
 onMounted(async () => {
-  setAlarmMute(!soundEnabled.value)
+  startAlarmSound()
   notifyDenied()
   const header: unknown = headerRef.value?.$el
   if (header instanceof HTMLElement) {
@@ -502,9 +465,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('scada-open-palette', onOpenPalette)
   disposeAlarmHandler?.()
   disposeHubClosed?.()
-  stopAlarmLoop()
+  disposeAlarmSound()
   if (badgeTimer !== undefined) window.clearTimeout(badgeTimer)
-  if (annunciatorTimer !== undefined) window.clearTimeout(annunciatorTimer)
   for (const toast of criticalToasts) toast.close()
   criticalToasts.clear()
   // 布局卸载即离开应用（登出）：断开共享连接，各页面的订阅已随组件卸载 dispose。

@@ -11,18 +11,10 @@ public class ArchitectureTests
     [Fact]
     public void CoreHasNoPackageOrProjectReferences()
     {
-        var project = Path.Combine(RepoRoot(), "src", "Scada.Core", "Scada.Core.csproj");
+        var project = Path.Combine(Repo.Root(), "src", "Scada.Core", "Scada.Core.csproj");
         var document = XDocument.Load(project);
 
         Assert.Empty(document.Descendants("PackageReference"));
         Assert.Empty(document.Descendants("ProjectReference"));
-    }
-
-    private static string RepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "Scada.sln")))
-            directory = directory.Parent;
-        return directory?.FullName ?? throw new InvalidOperationException("找不到解决方案根目录（Scada.sln）。");
     }
 }

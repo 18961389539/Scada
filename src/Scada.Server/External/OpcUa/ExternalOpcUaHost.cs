@@ -32,6 +32,9 @@ public sealed class ExternalOpcUaHost(
 {
     private IHost? _host;
     private CancellationTokenSource? _publishCts;
+    // 发布循环异常以前完全静默：客户端一直收不到值，现场却没有任何线索。按累计数限流记录。
+    // BindAddressSpace 是静态方法，计数也只能是静态的（单实例运行，共享无副作用）。
+    private static long _publishFailures;
     public bool IsRunning { get; private set; }
     public string? EndpointUrl { get; private set; }
 
@@ -343,7 +346,13 @@ public sealed class ExternalOpcUaHost(
                     }
                 }
                 catch (OperationCanceledException) { break; }
-                catch { try { await Task.Delay(1000, publishCt); } catch { break; } }
+                catch (Exception ex)
+                {
+                    var count = Interlocked.Increment(ref _publishFailures);
+                    if (count == 1 || count % 30 == 0)
+                        logger.LogWarning(ex, "OPC UA 对外发布失败 {Count} 次（累计），客户端可能收不到实时值", count);
+                    try { await Task.Delay(1000, publishCt); } catch { break; }
+                }
             }
         }, publishCt);
     }

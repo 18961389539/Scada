@@ -37,6 +37,28 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetInt32();
     }
 
+    [Fact]
+    public async Task RuleValidationReturnsStructuredIssues()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var response = await admin.PostAsJsonAsync("/api/alarm-rules", new
+        {
+            tagId = _site.TagA, type = "High", threshold = 1000, level = "Warning",
+            delaySec = -1, recoverDeadband = 0, enabled = true, message = "结构化校验" + Guid.NewGuid().ToString("N")[..4]
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var (message, issues) = await BodyAsync(response);
+        Assert.Contains("报警延时", message);
+        Assert.Equal("alarm.delay.negative", issues[0].GetProperty("code").GetString());
+        Assert.Equal("delaySec", issues[0].GetProperty("field").GetString());
+    }
+
+    private static async Task<(string Message, JsonElement Issues)> BodyAsync(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return (body.GetProperty("message").GetString() ?? "", body.GetProperty("issues"));
+    }
+
     private async Task<int> ActiveAlarmAsync(int tagId, int? ruleId, long? start = null, Scada.Core.Enums.AlarmLevel level = Scada.Core.Enums.AlarmLevel.Warning)
     {
         await using var db = await Runtime().CreateDbContextAsync();
@@ -400,8 +422,7 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
         }
         finally
         {
-            TestSqlite.ClearPools(dir);
-            try { Directory.Delete(dir, true); } catch { }
+            TestSqlite.TryDeleteDirectory(dir);
         }
     }
 

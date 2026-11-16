@@ -43,9 +43,23 @@ public sealed class RealtimeBus : IRealtimeBus, IDisposable
         }
     }
 
-    public ChannelReader<TagValue> Subscribe() => Subscribe(_subscribers, SubscriberCapacity);
+    public ChannelReader<TagValue> Subscribe() => Create(_subscribers, SubscriberCapacity, out _).Reader;
 
-    public ChannelReader<TagValue> SubscribeHistory() => Subscribe(_history, HistoryCapacity);
+    public ChannelReader<TagValue> SubscribeHistory() => Create(_history, HistoryCapacity, out _).Reader;
+
+    public IDisposable Subscribe(out ChannelReader<TagValue> reader)
+    {
+        var channel = Create(_subscribers, SubscriberCapacity, out var id);
+        reader = channel.Reader;
+        return new Lease(_subscribers, id, channel.Writer);
+    }
+
+    public IDisposable SubscribeHistory(out ChannelReader<TagValue> reader)
+    {
+        var channel = Create(_history, HistoryCapacity, out var id);
+        reader = channel.Reader;
+        return new Lease(_history, id, channel.Writer);
+    }
 
     public void Dispose()
     {
@@ -55,7 +69,7 @@ public sealed class RealtimeBus : IRealtimeBus, IDisposable
         _history.Clear();
     }
 
-    private ChannelReader<TagValue> Subscribe(ConcurrentDictionary<long, Channel<TagValue>> target, int capacity)
+    private Channel<TagValue> Create(ConcurrentDictionary<long, Channel<TagValue>> target, int capacity, out long id)
     {
         var channel = Channel.CreateBounded<TagValue>(new BoundedChannelOptions(capacity)
         {
@@ -63,8 +77,22 @@ public sealed class RealtimeBus : IRealtimeBus, IDisposable
             SingleReader = true,
             SingleWriter = false
         });
-        target[Interlocked.Increment(ref _nextId)] = channel;
-        return channel.Reader;
+        id = Interlocked.Increment(ref _nextId);
+        target[id] = channel;
+        return channel;
+    }
+
+    // 订阅租约：释放时把队列从总线摘掉，并完成写入端让仍在读的消费者看到 EOF。
+    private sealed class Lease(ConcurrentDictionary<long, Channel<TagValue>> target, long id, ChannelWriter<TagValue> writer) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            target.TryRemove(id, out _);
+            writer.TryComplete();
+        }
     }
 
     private static int Count(ConcurrentDictionary<long, Channel<TagValue>> target) =>

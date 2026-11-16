@@ -24,7 +24,7 @@ public static class HistoryDownsampler
             if (!ids.Contains(value.TagId) || value.Ts < from || value.Ts > to) continue;
             if (!accumulators.TryGetValue(value.TagId, out var accumulator))
                 accumulators[value.TagId] = accumulator = new StreamingSeries(target, from, to);
-            accumulator.Add(new HistoryPoint(value.Ts, value.Value, value.Quality));
+            accumulator.Add(new HistoryPoint(value.Ts, value.Value, value.Quality, value.Text));
         }
         return (accumulators.OrderBy(x => x.Key).Select(x => new HistorySeries { TagId = x.Key, Points = x.Value.Points() }).ToList(),
             accumulators.Values.Any(x => x.Downsampled));

@@ -20,10 +20,12 @@ public static class McpSourceGuard
 
     public static bool IsAllowed(IPAddress? remote, string[]? cidrs)
     {
-        // 进程内调用（测试服务器、内置工具）没有网络来源，按本机处理。
-        if (remote is null) return true;
-
         var rules = cidrs is { Length: > 0 } ? cidrs : LoopbackOnly;
+        // 没有来源地址不能按"本机"放行：反向代理的 ForwardedHeaders 配错、Unix 域套接字
+        // 转发都会让所有外部调用落到这个分支，等于同时绕过网段、全局限流与分桶。
+        // 只有部署方显式写出 "*" 才允许无来源地址（集成测试正是这样配置的）。
+        if (remote is null) return Array.IndexOf(rules, AnySource) >= 0;
+
         foreach (var rule in rules)
         {
             if (IpRule.IsMatch(remote, rule)) return true;

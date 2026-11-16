@@ -40,8 +40,7 @@ public sealed class PasswordChangeTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         await _factory.DisposeAsync();
-        TestSqlite.ClearPools(_root);
-        try { Directory.Delete(_root, recursive: true); } catch (IOException) { }
+        TestSqlite.TryDeleteDirectory(_root);
     }
 
     private HttpClient Client() => _factory.CreateClient();

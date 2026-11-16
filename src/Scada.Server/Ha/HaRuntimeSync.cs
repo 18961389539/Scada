@@ -1,6 +1,7 @@
 using System.Data;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 
 namespace Scada.Server.Ha;
@@ -173,22 +174,30 @@ public static class HaRuntimeSync
         SetApplying(connection, tx, 1);
         foreach (var change in batch.Changes)
         {
+            // peer 传来的 Table / Key / 列名都不可信：回放端必须自己校验并参数化，
+            // 不能把主机生成的 WHERE 片段当成"内部数据"直接拼进 SQL。
+            var table = SafeTable(connection, change.Table);
+            if (!TryParseKey(change.Key, out var keyTerms))
+                throw new InvalidOperationException($"HA 回放主键谓词无效：{change.Key}");
             if (change.Deleted)
             {
                 using var del = connection.CreateCommand();
                 del.Transaction = tx;
-                del.CommandText = $"DELETE FROM \"{change.Table}\" WHERE {change.Key}";
+                var where = WhereSql(keyTerms, del, "k");
+                del.CommandText = $"DELETE FROM \"{table}\" WHERE {where}";
                 del.ExecuteNonQuery();
                 continue;
             }
 
             if (change.Row is null || change.Row.Count == 0) continue;
             var columns = change.Row.Keys.ToArray();
+            if (columns.Length is 0 or > 256 || columns.Any(c => !IsIdentifier(c)))
+                throw new InvalidOperationException($"HA 回放列名无效：{change.Table}");
             var names = string.Join(", ", columns.Select(c => "\"" + c + "\""));
             var values = string.Join(", ", columns.Select((_, i) => "$p" + i));
             using var upsert = connection.CreateCommand();
             upsert.Transaction = tx;
-            upsert.CommandText = $"INSERT OR REPLACE INTO \"{change.Table}\" ({names}) VALUES ({values})";
+            upsert.CommandText = $"INSERT OR REPLACE INTO \"{table}\" ({names}) VALUES ({values})";
             for (var i = 0; i < columns.Length; i++)
                 upsert.Parameters.AddWithValue("$p" + i, ToDb(change.Row[columns[i]]));
             upsert.ExecuteNonQuery();
@@ -232,10 +241,72 @@ public static class HaRuntimeSync
         return cmd.ExecuteScalar() is not null;
     }
 
+    // ── 回放输入的白名单 ──────────────────────────────────────────────────────
+    // 主机生成的谓词形如 Id=2 或 Id='a''b' AND Slot=NULL（PredicateSql 用 quote()）。
+    // 只接受这种严格语法，再拆成「列名 + 字面量」用参数重建 WHERE；任何 SQL 片段
+    // （OR 1=1、注释、子查询、分号）都在这里被拒绝，整批回放回滚。
+    private static readonly Regex KeyTerm = new(
+        @"^([A-Za-z_][A-Za-z0-9_]*)=('(?:[^']|'')*'|X'(?:[0-9A-Fa-f]{2})*'|-?\d+(?:\.\d+)?|NULL)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static bool IsIdentifier(string? name) =>
+        !string.IsNullOrEmpty(name) && name.Length <= 80
+        && (char.IsAsciiLetter(name[0]) || name[0] == '_')
+        && name.All(c => char.IsAsciiLetterOrDigit(c) || c == '_');
+
+    private static string SafeTable(SqliteConnection connection, string? table)
+    {
+        // 变更流自身、同步状态表等不允许被回放；表还必须在本机 schema 里真实存在。
+        if (!IsIdentifier(table) || Skip.Contains("," + table + ",", StringComparison.Ordinal) || !TableExists(connection, table!))
+            throw new InvalidOperationException($"HA 回放目标表无效：{table}");
+        return table!;
+    }
+
+    private static bool TryParseKey(string? key, out List<(string Column, object? Value)> terms)
+    {
+        terms = [];
+        if (string.IsNullOrEmpty(key) || key.Length > 4096) return false;
+        var position = 0;
+        while (true)
+        {
+            var match = KeyTerm.Match(key[position..]);
+            if (!match.Success) return false;
+            var literal = match.Groups[2].Value;
+            object? value;
+            if (literal == "NULL") value = null;
+            else if (literal[0] == '\'') value = literal[1..^1].Replace("''", "'", StringComparison.Ordinal);
+            else if (literal[0] == 'X') value = Convert.FromHexString(literal[2..^1]);
+            else if (literal.Contains('.', StringComparison.Ordinal)) value = double.Parse(literal, CultureInfo.InvariantCulture);
+            else value = long.Parse(literal, CultureInfo.InvariantCulture);
+            terms.Add((match.Groups[1].Value, value));
+            position += match.Length;
+            if (position == key.Length) return terms.Count is > 0 and <= 16;
+            if (!key.AsSpan(position).StartsWith(" AND ", StringComparison.Ordinal)) return false;
+            position += 5;
+        }
+    }
+
+    private static string WhereSql(IReadOnlyList<(string Column, object? Value)> terms, SqliteCommand command, string prefix)
+    {
+        var parts = new List<string>(terms.Count);
+        for (var i = 0; i < terms.Count; i++)
+        {
+            var (column, value) = terms[i];
+            if (value is null) { parts.Add($"\"{column}\" IS NULL"); continue; }
+            var parameter = "$" + prefix + i;
+            parts.Add($"\"{column}\" = {parameter}");
+            command.Parameters.AddWithValue(parameter, value);
+        }
+        return string.Join(" AND ", parts);
+    }
+
     private static IReadOnlyDictionary<string, JsonElement>? ReadRow(SqliteConnection connection, string table, string key)
     {
+        var safe = SafeTable(connection, table);
+        if (!TryParseKey(key, out var terms))
+            throw new InvalidOperationException($"HA 回放主键谓词无效：{key}");
         using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"SELECT * FROM \"{table}\" WHERE {key} LIMIT 1";
+        cmd.CommandText = $"SELECT * FROM \"{safe}\" WHERE {WhereSql(terms, cmd, "k")} LIMIT 1";
         using var reader = cmd.ExecuteReader();
         if (!reader.Read()) return null;
         var map = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
@@ -288,6 +359,8 @@ public static class HaRuntimeSync
 
     private static List<string> PrimaryKeys(SqliteConnection connection, string table)
     {
+        // 表名来自本机 sqlite_master，但触发器名与 PRAGMA 里仍要拼接它：只接受标识符形态。
+        if (!IsIdentifier(table)) return [];
         using var cmd = connection.CreateCommand();
         cmd.CommandText = $"PRAGMA table_info(\"{table}\")";
         var keys = new List<(int Seq, string Name)>();
@@ -301,6 +374,8 @@ public static class HaRuntimeSync
 
     private static string PredicateSql(string alias, IReadOnlyList<string> keys)
     {
+        if (keys.Count == 0 || keys.Any(k => !IsIdentifier(k)))
+            throw new InvalidOperationException("HA 变更触发器遇到非法主键列名");
         // 触发器里用 quote() 生成可直接用于 WHERE 的谓词，避免再解析主键。
         var parts = keys.Select(c => $"'{c}=' || quote({alias}.\"{c}\")");
         return string.Join(" || ' AND ' || ", parts);
