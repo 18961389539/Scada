@@ -240,7 +240,7 @@ public sealed class CalcJobEngine(
             }
             if (running.Job.Revision != job.Revision) { running.IdentityProblem = null; running.IdentityCheckedTs = 0; }
             running.Job = job; running.Error = null; running.Script = null;
-            UsePublished(job);
+            CalcJobPublishedSync.UsePublished(job);
             if (job.IsScript && job.PublishedRevision == 0) running.Error = "脚本尚未发布";
             running.Outputs = outputs.Where(x => x.JobId == job.Id && x.JobOutput != null).ToDictionary(x => x.JobOutput!, x => x.Id);
             running.TagNames = ScriptTagNames.ForScript(CalcScript.ParseIds(job.ReadTags).Concat(CalcScript.ParseIds(job.WriteTags)).Where(catalog.ContainsKey).Select(id => catalog[id]));
@@ -291,19 +291,6 @@ public sealed class CalcJobEngine(
         return new(reply, samples);
     }
 
-    private static void UsePublished(CalcJob job)
-    {
-        if (!job.IsScript || job.PublishedRevision == 0) return;
-        job.Script = job.PublishedScript; job.ReadTags = job.PublishedReadTags; job.WriteTags = job.PublishedWriteTags;
-        // 库名也要跟随发布副本：运行时用它做依赖检查与"是否需要重新发布"的判定，
-        // 漏抄会让草稿里新加的库名立刻影响正在运行的脚本。
-        job.Libraries = job.PublishedLibraries;
-        job.HistoryWindowSec = job.PublishedHistoryWindowSec; job.AlarmSnapshot = job.PublishedAlarmSnapshot;
-        job.Trigger = job.PublishedTrigger; job.IntervalMs = job.PublishedIntervalMs;
-        job.ChangeDeadband = job.PublishedChangeDeadband; job.ChangeCooldownMs = job.PublishedChangeCooldownMs;
-        job.AlarmMinLevel = job.PublishedAlarmMinLevel; job.AlarmOnRaise = job.PublishedAlarmOnRaise;
-        job.AlarmOnAck = job.PublishedAlarmOnAck; job.AlarmOnRecover = job.PublishedAlarmOnRecover;
-    }
 
     public async Task InvokeAsync(int jobId, double? argument, CancellationToken ct = default)
     {

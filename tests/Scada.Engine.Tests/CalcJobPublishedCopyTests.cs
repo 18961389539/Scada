@@ -52,9 +52,7 @@ public sealed class CalcJobPublishedCopyTests
         Assert.Equal("draft", job.Script);
     }
 
-    private static void UsePublished(CalcJob job) =>
-        typeof(CalcJobEngine).GetMethod("UsePublished", BindingFlags.NonPublic | BindingFlags.Static)!
-            .Invoke(null, [job]);
+    private static void UsePublished(CalcJob job) => CalcJobPublishedSync.UsePublished(job);
 
     private static object Sample(Type type, bool published) => type switch
     {
