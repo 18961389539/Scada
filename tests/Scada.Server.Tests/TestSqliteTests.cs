@@ -1,3 +1,4 @@
+using Scada.Tests;
 using Microsoft.Data.Sqlite;
 
 namespace Scada.Server.Tests;

@@ -40,6 +40,7 @@ public sealed class DirectoryBackupTarget(BackupTargetOptions o) : IBackupTarget
 
     public async Task UploadAsync(string localPath, string fileName, CancellationToken ct)
     {
+        BackupSecurity.RequireEncryptedOffsite(localPath);
         Directory.CreateDirectory(_root);
         var target = System.IO.Path.Combine(_root, System.IO.Path.GetFileName(fileName));
         var temp = target + ".partial";
@@ -87,11 +88,12 @@ public sealed class S3BackupTarget : IBackupTarget, IDisposable
 
     public async Task UploadAsync(string localPath, string fileName, CancellationToken ct)
     {
+        BackupSecurity.RequireEncryptedOffsite(localPath);
         string hash;
         await using (var s = File.OpenRead(localPath)) hash = Convert.ToHexString(await SHA256.HashDataAsync(s, ct)).ToLowerInvariant();
         await using var body = File.OpenRead(localPath);
         var content = new StreamContent(body); content.Headers.ContentLength = body.Length;
-        content.Headers.ContentType = new("application/zip");
+        content.Headers.ContentType = new("application/octet-stream");
         using var response = await SendAsync(HttpMethod.Put, ObjectPath(fileName), "", hash, content, ct);
         await EnsureAsync(response, "上传", ct);
         using var head = await SendAsync(HttpMethod.Head, ObjectPath(fileName), "", S3Signer.EmptyHash, null, ct);

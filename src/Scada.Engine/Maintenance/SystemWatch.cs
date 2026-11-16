@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
@@ -31,7 +32,8 @@ public sealed class SystemWatch(
     TimeProvider? timeProvider = null,
     Func<string, DiskCapacity>? diskProbe = null,
     IHistoryBackend? history = null,
-    IDbContextFactory<RuntimeDbContext>? runtime = null) : BackgroundService
+    IDbContextFactory<RuntimeDbContext>? runtime = null,
+    IConfigSnapshot? config = null) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private const double BytesPerGb = 1024d * 1024 * 1024;
@@ -76,6 +78,18 @@ public sealed class SystemWatch(
         var configDisk = ProbeDisk(options.ConfigDbPath);
         var freeGb = Math.Round((configDisk.FreeBytes ?? 0) / BytesPerGb, 1);
         var history = MeasureHistory(options);
+        if (config is not null)
+            warnings.AddRange(HistorySizingPlan.Estimate(config.Devices, config.Tags, options).Warnings(options, history));
+        if (!options.LocalCollectionEnabled)
+        {
+            warnings.Add(new(LocalCollection.DisabledHealthCode, LocalCollection.DisabledHealthMessage));
+            if (config is not null)
+            {
+                var unassigned = config.Devices.Count(LocalCollection.IsUnassignedEnabled);
+                if (unassigned > 0)
+                    warnings.Add(new(LocalCollection.UnassignedHealthCode, LocalCollection.UnassignedHealthMessage(unassigned)));
+            }
+        }
 
         var spoolBytes = spool.PendingBytes;
         var backlog = bus.Backlog;

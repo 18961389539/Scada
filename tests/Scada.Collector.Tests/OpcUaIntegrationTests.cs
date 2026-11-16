@@ -1,3 +1,4 @@
+using Scada.Tests;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +20,8 @@ public class OpcUaIntegrationTests
     public async Task RealOpcServerSupportsNumericAndBitReadsWritesAndPerNodeBadQuality()
     {
         var root = Path.Combine(Path.GetTempPath(), "scada-opc-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        TempCleanup.Track(root);
         using var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); var port = ((IPEndPoint)listener.LocalEndpoint).Port; listener.Stop();
         var endpoint = $"opc.tcp://localhost:{port}/scada-test";
         string realAddress = "", runAddress = "";

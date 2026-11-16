@@ -3,6 +3,7 @@ using Scada.Core.Entities;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
+using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
@@ -34,44 +35,22 @@ public static class AccessEndpoints
             return Results.Ok(list.Where(x => access.Grants.Any(g => g.AreaId is null || g.AreaId == x.Id))
                 .Select(x => new { x.Id, x.Name, x.Description, deviceCount = counts.GetValueOrDefault(x.Id), isDefault = x.Id == Area.DefaultId }));
         });
-        areas.MapPost("", async (AreaRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider provider, CancellationToken ct) =>
+        areas.MapPost("", async (AreaRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AreaCommandService areasCommand, CancellationToken ct) =>
         {
-            var name = request.Name?.Trim() ?? "";
-            if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("区域名称须为 1～100 个字符");
             await using var db = await factory.CreateDbContextAsync(ct);
-            if (await db.Areas.AnyAsync(x => x.Name == name, ct)) return EndpointHelpers.BadRequest("区域名称已存在");
-            var area = new Area { Name = name, Description = Clean(request.Description) };
-            db.Areas.Add(area);
-            // 审计行由 AuditInterceptor 写（Area 实现了 IAuditedEntity）。
-            await db.SaveChangesAsync(ct);
-            provider.Invalidate();
-            return Results.Created($"/api/areas/{area.Id}", area);
+            return MapArea(await areasCommand.CreateAsync(db, request.Name, request.Description, ct), created: true);
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        areas.MapPut("/{id:int}", async (int id, AreaRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, CancellationToken ct) =>
+        areas.MapPut("/{id:int}", async (int id, AreaRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AreaCommandService areasCommand, CancellationToken ct) =>
         {
-            var name = request.Name?.Trim() ?? "";
-            if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("区域名称须为 1～100 个字符");
             await using var db = await factory.CreateDbContextAsync(ct);
-            var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (area is null) return Results.NotFound();
-            if (await db.Areas.AnyAsync(x => x.Id != id && x.Name == name, ct)) return EndpointHelpers.BadRequest("区域名称已存在");
-            area.Name = name; area.Description = Clean(request.Description);
-            await db.SaveChangesAsync(ct);
-            return Results.Ok(area);
+            return MapArea(await areasCommand.UpdateAsync(db, id, request.Name, true, request.Description, true, ct));
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        areas.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AccessModelProvider provider, CancellationToken ct) =>
+        areas.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AreaCommandService areasCommand, CancellationToken ct) =>
         {
-            if (id == Area.DefaultId) return EndpointHelpers.BadRequest("默认区域不能删除");
             await using var db = await factory.CreateDbContextAsync(ct);
-            var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (area is null) return Results.NotFound();
-            if (await db.Devices.AnyAsync(x => x.AreaId == id, ct)) return EndpointHelpers.BadRequest("区域内仍有设备，请先移走设备");
-            if (await db.Tags.AnyAsync(x => x.AreaId == id, ct)) return EndpointHelpers.BadRequest("仍有计算测点指定了该区域");
-            if (await db.UserRoleAssignments.AnyAsync(x => x.AreaId == id, ct)) return EndpointHelpers.BadRequest("仍有用户授权限定在该区域，请先调整授权");
-            db.Areas.Remove(area);
-            await db.SaveChangesAsync(ct);
-            provider.Invalidate();
-            return Results.NoContent();
+            var result = await areasCommand.DeleteAsync(db, id, ct);
+            if (result.Success) return Results.NoContent();
+            return MapArea(result);
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
 
         var roles = app.MapGroup("/api/roles").RequireAuthorization(AccessPolicies.GlobalManageUsers).AddEndpointFilter<AuditFailuresFilter>();
@@ -177,6 +156,18 @@ public static class AccessEndpoints
     }
 
     private static object RoleSnapshot(AccessRole role) => new { role.Id, role.Name, role.Description, permissions = Permissions.Names(role.Permissions) };
+
+
+    private static IResult MapArea(AreaCommandResult result, bool created = false)
+    {
+        if (result.Success)
+            return created ? Results.Created($"/api/areas/{result.Area!.Id}", result.Area) : Results.Ok(result.Area);
+        return result.Error switch
+        {
+            AreaCommandError.NotFound => Results.NotFound(),
+            _ => EndpointHelpers.BadRequest(result.Message ?? "区域写入失败")
+        };
+    }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim()[..Math.Min(value.Trim().Length, 500)];
 

@@ -112,4 +112,11 @@ test('workspace keeps per-tab history, tab actions, cache and restore', async ({
   await page.locator('[data-test="workspace-tab-actions"]').click()
   await page.locator('[data-test="workspace-close-all"]').click()
   await expect(page.locator('[data-test="workspace-empty"]')).toBeVisible()
+
+  await page.locator('[data-test="workspace-tab-actions"]').click()
+  await page.locator('[data-test="workspace-reopen"]').click()
+  await expect(page.locator('[data-test="workspace-tabs"] .ws-tab')).toHaveCount(1)
+  await page.locator('[data-test="workspace-tab-actions"]').click()
+  await page.locator('[data-test="workspace-close-all"]').click()
+  await expect(page.locator('[data-test="workspace-empty"]')).toBeVisible()
 })

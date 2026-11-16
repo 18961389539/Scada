@@ -9,6 +9,7 @@ using Scada.Data;
 using Scada.Engine.Reports;
 using Scada.Server.Auth;
 using Scada.Server.Reports;
+using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
@@ -41,10 +42,10 @@ public static class ReportTemplateEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             return Results.Ok((await db.ReportTemplates.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct)).Where(x => access.Has(Permission.View, x.AreaId)).Select(View));
         });
-        templates.MapPost("", (ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
-            SaveAsync(null, request, http, factory, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.Configure);
-        templates.MapPut("/{id:int}", (int id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
-            SaveAsync(id, request, http, factory, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.Configure);
+        templates.MapPost("", (ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportTemplateCommandService commands, CancellationToken ct) =>
+            SaveAsync(null, request, http, factory, runtimeFactory, commands, ct)).RequireAuthorization(AccessPolicies.Configure);
+        templates.MapPut("/{id:int}", (int id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportTemplateCommandService commands, CancellationToken ct) =>
+            SaveAsync(id, request, http, factory, runtimeFactory, commands, ct)).RequireAuthorization(AccessPolicies.Configure);
         templates.MapDelete("/{id:int}", async (int id, long revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -127,57 +128,40 @@ public static class ReportTemplateEndpoints
 
     internal static string FileName(ReportRun run, string ext) => $"{run.TemplateName}_{run.PeriodKey.Replace(':', '-').Replace(' ', '_')}_v{run.Version}.{ext}";
 
-    private static async Task<IResult> SaveAsync(int? id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
+    private static async Task<IResult> SaveAsync(int? id, ReportTemplateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ReportTemplateCommandService commands, CancellationToken ct)
     {
         var access = await http.GetAccessAsync();
         var action = id is null ? $"创建报表模板：{request.Name}" : $"修改报表模板 #{id}";
         await using var db = await factory.CreateDbContextAsync(ct);
-        ReportTemplate? existing = null;
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         if (id is int current)
         {
-            existing = await db.ReportTemplates.SingleOrDefaultAsync(x => x.Id == current, ct);
+            var existing = await db.ReportTemplates.AsNoTracking().SingleOrDefaultAsync(x => x.Id == current, ct);
             if (existing is null) return Results.NotFound();
             if (!access.Has(Permission.Configure, existing.AreaId)) return await Audit.ForbidAsync(http, action, "无权配置该区域的报表", "ReportTemplate", current);
-            if (existing.Revision != request.Revision) return Results.Conflict(new { message = "模板已被修改，请重新读取后核对" });
         }
-        if (!await db.Areas.AnyAsync(x => x.Id == request.AreaId, ct)) return EndpointHelpers.BadRequest("区域不存在");
         if (!access.Has(Permission.Configure, request.AreaId)) return await Audit.ForbidAsync(http, action, $"无权配置区域 #{request.AreaId}", "Area", request.AreaId);
         var columns = request.Columns ?? [];
-        var candidate = new ReportTemplate
-        {
-            Name = request.Name?.Trim() ?? "", Period = request.Period, AreaId = request.AreaId, ShiftStarts = string.IsNullOrWhiteSpace(request.ShiftStarts) ? "08:00,20:00" : request.ShiftStarts.Trim(),
-            ColumnsJson = JsonSerializer.Serialize(columns, ReportTemplates.Json), ScheduleEnabled = request.ScheduleEnabled, ScheduleDelayMin = request.ScheduleDelayMin ?? ReportTemplate.DefaultScheduleDelayMin,
-            EmailChannelId = request.EmailChannelId, EmailRecipients = request.EmailRecipients?.Trim() ?? ""
-        };
-        try { ReportTemplates.Validate(candidate, columns); }
-        catch (ReportTemplateException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         // 列引用的测点须可查看；计算任务须存在且其区域可查看。
         var hidden = columns.Where(c => c.TagId is int t && c.Kind <= ReportColumnKind.TagSum && !access.CanTag(Permission.View, t)).Select(c => c.TagId!.Value).Distinct().ToArray();
         if (hidden.Length > 0) return await Audit.ForbidAsync(http, action, $"引用了无权查看的测点：{string.Join(",", hidden)}", "ReportTemplate", id);
-        var tagIds = columns.Where(c => c.TagId is int && c.Kind <= ReportColumnKind.TagSum).Select(c => c.TagId!.Value).Distinct().ToArray();
-        var missingTags = tagIds.Except(await db.Tags.Where(x => tagIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct)).ToArray();
-        if (missingTags.Length > 0) return EndpointHelpers.BadRequest($"测点不存在：{string.Join(",", missingTags)}");
         foreach (var column in columns.Where(c => c.Kind == ReportColumnKind.CalcSnapshot))
         {
-            var job = await db.CalcJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == column.JobId, ct);
-            if (job is null) return EndpointHelpers.BadRequest($"计算任务 #{column.JobId} 不存在");
-            if (!access.Has(Permission.View, job.AreaId)) return await Audit.ForbidAsync(http, action, $"无权查看计算任务 #{job.Id}", "ReportTemplate", id);
+            if (column.JobId is not int jobId) continue;
+            var job = await db.CalcJobs.AsNoTracking().SingleOrDefaultAsync(x => x.Id == jobId, ct);
+            if (job is not null && !access.Has(Permission.View, job.AreaId))
+                return await Audit.ForbidAsync(http, action, $"无权查看计算任务 #{job.Id}", "ReportTemplate", id);
         }
-        if (candidate.EmailChannelId is int channelId)
+        var result = await commands.SaveAsync(db, runtime, id, request.Name, request.Period, request.AreaId, request.ShiftStarts, columns,
+            request.ScheduleEnabled, request.ScheduleDelayMin, request.EmailChannelId, request.EmailRecipients, request.Revision,
+            http.User.GetUserName(), http.User.GetUserId(), ct);
+        if (result.Success)
+            return result.Created ? Results.Created($"/api/report-templates/{result.Template!.Id}", View(result.Template)) : Results.Ok(View(result.Template!));
+        return result.Error switch
         {
-            var channel = await db.NotificationChannels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == channelId, ct);
-            if (channel is null || channel.Type != NotificationChannelType.Email) return EndpointHelpers.BadRequest("报表投递须选择邮件通道");
-        }
-        if (await db.ReportTemplates.AnyAsync(x => x.Name == candidate.Name && x.Id != (id ?? 0), ct)) return Results.Conflict(new { message = "模板名称已存在" });
-
-        var template = existing ?? new ReportTemplate();
-        template.Name = candidate.Name; template.Period = candidate.Period; template.AreaId = candidate.AreaId; template.ShiftStarts = candidate.ShiftStarts;
-        template.ColumnsJson = candidate.ColumnsJson; template.ScheduleEnabled = candidate.ScheduleEnabled; template.ScheduleDelayMin = candidate.ScheduleDelayMin;
-        if (candidate.ScheduleEnabled && (existing is null || !existing.ScheduleEnabled)) template.ScheduleSinceTs = ScadaTime.NowMs();
-        template.EmailChannelId = candidate.EmailChannelId; template.EmailRecipients = candidate.EmailRecipients;
-        template.Revision = existing is null ? 1 : existing.Revision + 1; template.UpdatedTs = ScadaTime.NowMs();
-        if (existing is null) db.ReportTemplates.Add(template);
-        await db.SaveChangesAsync(ct);
-        return existing is null ? Results.Created($"/api/report-templates/{template.Id}", View(template)) : Results.Ok(View(template));
+            ReportTemplateCommandError.NotFound => Results.NotFound(),
+            ReportTemplateCommandError.Conflict or ReportTemplateCommandError.DuplicateName => Results.Conflict(new { message = result.Message }),
+            _ => EndpointHelpers.BadRequest(result.Message ?? "报表模板无效")
+        };
     }
 }

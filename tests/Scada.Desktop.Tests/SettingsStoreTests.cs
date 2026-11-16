@@ -1,4 +1,5 @@
 using Scada.Desktop.Configuration;
+using Scada.Tests;
 
 namespace Scada.Desktop.Tests;
 
@@ -91,6 +92,7 @@ public sealed class SettingsStoreTests
     private static string TempDirectory()
     {
         var path = Path.Combine(Path.GetTempPath(), "scada-desktop-tests", Guid.NewGuid().ToString("N"));
+        TempCleanup.Track(path);
         Directory.CreateDirectory(path);
         return path;
     }

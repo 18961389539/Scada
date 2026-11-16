@@ -69,7 +69,7 @@
       </template>
       <template v-if="currentDef">
         <el-alert v-if="currentDef.notice" :title="currentDef.notice" type="warning" :closable="false" />
-        <el-form-item v-for="f in currentDef.fields" :key="f.key" :label="f.label">
+        <el-form-item v-for="f in currentDef.fields" :key="f.key" :label="f.label" :required="f.type === 'number' && typeof f.default === 'number' && f.min != null && f.default < f.min">
           <el-select v-if="f.type === 'select'" v-model="options[f.key]" :data-test="`opt-${f.key}`" style="width: 100%"><el-option v-for="o in f.options" :key="o" :value="o" /></el-select>
           <el-switch v-else-if="f.type === 'bool'" v-model="options[f.key]" :disabled="f.locked" :data-test="`opt-${f.key}`" />
           <el-input-number v-else-if="f.type === 'number'" v-model="options[f.key]" :data-test="`opt-${f.key}`" :min="f.min" :max="f.max" style="width: 100%" />
@@ -145,7 +145,7 @@ import { errorMessage } from '../../api/http'
 import type { Area, Device, DeviceInput } from '../../types'
 import { formatValue } from '../../utils'
 import { can } from '../../access/policies'
-import { defaultOptions, parseOptions, protocolDef, textProtocols } from '../../protocols'
+import { defaultOptions, parseOptions, protocolDef, textProtocols, protocolOptionsComplete } from '../../protocols'
 import { tr } from '../../i18n'
 import { readLastNumber, rememberNumber } from '../../composables/lastChoice'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../../composables/formErrors'
@@ -197,6 +197,7 @@ const validationRules = computed<FormRules>(() => ({
 }))
 
 const canSave = computed(() => {
+  if (textProtocols.value.length === 0 || !protocolOptionsComplete(protocolDef(form.protocol), options)) return false
   if (!String(form.name || '').trim()) return false
   if (form.simulationEnabled) return true
   if (form.protocol === 'OpcUa') return !!String(form.opcEndpointUrl || '').trim()

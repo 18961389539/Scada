@@ -172,6 +172,7 @@ public sealed class BackupPipelineTests
         await File.WriteAllTextAsync(blocked, "file");
         await rig.PrepareAsync(s =>
         {
+            s.BackupPassword = "test-only-backup-passphrase";
             s.BackupKeepLatest = 2; s.BackupRetentionDays = 1;
             s.BackupTargets =
             [
@@ -187,7 +188,7 @@ public sealed class BackupPipelineTests
         BackupRun last = null!;
         for (var i = 0; i < 3; i++)
         {
-            if (i == 2) foreach (var f in Directory.EnumerateFiles(rig.Backups.Root, "full_*.zip")) File.SetLastWriteTime(f, DateTime.Now.AddDays(-3));
+            if (i == 2) foreach (var f in Directory.EnumerateFiles(rig.Backups.Root, "full_*.zip.enc")) File.SetLastWriteTime(f, DateTime.Now.AddDays(-3));
             last = await scheduler.RunAsync("测试", default);
             await Task.Delay(1100); // 文件名精确到秒，保证顺序
         }
@@ -196,7 +197,7 @@ public sealed class BackupPipelineTests
         Assert.Equal(2, last.Drill.Tags);
         Assert.Equal(2, rig.Backups.List().Count);            // 本地保留最近 2 份，更旧且过期的删除
         Assert.Single(last.Pruned);
-        Assert.Equal(2, Directory.GetFiles(offsite, "full_*.zip").Length);
+        Assert.Equal(2, Directory.GetFiles(offsite, "full_*.zip.enc").Length);
         Assert.Single(s3.Objects);                              // S3 只保留 1 份
         Assert.StartsWith("site-1/full_", s3.Objects.Keys.Single());
         Assert.True(s3.SignaturesChecked >= 9);
@@ -225,11 +226,12 @@ public sealed class BackupPipelineTests
         var drill = await rig.Backups.DrillAsync(summary.FileName, default);
         Assert.False(drill.Ok); Assert.NotEmpty(drill.Problems);
 
-        // 流水线里演练失败的备份不上传异地。
+        // After the failed local drill, ship only a newly encrypted backup.
+        rig.Settings.BackupPassword = "test-only-backup-passphrase";
         var scheduler = Scheduler(rig);
         var run = await scheduler.RunAsync("测试", default);
         Assert.True(run.Drill!.Ok); Assert.True(run.Ok);
-        Assert.Single(Directory.GetFiles(offsite, "full_*.zip"));
+        Assert.Single(Directory.GetFiles(offsite, "full_*.zip.enc"));
     }
 
     [Fact]

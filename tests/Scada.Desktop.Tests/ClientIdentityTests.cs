@@ -1,4 +1,5 @@
 using Scada.Desktop.Configuration;
+using Scada.Tests;
 
 namespace Scada.Desktop.Tests;
 
@@ -8,6 +9,7 @@ public sealed class ClientIdentityTests
     public void GeneratesAndPreservesClientId()
     {
         var directory = Path.Combine(Path.GetTempPath(), "scada-desktop-tests", Guid.NewGuid().ToString("N"));
+        TempCleanup.Track(directory);
         Directory.CreateDirectory(directory);
         try
         {
@@ -43,6 +45,7 @@ public sealed class ClientIdentityTests
     public void DoesNotWriteMachineLayerValuesIntoUserConfig()
     {
         var directory = Path.Combine(Path.GetTempPath(), "scada-desktop-tests", Guid.NewGuid().ToString("N"));
+        TempCleanup.Track(directory);
         Directory.CreateDirectory(directory);
         try
         {

@@ -18,11 +18,13 @@ if (args.Length == 0 || args[0] is "-h" or "--help")
 }
 
 var command = args[0];
+var promptPassword = false;
 string? backupPath = null, targetPath = null, password = Environment.GetEnvironmentVariable("SCADA_BACKUP_PASSWORD");
 for (var i = 1; i < args.Length; i++)
 {
     switch (args[i])
     {
+        case "--prompt-password": promptPassword = true; break;
         case "--backup" when i + 1 < args.Length: backupPath = args[++i]; break;
         case "--target" when i + 1 < args.Length: targetPath = args[++i]; break;
         // 口令也可以从 SCADA_BACKUP_PASSWORD 读：命令行参数会进进程列表与运维记录。
@@ -38,6 +40,23 @@ if (string.IsNullOrWhiteSpace(backupPath))
 {
     Console.Error.WriteLine("缺少 --backup 参数");
     return 2;
+}
+
+if (promptPassword)
+{
+    if (Console.IsInputRedirected) { Console.Error.WriteLine("Password prompt requires an interactive console."); return 2; }
+    Console.Write("Backup password (hidden): ");
+    var input = new System.Text.StringBuilder();
+    while (true)
+    {
+        var key = Console.ReadKey(intercept: true);
+        if (key.Key == ConsoleKey.Enter) break;
+        if (key.Key == ConsoleKey.Escape) { Console.WriteLine(); return 2; }
+        if (key.Key == ConsoleKey.Backspace) { if (input.Length > 0) input.Length--; }
+        else if (!char.IsControl(key.KeyChar)) input.Append(key.KeyChar);
+    }
+    Console.WriteLine();
+    password = input.ToString(); input.Clear();
 }
 
 var full = Path.GetFullPath(backupPath);
@@ -115,7 +134,7 @@ static void PrintUsage()
           Scada.BackupTool verify  --backup <full_*.zip | full_*.zip.enc> [--password <口令>]
           Scada.BackupTool restore --backup <full_*.zip | full_*.zip.enc> --target <空目录> [--password <口令>]
 
-        加密包（.zip.enc）必须提供口令；也可用环境变量 SCADA_BACKUP_PASSWORD，避免口令进命令历史。
+        加密包（.zip.enc）必须提供口令；也可用环境变量 SCADA_BACKUP_PASSWORD，避免口令进命令历史。使用 --prompt-password 可在交互控制台隐藏输入口令。
         还原只写入空目录，不会覆盖现场数据；执行前请先停止服务。
         """);
 }

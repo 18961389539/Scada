@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { resetProtocolCatalog } from '../protocols'
 import { computed, ref } from 'vue'
 import { authApi } from '../api'
 import { bindSessionListener, EXPIRES_KEY, TOKEN_KEY, USER_KEY } from '../api/http'
@@ -28,6 +29,7 @@ export const useAuthStore = defineStore('auth', () => {
   // 返回 true 表示服务端保存的语言偏好与当前界面不同，调用方应整页跳转以加载该语言。
   async function login(userName: string, password: string): Promise<boolean> {
     const result = await authApi.login(userName, password)
+    resetProtocolCatalog()
     token.value = result.token
     user.value = result.user
     localStorage.setItem(EXPIRES_KEY, result.expiresAt)
@@ -68,6 +70,7 @@ export const useAuthStore = defineStore('auth', () => {
   // 改密成功即换令牌：服务端按新口令派生了 CredentialsVersion，旧令牌已经不可用。
   async function changePassword(currentPassword: string, newPassword: string): Promise<boolean> {
     const result = await authApi.changePassword(currentPassword, newPassword)
+    resetProtocolCatalog()
     token.value = result.token
     user.value = result.user
     localStorage.setItem(EXPIRES_KEY, result.expiresAt)
@@ -76,6 +79,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout(): void {
+    resetProtocolCatalog()
     token.value = ''
     user.value = null
     localStorage.removeItem(EXPIRES_KEY)

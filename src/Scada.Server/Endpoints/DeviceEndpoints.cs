@@ -272,6 +272,8 @@ public static class DeviceEndpoints
 
             if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Control, $"设备连通测试 #{id}") is { } denied) return denied;
             if (device.GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
+            if (Settings(http) is { LocalCollectionEnabled: false })
+                return Results.Conflict(new { message = LocalCollection.DisabledMessage });
             try
             {
                 return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken, collector));
@@ -311,6 +313,9 @@ public static class DeviceEndpoints
             var areaId = request.Device.AreaId ?? stored?.AreaId ?? Area.DefaultId;
             if (await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Configure, $"测试未保存设备：{request.Device.Name}") is { } deniedConfigure) return deniedConfigure;
             if (await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Control, $"测试未保存设备：{request.Device.Name}") is { } deniedControl) return deniedControl;
+
+            if (Settings(http) is { LocalCollectionEnabled: false })
+                return Results.Conflict(new { message = LocalCollection.DisabledMessage });
 
             var device = new Device
             {

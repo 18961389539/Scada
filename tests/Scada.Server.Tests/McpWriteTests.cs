@@ -25,7 +25,7 @@ public sealed class McpWriteTests : IClassFixture<McpWriteTests.Site>
         public readonly List<int> Reconnects = [];
         public CollectorDeviceDiagnostics? GetDiagnostics(int deviceId) =>
             deviceId == SnapshotDeviceId ? Snapshot(deviceId) : null;
-        public bool RequestReconnect(int deviceId) { lock (Reconnects) Reconnects.Add(deviceId); return true; }
+        public CollectorReconnectResult RequestReconnect(int deviceId) { lock (Reconnects) Reconnects.Add(deviceId); return CollectorReconnectResult.Ok; }
         private static CollectorDeviceDiagnostics Snapshot(int deviceId) => new(
             deviceId, "MCP fake", "ModbusTcp", "", "Running", "Poll", null, null, true, false, 1,
             ScadaTime.NowMs(), ScadaTime.NowMs(), 1000, 1000, 5000, 0, 1,

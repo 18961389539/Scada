@@ -19,17 +19,25 @@ public sealed record OpcImportRequest(IReadOnlyList<OpcImportItem> Items);
 public sealed record OpcImportRow(string NodeId, string Name, TagDataType? DataType, bool Writable, string? Error);
 public sealed record OpcImportPreview(string Id, IReadOnlyList<OpcImportRow> Rows, IReadOnlyList<string> Errors, bool CanApply, DateTime ExpiresAt);
 
-public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, OpcUaRuntime runtime, GatewayCenterService gateways) : BackgroundService
+public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, OpcUaRuntime runtime, GatewayCenterService gateways, Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings) : BackgroundService
 {
     private sealed record PreviewState(int Owner, int DeviceId, string Fingerprint, OpcImportPreview Preview, IReadOnlyList<OpcNodeInfo> Metadata, int? GatewayId);
     private readonly OpcBrowseRegistry _local = new(runtime);
     private readonly ConcurrentDictionary<string, PreviewState> _previews = new();
+
+    private void EnsureLocalEngineering(Device device)
+    {
+        if (device.GatewayId is null && !settings.Value.LocalCollectionEnabled)
+            throw new InvalidOperationException(Scada.Core.LocalCollection.DisabledMessage);
+    }
+
 
     public async Task<OpcBrowseResponse> BrowseAsync(int owner, int deviceId, OpcBrowseRequest request, CancellationToken ct)
     {
         if (request.Limit is < 1 or > 200 || !OpcNodeAddress.IsValid(request.NodeId)) throw new ArgumentException("浏览节点或分页大小无效（1～200）");
         var device = await DeviceAsync(deviceId, ct);
         if (device.GatewayId is not null) return await gateways.EngineerAsync<OpcBrowseResponse>(deviceId, GatewayEngineeringOperation.OpcBrowse, request, owner, ct);
+        EnsureLocalEngineering(device);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(device.TimeoutMs);
         return await _local.BrowseAsync(owner, device, Fingerprint(device), request, timeout.Token);
     }
@@ -38,7 +46,11 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
     {
         var device = await DeviceAsync(deviceId, ct);
         if (device.GatewayId is not null) await gateways.EngineerAsync<JsonElement>(deviceId, GatewayEngineeringOperation.OpcClose, new { cursor = key }, owner, ct);
-        else await _local.CloseAsync(owner, deviceId, key, ct);
+        else
+        {
+            EnsureLocalEngineering(device);
+            await _local.CloseAsync(owner, deviceId, key, ct);
+        }
     }
     public async Task InvalidateAsync(int? gatewayId = null)
     {
@@ -104,6 +116,7 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
     private async Task<IReadOnlyList<OpcNodeInfo>> MetadataAsync(int owner, Device device, IReadOnlyList<string> nodes, CancellationToken ct)
     {
         if (device.GatewayId is not null) return await gateways.EngineerAsync<IReadOnlyList<OpcNodeInfo>>(device.Id, GatewayEngineeringOperation.OpcMetadata, nodes, owner, ct);
+        EnsureLocalEngineering(device);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct); timeout.CancelAfter(device.TimeoutMs);
         await using var session = new OpcCatalogSession(runtime, await runtime.ConnectAsync(device, timeout.Token));
         return await session.MetadataAsync(nodes, timeout.Token);

@@ -23,4 +23,8 @@
   </ItemGroup>
 
   <Import Project="..\..\src\Scada.ScriptWorker\Scada.ScriptWorker.targets" />
+
+  <ItemGroup>
+    <Compile Include="..\shared\TempCleanup.cs" Link="TempCleanup.cs" />
+  </ItemGroup>
 </Project>

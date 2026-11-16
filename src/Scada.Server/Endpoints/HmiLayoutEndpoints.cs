@@ -7,6 +7,7 @@ using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
+using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
@@ -51,10 +52,10 @@ public static class HmiLayoutEndpoints
             if (row is null || draft != true && row.PublishedJson is null) return Results.NotFound();
             return Results.Ok(View(row, draft == true));
         });
-        layouts.MapPost("", (HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveAsync(null, r, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapPut("/{id:int}", (int id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveAsync(id, r, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapPost("/{id:int}/publish", (int id, HmiLayoutPublishRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, null, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
-        layouts.MapPost("/{id:int}/rollback", (int id, HmiLayoutRollbackRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, r.TargetRevision, http, f, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPost("", (HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, HmiLayoutCommandService commands, CancellationToken ct) => SaveAsync(null, r, http, f, runtimeFactory, commands, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPut("/{id:int}", (int id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, HmiLayoutCommandService commands, CancellationToken ct) => SaveAsync(id, r, http, f, runtimeFactory, commands, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPost("/{id:int}/publish", (int id, HmiLayoutPublishRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, HmiLayoutCommandService commands, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, null, http, f, runtimeFactory, commands, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
+        layouts.MapPost("/{id:int}/rollback", (int id, HmiLayoutRollbackRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, HmiLayoutCommandService commands, CancellationToken ct) => PublishAsync(id, r.Revision, r.Note, r.TargetRevision, http, f, runtimeFactory, commands, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
         layouts.MapGet("/{id:int}/versions", async (int id, int? limit, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -122,69 +123,30 @@ public static class HmiLayoutEndpoints
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
     }
 
-    private static async Task<IResult> SaveAsync(int? id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
+    private static async Task<IResult> SaveAsync(int? id, HmiLayoutRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HmiLayoutCommandService commands, CancellationToken ct)
     {
-        var name = r.Name?.Trim() ?? "";
-        if (name.Length is 0 or > 100) return EndpointHelpers.BadRequest("名称须为 1～100 个字符");
-        if (HmiLayoutValidator.ValidateDraft(r.Document) is string error) return EndpointHelpers.BadRequest(error);
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var row = id is int rid ? await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == rid, ct) : null;
-        if (id is not null && row is null) return Results.NotFound();
-        if (await db.HmiLayouts.AnyAsync(x => x.Name == name && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("名称已存在");
-        if (row is not null && row.Revision != r.Revision) return Conflict();
-        var before = row is null ? null : View(row);
-        row ??= db.HmiLayouts.Add(new HmiLayout()).Entity;
-        if (before is not null) row.Revision++;
-        row.Name = name; row.DocumentJson = JsonSerializer.Serialize(r.Document, Json); row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-        try
-        {
-            await db.SaveChangesAsync(ct);
-            runtime.OperationLogs.Add(Audit.Change(http, $"{(before is null ? "新建" : "保存")}运行布局草稿 {name}", "HmiLayout", row.Id, before, View(row)));
-            await transaction.CommitAsync(ct);
-            await runtime.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException) { return Conflict(); }
-        return Results.Ok(View(row));
+        return Map(await commands.SaveAsync(db, runtime, id, r.Name, r.Document, r.Revision, http.User.GetUserName(), http.User.GetUserId(), ct));
     }
 
-    private static async Task<IResult> PublishAsync(int id, int revision, string? note, int? targetRevision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
+    private static async Task<IResult> PublishAsync(int id, int revision, string? note, int? targetRevision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HmiLayoutCommandService commands, CancellationToken ct)
     {
-        note = note?.Trim();
-        if (string.IsNullOrEmpty(note) || note.Length > 500) return EndpointHelpers.BadRequest("发布或回退说明须为 1～500 个字符");
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var row = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == id, ct);
-        if (row is null) return Results.NotFound();
-        if (row.Revision != revision) return Conflict();
-        var name = row.Name; var documentJson = row.DocumentJson;
-        if (targetRevision is int restore)
+        return Map(await commands.PublishAsync(db, runtime, id, revision, note, targetRevision, http.User.GetUserName(), http.User.GetUserId(), ct));
+    }
+
+    private static IResult Map(HmiLayoutCommandResult result)
+    {
+        if (result.Success) return Results.Ok(View(result.Layout!));
+        return result.Error switch
         {
-            var version = await db.HmiLayoutVersions.AsNoTracking().SingleOrDefaultAsync(x => x.LayoutId == id && x.Revision == restore, ct);
-            if (version is null) return Results.NotFound(new { message = "指定的布局发布版本不存在" });
-            name = version.Name; documentJson = version.DocumentJson;
-        }
-        HmiLayoutDocument? document;
-        try { document = JsonSerializer.Deserialize<HmiLayoutDocument>(documentJson, Json); }
-        catch (JsonException ex) { return EndpointHelpers.BadRequest($"布局文档格式无效：{ex.Message}"); }
-        var published = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
-        if (HmiLayoutValidator.Validate(document, published) is string error) return EndpointHelpers.BadRequest(error);
-        var before = View(row);
-        row.Revision++;
-        row.PublishedName = name; row.PublishedJson = documentJson; row.PublishedRevision = row.Revision;
-        row.PublishedTs = ScadaTime.NowMs(); row.PublishedBy = http.User.GetUserName();
-        db.HmiLayoutVersions.Add(new HmiLayoutVersion
-        {
-            LayoutId = row.Id, Revision = row.Revision, Name = name, DocumentJson = documentJson,
-            PublishedTs = row.PublishedTs.Value, PublishedBy = row.PublishedBy, Note = note,
-            RestoredFromRevision = targetRevision, Kind = targetRevision is null ? "publish" : "rollback"
-        });
-        runtime.OperationLogs.Add(Audit.Change(http, targetRevision is int from ? $"回退运行布局 {name} r{from} → r{row.Revision}：{note}" : $"发布运行布局 {name} r{row.Revision}：{note}", "HmiLayout", row.Id, before, View(row)));
-        try { await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtime.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException) { return Conflict(); }
-        return Results.Ok(View(row));
+            HmiLayoutCommandError.NotFound => Results.NotFound(),
+            HmiLayoutCommandError.VersionNotFound => Results.NotFound(new { message = result.Message }),
+            HmiLayoutCommandError.Conflict => Conflict(),
+            _ => EndpointHelpers.BadRequest(result.Message ?? "")
+        };
     }
 
     private static async Task<IResult> SaveStationAsync(int? id, HmiWorkstationRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)

@@ -79,6 +79,7 @@
 | `CollectorMinWorkerThreads` | `（无）` | — | 采集线程池最小线程数下限（0 不调整）。阻塞式驱动事务按线程计价， 设备数量大时抬高该值可避免线程注入延迟造成的采集抖动。 |
 | `ConfigRefreshSeconds` | `10` | ✓ | — |
 | `AllowPublicCollectorTargets` | `（无）` | — | — |
+| `LocalCollectionEnabled` | `true` | — | 本机进程内采集。默认开启，保持一体化部署。 设为 false 后 Server 不再连接现场设备；启用且未分配网关的设备会在保存、浏览与控制时被拒绝， 采集改走已登记的 Gateway.Host（可与中心同机回环）。这不是驱动插件进程隔离。 更改后需重启中心。回环 HTTP 还须同时打开 Gateway:AllowLoopbackHttp 与网关的 AllowLoopbackHttp。 |
 | `SeedDemoData` | `（无）` | ✓ | — |
 | `DesktopClient` | `new()` | ✓ | 桌面客户端集中运维：在线心跳阈值与版本门禁。 |
 | `ReverseProxy` | `new()` | ✓ | 反向代理：默认关闭，只信任显式列出的代理地址。 |

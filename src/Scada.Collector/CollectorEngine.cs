@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -100,17 +101,21 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         if (device.Enabled && tags.Count > 0 && _workers.TryGetValue(deviceId, out var worker)) return worker.Diagnostics(pending);
         var idle = new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.CollectionVersion).Snapshot(0, pending);
         // 启动失败要显式暴露，否则面板会一直显示"等待连接"，运维看不到真正的原因。
+        if (!_settings.Value.LocalCollectionEnabled && device.GatewayId is null)
+            return idle with { State = "Disabled", CurrentError = LocalCollection.DisabledMessage };
         if (_startFailures.TryGetValue(deviceId, out var startError))
             return idle with { State = "Faulted", CurrentError = startError };
         return !IsDeviceQuiescent(deviceId) ? idle with { State = "Stopping", CurrentError = "旧采集 I/O 尚未退出，暂不启动新任务" } : idle;
     }
 
-    public bool RequestReconnect(int deviceId)
+    public CollectorReconnectResult RequestReconnect(int deviceId)
     {
-        if (!_config.TryGetDevice(deviceId, out var device) || !device.Enabled || _config.TagsOfDevice(deviceId).Count == 0) return false;
+        if (!_settings.Value.LocalCollectionEnabled) return CollectorReconnectResult.LocalCollectionOff;
+        if (!_config.TryGetDevice(deviceId, out var device) || !device.Enabled || _config.TagsOfDevice(deviceId).Count == 0)
+            return CollectorReconnectResult.ConfigurationChanged;
         if (_workers.TryGetValue(deviceId, out var worker)) worker.RequestReconnect();
         if (!_workerTasks.TryGetValue(deviceId, out var task) || task.IsCompleted) RequestReload();
-        return true;
+        return CollectorReconnectResult.Ok;
     }
 
     public ChannelStatistics GetChannelStatistics(int channelId)
@@ -131,6 +136,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
     public Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
     {
         if (!_role.IsActive) throw new InvalidOperationException(_role.StandbyMessage);
+        if (!_settings.Value.LocalCollectionEnabled) throw new InvalidOperationException(LocalCollection.DisabledMessage);
         if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
             throw new InvalidOperationException("采集配置正在重新加载，请稍后重试");
         if (HasStuckIo(deviceId))
@@ -142,6 +148,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
     public async Task<CollectorProbeResult?> ProbeAsync(int deviceId, Tag tag, CancellationToken cancellationToken = default)
     {
         if (!_role.IsActive) throw new InvalidOperationException(_role.StandbyMessage);
+        if (!_settings.Value.LocalCollectionEnabled) throw new InvalidOperationException(LocalCollection.DisabledMessage);
         return _workers.TryGetValue(deviceId, out var worker) ? await worker.ProbeAsync(tag, cancellationToken) : null;
     }
 
@@ -153,6 +160,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
     {
         if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return CommandResults.Of(GatewayCommandOutcome.NotSent, "测点不是该设备的物理测点");
         if (!_role.IsActive) return CommandResults.Of(GatewayCommandOutcome.NotSent, _role.StandbyMessage);
+        if (!_settings.Value.LocalCollectionEnabled) return CommandResults.Of(GatewayCommandOutcome.NotSent, LocalCollection.DisabledMessage);
         if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
             return CommandResults.Of(GatewayCommandOutcome.NotSent, "采集配置正在重新加载，请稍后重试");
         if (HasStuckIo(deviceId))
@@ -174,6 +182,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return CommandResults.Of(GatewayCommandOutcome.NotSent, "测点不是该设备的物理测点");
         if (tag.DataType != TagDataType.String) return CommandResults.Of(GatewayCommandOutcome.NotSent, "测点不是字符串类型");
         if (!_role.IsActive) return CommandResults.Of(GatewayCommandOutcome.NotSent, _role.StandbyMessage);
+        if (!_settings.Value.LocalCollectionEnabled) return CommandResults.Of(GatewayCommandOutcome.NotSent, LocalCollection.DisabledMessage);
         if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
             return CommandResults.Of(GatewayCommandOutcome.NotSent, "采集配置正在重新加载，请稍后重试");
         if (HasStuckIo(deviceId))
@@ -318,7 +327,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         _workerCts ??= CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         // 备机不采集：不建立任何设备连接，避免与主机同时轮询现场（部分设备只允许单连接）。
-        var enabledDevices = _role.IsActive ? _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList() : [];
+        var enabledDevices = _role.IsActive && _settings.Value.LocalCollectionEnabled ? _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList() : [];
         if (!_role.IsActive) { _statuses.Clear(); _statusEpochs.Clear(); }
 
         var wanted = new Dictionary<int, (Device Device, IReadOnlyList<Tag> Tags, string Fingerprint)>();

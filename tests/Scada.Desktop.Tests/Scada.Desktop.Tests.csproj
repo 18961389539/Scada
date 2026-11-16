@@ -27,4 +27,8 @@
     </ItemGroup>
   </Target>
 
+
+  <ItemGroup>
+    <Compile Include="..\shared\TempCleanup.cs" Link="TempCleanup.cs" />
+  </ItemGroup>
 </Project>

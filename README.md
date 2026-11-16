@@ -37,6 +37,8 @@ Never rebuild/publish over a running instance or an output folder with site data
 
 ## Deployment and acceptance
 
+- Optional same-machine isolation: disable in-process collection and route devices through `Gateway.Host` on loopback. See [docs/local-collection.md](docs/local-collection.md). The default remains the combined in-process collector.
+
 - [Unified publishing and release verification](docs/publishing.md)
 - [History storage, query budgets and capacity baseline](docs/history-capacity.md)
 - [Software licensing and activation](docs/licensing.md)

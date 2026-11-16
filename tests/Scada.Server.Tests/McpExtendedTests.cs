@@ -119,7 +119,7 @@ public sealed class McpExtendedTests : IClassFixture<McpExtendedTests.Site>
     {
         public int DeviceId { get; set; }
         public int Reconnects { get; private set; }
-        public bool RequestReconnect(int deviceId) { Reconnects++; throw new InvalidOperationException("MCP must not reconnect."); }
+        public CollectorReconnectResult RequestReconnect(int deviceId) { Reconnects++; throw new InvalidOperationException("MCP must not reconnect."); }
         public CollectorDeviceDiagnostics? GetDiagnostics(int deviceId)
         {
             if (deviceId != DeviceId) return null;

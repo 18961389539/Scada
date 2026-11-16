@@ -1,0 +1,9 @@
+{
+  "GatewayAgent": {
+    "ServerUrl": "http://127.0.0.1:5080/",
+    "AllowLoopbackHttp": true,
+    "GatewayId": 1,
+    "Token": "replace-with-the-token-issued-when-registering-the-gateway",
+    "DataRoot": "data/gateway-local"
+  }
+}

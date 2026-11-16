@@ -20,11 +20,11 @@ namespace Scada.Server.Mcp;
 // 修改类工具只覆盖显式传入的字段：不传即保持不变，避免 LLM 因为漏字段把配置改回默认值。
 [McpServerToolType]
 public sealed class McpMasterDataTools(
-    AccessModelProvider accessModels,
     IDbContextFactory<ConfigDbContext> factory,
     AlarmRuleCommandService alarmRules,
     TagCommandService tags,
     DeviceCommandService deviceCommands,
+    AreaCommandService areas,
     IDeviceCredentials deviceCredentials,
     McpIdempotency idempotency)
 {
@@ -37,17 +37,8 @@ public sealed class McpMasterDataTools(
         [Description(McpIdempotency.Hint)] Guid? requestId = null) =>
         idempotency.RunAsync("create_area", requestId, cancellationToken, async () =>
         {
-            var clean = RequiredText(name?.Trim(), 100, "name");
-            var note = OptionalText(string.IsNullOrWhiteSpace(description) ? null : description.Trim(), 500, "description");
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
-            if (await db.Areas.AnyAsync(x => x.Name == clean, cancellationToken))
-                return new McpAreaSaved(0, false, "区域名称已存在。", clean, note, ScadaTime.NowMs());
-            var area = new Area { Name = clean, Description = note };
-            db.Areas.Add(area);
-            // 审计由 AuditInterceptor 自动写。
-            await db.SaveChangesAsync(cancellationToken);
-            accessModels.Invalidate();
-            return new McpAreaSaved(area.Id, true, "Created.", area.Name, area.Description, ScadaTime.NowMs());
+            return MapArea(await areas.CreateAsync(db, name, description, cancellationToken), created: true);
         });
 
     [McpServerTool(Name = "update_area", ReadOnly = false, Idempotent = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -58,17 +49,7 @@ public sealed class McpMasterDataTools(
     {
         if (areaId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "areaId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == areaId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
-        var clean = name is null ? area.Name : RequiredText(name.Trim(), 100, "name");
-        var note = description is null ? area.Description : OptionalText(description.Trim(), 500, "description");
-        if (await db.Areas.AnyAsync(x => x.Id != areaId && x.Name == clean, cancellationToken))
-            return new(areaId, false, "区域名称已存在。", clean, note, ScadaTime.NowMs());
-        area.Name = clean;
-        area.Description = note;
-        await db.SaveChangesAsync(cancellationToken);
-        accessModels.Invalidate();
-        return new(area.Id, true, "Updated.", area.Name, area.Description, ScadaTime.NowMs());
+        return MapArea(await areas.UpdateAsync(db, areaId, name, name is not null, description, description is not null, cancellationToken));
     }
 
     [McpServerTool(Name = "delete_area", ReadOnly = false, Destructive = true, OpenWorld = false, UseStructuredContent = true)]
@@ -76,20 +57,10 @@ public sealed class McpMasterDataTools(
     public async Task<McpMasterDeleted> DeleteArea(int areaId, CancellationToken cancellationToken)
     {
         if (areaId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "areaId must be positive.");
-        if (areaId == Area.DefaultId) return new(areaId, false, "默认区域不能删除。", ScadaTime.NowMs());
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
-        var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == areaId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
-        if (await db.Devices.AnyAsync(x => x.AreaId == areaId, cancellationToken))
-            return new(areaId, false, "区域内仍有设备，请先移走设备。", ScadaTime.NowMs());
-        if (await db.Tags.AnyAsync(x => x.AreaId == areaId, cancellationToken))
-            return new(areaId, false, "仍有计算测点指定了该区域。", ScadaTime.NowMs());
-        if (await db.UserRoleAssignments.AnyAsync(x => x.AreaId == areaId, cancellationToken))
-            return new(areaId, false, "仍有用户授权限定在该区域，请先调整授权。", ScadaTime.NowMs());
-        db.Areas.Remove(area);
-        await db.SaveChangesAsync(cancellationToken);
-        accessModels.Invalidate();
-        return new(areaId, true, "Deleted.", ScadaTime.NowMs());
+        var result = await areas.DeleteAsync(db, areaId, cancellationToken);
+        if (result.Error is AreaCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
+        return new(areaId, result.Success, result.Success ? "Deleted." : result.Message ?? "Rejected.", ScadaTime.NowMs());
     }
 
     // ---------- 设备 ----------
@@ -445,6 +416,18 @@ public sealed class McpMasterDataTools(
 
     // ---------- 辅助 ----------
 
+
+
+    private static McpAreaSaved MapArea(AreaCommandResult result, bool created = false)
+    {
+        var now = ScadaTime.NowMs();
+        if (result.Error is AreaCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
+        if (result.Error is AreaCommandError.InvalidName)
+            throw new McpToolException(McpErrorCodes.InvalidArgument, result.Message ?? AreaCommandService.InvalidNameMessage);
+        var area = result.Area;
+        var message = result.Success ? (created ? "Created." : "Updated.") : (result.Message ?? "Rejected.");
+        return new(area?.Id ?? 0, result.Success, message, area?.Name ?? "", area?.Description, now);
+    }
 
     public sealed record McpAreaSaved(int AreaId, bool Success, string Message, string Name, string? Description, long DataAsOf);
     public sealed record McpDeviceSaved(int DeviceId, bool Success, string Message, string Name, int AreaId, bool Enabled, long DataAsOf);

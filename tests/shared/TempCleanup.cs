@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Scada.Server.Tests;
+namespace Scada.Tests;
 
 /// <summary>
 /// 临时目录的最后一道兜底。
@@ -73,7 +73,12 @@ internal static class TempCleanup
     /// </summary>
     public static void FlushAtExit()
     {
-        try { global::Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools(); }
+        try
+        {
+            // 部分测试项目不引用 Microsoft.Data.Sqlite，用反射清池，避免为挂钩清理而增加程序集依赖。
+            var type = Type.GetType("Microsoft.Data.Sqlite.SqliteConnection, Microsoft.Data.Sqlite");
+            type?.GetMethod("ClearAllPools")?.Invoke(null, null);
+        }
         catch (Exception) { /* 退出路径上不抛 */ }
         Flush();
         // 不再需要「把剩余路径落盘」：Track 时已经逐条追加过了，这里只管尽力删。

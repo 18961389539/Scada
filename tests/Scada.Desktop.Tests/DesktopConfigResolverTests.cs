@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Scada.Desktop.Configuration;
+using Scada.Tests;
 
 namespace Scada.Desktop.Tests;
 
@@ -115,6 +116,7 @@ public sealed class DesktopConfigResolverTests
     public void CorruptMachineFileFallsBackWithError()
     {
         var directory = Path.Combine(Path.GetTempPath(), "scada-desktop-tests", Guid.NewGuid().ToString("N"));
+        TempCleanup.Track(directory);
         Directory.CreateDirectory(directory);
         try
         {

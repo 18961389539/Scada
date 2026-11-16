@@ -51,7 +51,10 @@ public static class CollectorDiagnosticEndpoints
             runtime.OperationLogs.Add(new OperationLog { UserId = http.User.GetUserId(), UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(), Action = $"请求采集重连：设备 #{id} {snapshot.Name}", Result = "管理员请求" });
             await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
-            return collector.RequestReconnect(id) ? Results.Accepted(value: new { message = "已请求重连，将在当前采集及排队命令结束后执行" }) : Results.Conflict(new { message = "设备配置已变化，请刷新后重试" });
+            var reconnect = collector.RequestReconnect(id);
+            return reconnect.Accepted
+                ? Results.Accepted(value: new { message = "已请求重连，将在当前采集及排队命令结束后执行" })
+                : Results.Conflict(new { message = reconnect.Message });
         }));
     }
     private static void Validate(CollectorDeviceDiagnostics? snapshot, int deviceId, int gatewayId)

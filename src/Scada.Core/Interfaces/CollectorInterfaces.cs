@@ -1,4 +1,5 @@
 using Scada.Core.Entities;
+using Scada.Core;
 using Scada.Core.Models;
 
 namespace Scada.Core.Interfaces;
@@ -71,10 +72,19 @@ public interface ICollectorControl
     void RequestReload();
 }
 
+public readonly record struct CollectorReconnectResult(bool Accepted, bool LocalCollectionDisabled, string Message)
+{
+    public static CollectorReconnectResult Ok { get; } = new(true, false, "");
+    public static CollectorReconnectResult ConfigurationChanged { get; } =
+        new(false, false, "设备配置已变化，请刷新后重试");
+    public static CollectorReconnectResult LocalCollectionOff { get; } =
+        new(false, true, LocalCollection.DisabledMessage);
+}
+
 public interface ICollectorDiagnostics
 {
     CollectorDeviceDiagnostics? GetDiagnostics(int deviceId);
-    bool RequestReconnect(int deviceId);
+    CollectorReconnectResult RequestReconnect(int deviceId);
     // 共享通道的总线级观测：占用率、排队、成员争用。没有运行中的通道时返回全零快照。
     ChannelStatistics GetChannelStatistics(int channelId)
         => new(channelId, "", "", "", false, 0, 0, 0, 0, 0, 0, 0, null, ScadaTime.NowMs(), []);

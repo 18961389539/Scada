@@ -152,7 +152,8 @@ public static class ProtocolForms
         DefaultPort: 47808,
         Fields:
         [
-            FormField.Number("deviceInstance", 0, labelKey: "protocols.k9b82e7", min: 0, max: 4194302, helpKey: "protocols.k0ded08"),
+            // Below-minimum default is an unset sentinel: clients must omit it until explicitly entered.
+            FormField.Number("deviceInstance", -1, labelKey: "protocols.k9b82e7", min: 0, max: 4194302, helpKey: "protocols.k0ded08"),
             FormField.Bool("whoIs", true, labelKey: "protocols.k1be3a9", helpKey: "protocols.ka3015e"),
             FormField.Number("writePriority", 8, labelKey: "protocols.k5d6d59", min: 1, max: 16, helpKey: "protocols.ka31759"),
             FormField.Bool("readMultiple", true, label: "ReadPropertyMultiple", helpKey: "protocols.k7f4060"),

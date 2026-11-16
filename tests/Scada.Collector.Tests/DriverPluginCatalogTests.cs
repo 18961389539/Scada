@@ -1,3 +1,4 @@
+using Scada.Tests;
 using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -177,6 +178,8 @@ public class DriverPluginCatalogTests
         public CompiledPlugin(string assemblyName, ProtocolType protocol, string providerName, bool withDependency = false)
         {
             _workspace = Path.Combine(Path.GetTempPath(), "scada-plugin-tests", $"{assemblyName}-{Guid.NewGuid():N}");
+            Directory.CreateDirectory(_workspace);
+            TempCleanup.Track(_workspace);
             Root = Path.Combine(_workspace, "plugins");
             Directory.CreateDirectory(Path.Combine(_workspace, "src"));
             Directory.CreateDirectory(Root);

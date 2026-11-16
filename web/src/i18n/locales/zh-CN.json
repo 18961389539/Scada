@@ -3599,6 +3599,7 @@
   "closeAll": "关闭全部标签页",
   "closeDialog": "关闭",
   "closeOthers": "关闭其他标签页",
+  "closeRight": "关闭右侧标签页",
   "closeTab": "关闭标签页",
   "duplicateTab": "复制标签页",
   "emptyHint": "从画面目录选择一个已发布画面，开始多页面监控。",
@@ -3607,6 +3608,7 @@
   "loadFailed": "画面目录加载失败",
   "maxTabs": "最多同时打开 {0} 个画面",
   "noMatches": "没有匹配的画面",
+  "noClosedTabs": "没有可恢复的标签页",
   "noScreens": "暂无可打开的画面",
   "noTabs": "还没有打开画面",
   "openFailed": "该画面尚未发布或当前账号不可见",
@@ -3620,6 +3622,7 @@
   "refresh": "刷新画面目录",
   "reloadTab": "重新加载标签页",
   "removed": "部分画面已不可用，已从工作台移除",
+  "reopenTab": "恢复关闭的标签页",
   "retry": "重试",
   "searchPlaceholder": "搜索画面名称或编号",
   "shortcuts": "Ctrl+Tab 切换 · Ctrl+W 关闭 · Alt+←/→ 前后退",
@@ -4462,5 +4465,10 @@
   "stopBits": "停止位",
   "timeout": "超时（毫秒）",
   "title": "通道"
+ },
+ "protocolRecovery": {
+  "title": "协议目录加载失败",
+  "hint": "为防止缺失协议参数，组态页面暂不可用，运行监视不受此限制。请检查服务连接后重试。",
+  "retry": "重新加载协议目录"
  }
 }

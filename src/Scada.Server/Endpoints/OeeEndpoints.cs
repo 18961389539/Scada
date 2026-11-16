@@ -10,6 +10,8 @@ using Scada.Server.Auth;
 using Scada.Server.Localization;
 using Scada.Server.Reports;
 
+using Scada.Server.Services;
+
 namespace Scada.Server.Endpoints;
 
 public sealed record OeeThresholdsRequest(OeeThresholds Thresholds, long Revision = 0);
@@ -174,20 +176,22 @@ public static class OeeEndpoints
             await rollups.RequestRebuildAsync(row.StartTs, ct);
             return Results.Ok(DowntimeView(row, line.Name));
         });
-        group.MapPost("/downtimes/{id:long}/confirm", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, OeeRollupService rollups, CancellationToken ct) =>
+        group.MapPost("/downtimes/{id:long}/confirm", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, OeeRollupService rollups, DowntimeCommandService downtimes, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var row = await runtime.DowntimeEvents.SingleOrDefaultAsync(x => x.Id == id, ct);
-            if (row is null) return Results.NotFound();
-            var line = await db.ProductionLines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.LineId, ct);
-            if (line is null || !(await http.GetAccessAsync()).Has(Permission.Control, line.AreaId)) return await Audit.ForbidAsync(http, "确认停机", "无该区域的控制权限", "DowntimeEvent", id);
-            row.Confirmed = true; row.UpdatedBy = http.User.GetUserName(); row.UpdatedTs = ScadaTime.NowMs();
-            runtime.OperationLogs.Add(Audit.Change(http, $"确认停机候选 #{id}", "DowntimeEvent", id, new { confirmed = false }, new { confirmed = true }));
-            await db.SaveChangesAsync(ct);
-            await runtime.SaveChangesAsync(ct);
-            await rollups.RequestRebuildAsync(row.StartTs, ct);
-            return Results.Ok(DowntimeView(row, line.Name));
+            var existing = await runtime.DowntimeEvents.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (existing is null) return Results.NotFound();
+            var existingLine = await db.ProductionLines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == existing.LineId, ct);
+            if (existingLine is null || !(await http.GetAccessAsync()).Has(Permission.Control, existingLine.AreaId))
+                return await Audit.ForbidAsync(http, "确认停机", "无该区域的控制权限", "DowntimeEvent", id);
+            var result = await downtimes.ConfirmAsync(db, runtime, rollups, id, null, null, false, http.User.GetUserName(),
+                (row, line, already, _, _, _) => runtime.OperationLogs.Add(Audit.Change(http, $"确认停机候选 #{id}", "DowntimeEvent", id, new { confirmed = already }, new { confirmed = true })),
+                ct);
+            if (result.Error is DowntimeCommandError.NotFound) return Results.NotFound();
+            if (result.Error is DowntimeCommandError.LineMissing)
+                return await Audit.ForbidAsync(http, "确认停机", "无该区域的控制权限", "DowntimeEvent", id);
+            return Results.Ok(DowntimeView(result.Event!, result.Line!.Name));
         });
         group.MapDelete("/downtimes/{id:long}", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, OeeRollupService rollups, CancellationToken ct) =>
         {

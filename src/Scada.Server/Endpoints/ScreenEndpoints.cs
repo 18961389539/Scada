@@ -127,52 +127,24 @@ public static class ScreenEndpoints
             return Results.Ok(new ScreenThumbnail(document.Width, document.Height, document.Background ?? "#101b2d", source.Count > 400, nodes));
         });
 
-        group.MapPost("", async (ScreenCreateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapPost("", async (ScreenCreateRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ScreenCommandService screens, CancellationToken ct) =>
         {
-            if (!ValidName(request.Name)) return EndpointHelpers.BadRequest("画面名称须为 1～100 个字符");
-            var access = await http.GetAccessAsync();
-            if (!Screens.ScreenAreaRules.CanEdit(access, request.AreaId)) return Denied();
+            if (!Screens.ScreenAreaRules.CanEdit(await http.GetAccessAsync(), request.AreaId)) return Denied();
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            if (request.AreaId is int areaId && !await db.Areas.AnyAsync(x => x.Id == areaId, ct)) return EndpointHelpers.BadRequest("区域不存在");
-            var screen = new ProcessScreen
-            {
-                Name = request.Name.Trim(), AreaId = request.AreaId, DraftJson = JsonSerializer.Serialize(new ScreenDocument(), Json),
-                UpdatedTs = ScadaTime.NowMs(), UpdatedBy = http.User.GetUserName()
-            };
-            db.ProcessScreens.Add(screen);
-            AuditAction(runtime, http, $"创建画面 {screen.Name}");
-            await db.SaveChangesAsync(ct);
-            return Results.Created($"/api/screens/{screen.Id}", new { screen.Id, screen.Revision, screen.AreaId });
+            return MapWrite(await screens.CreateAsync(db, runtime, request.Name, request.AreaId, http.User.GetUserName(), http.User.GetUserId(), ct), created: true);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        group.MapPut("/{id:int}", async (int id, ScreenSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapPut("/{id:int}", async (int id, ScreenSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ScreenCommandService screens, CancellationToken ct) =>
         {
-            if (!ValidName(request.Name)) return EndpointHelpers.BadRequest("画面名称须为 1～100 个字符");
-            if (request.Document is null) return EndpointHelpers.BadRequest("画面内容不能为空");
-            var shapeIssues = ScreenValidator.Validate(request.Document);
-            if (shapeIssues.Count > 0) return Results.BadRequest(new { message = "画面格式无效", issues = shapeIssues });
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (screen is null) return Results.NotFound();
-            if (screen.Revision != request.Revision) return Conflict();
-            var nextArea = request.UpdateArea ? request.AreaId : screen.AreaId;
-            if (!Screens.ScreenAreaRules.CanEdit(access, screen.AreaId) || !Screens.ScreenAreaRules.CanEdit(access, nextArea)) return Denied();
-            if (nextArea is int next && !await db.Areas.AnyAsync(x => x.Id == next, ct)) return EndpointHelpers.BadRequest("区域不存在");
-            if (await Screens.ScreenAreaRules.MismatchAsync(db, nextArea, request.Document, ct) is string mismatch) return EndpointHelpers.BadRequest(mismatch);
-            screen.AreaId = nextArea;
-            screen.Name = request.Name.Trim();
-            screen.DraftJson = JsonSerializer.Serialize(request.Document, Json);
-            screen.DraftDirty = true;
-            screen.Revision++;
-            screen.UpdatedTs = ScadaTime.NowMs();
-            screen.UpdatedBy = http.User.GetUserName();
-            AuditAction(runtime, http, $"保存画面 {screen.Name} r{screen.Revision}");
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); }
-            catch (DbUpdateConcurrencyException) { return Conflict(); }
-            return Results.Ok(new { screen.Id, screen.Revision, screen.AreaId });
+            var current = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (current is null) return Results.NotFound();
+            var nextArea = request.UpdateArea ? request.AreaId : current.AreaId;
+            if (!Screens.ScreenAreaRules.CanEdit(access, current.AreaId) || !Screens.ScreenAreaRules.CanEdit(access, nextArea)) return Denied();
+            return MapWrite(await screens.SaveDraftAsync(db, runtime, id, request.Name, request.Revision, request.Document, request.AreaId, request.UpdateArea, http.User.GetUserName(), http.User.GetUserId(), ct));
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapPost("/validate", async (ScreenDocument document, int? screenId, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
@@ -246,11 +218,11 @@ public static class ScreenEndpoints
                 ReferencedBy = referencedBy.Select(x => new { x.Id, x.Name }).ToList(), Unreadable = unreadable
             });
         }).RequireAuthorization(AccessPolicies.Configure);
-        group.MapPost("/{id:int}/publish", (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Server.Projects.ProjectService projects, ScreenPublicationNotifier notifier, CancellationToken ct) =>
-            PublishAsync(id, request.Revision, null, request.Note, http, factory, runtimeFactory, projects, notifier, ct)).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/{id:int}/publish", (int id, ScreenRevisionRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ScreenCommandService screens, CancellationToken ct) =>
+            PublishAsync(id, request.Revision, null, request.Note, http, factory, runtimeFactory, screens, ct)).RequireAuthorization(AccessPolicies.Configure);
 
-        group.MapPost("/{id:int}/rollback", (int id, ScreenRollbackRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Server.Projects.ProjectService projects, ScreenPublicationNotifier notifier, CancellationToken ct) =>
-            PublishAsync(id, request.Revision, request.TargetRevision, request.Note, http, factory, runtimeFactory, projects, notifier, ct)).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/{id:int}/rollback", (int id, ScreenRollbackRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ScreenCommandService screens, CancellationToken ct) =>
+            PublishAsync(id, request.Revision, request.TargetRevision, request.Note, http, factory, runtimeFactory, screens, ct)).RequireAuthorization(AccessPolicies.Configure);
 
         // 运行端异常上报：只写健康摘要与审计，不改变画面配置；同一画面同类异常由服务端节流。
         group.MapPost("/{id:int}/runtime-report", async (int id, ScreenRuntimeReportRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ScreenRuntimeHealth health, CancellationToken ct) =>
@@ -314,82 +286,49 @@ public static class ScreenEndpoints
     }
 
     private static async Task<IResult> PublishAsync(int id, int revision, int? targetRevision, string? note, HttpContext http,
-        IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Server.Projects.ProjectService projects,
-        ScreenPublicationNotifier notifier, CancellationToken ct)
+        IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ScreenCommandService screens, CancellationToken ct)
     {
-        var text = note?.Trim() ?? "";
-        if (text.Length > 500 || targetRevision is not null && text.Length == 0)
-            return EndpointHelpers.BadRequest(targetRevision is null ? "发布说明最多 500 个字符" : "回退说明须为 1～500 个字符");
-        if (targetRevision is <= 0) return EndpointHelpers.BadRequest("目标版本须为正整数");
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var screen = await db.ProcessScreens.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (screen is null) return Results.NotFound();
-        if (screen.Revision != revision) return Conflict();
-        if (!Screens.ScreenAreaRules.CanEdit(await http.GetAccessAsync(), screen.AreaId)) return Denied();
-        var json = screen.DraftJson;
-        var name = screen.Name;
-        if (targetRevision is int target)
+        var current = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (current is null) return Results.NotFound();
+        if (!Screens.ScreenAreaRules.CanEdit(await http.GetAccessAsync(), current.AreaId)) return Denied();
+        var result = await screens.PublishAsync(db, runtime, id, revision, targetRevision, note, http.User.GetUserName(), http.User.GetUserId(), ct);
+        if (result.Success)
         {
-            var version = await db.ProcessScreenVersions.AsNoTracking().SingleOrDefaultAsync(x => x.ScreenId == id && x.Revision == target, ct);
-            if (version is null) return Results.NotFound();
-            json = version.DocumentJson; name = version.Name;
+            var warning = result.SnapshotFailed
+                ? "运行画面已更新，但自动创建配置快照失败，请在工程管理中手动创建快照；详情见系统告警"
+                : (string?)null;
+            return Results.Ok(new { result.Screen!.Id, result.Screen.Revision, result.Screen.PublishedRevision, versionId = result.ConfigVersionId, warning, warnings = result.Warnings });
         }
-        ScreenDocument? document;
-        try { document = JsonSerializer.Deserialize<ScreenDocument>(json, Json); }
-        catch (JsonException) { return EndpointHelpers.BadRequest("画面内容无法解析"); }
-        if (document is null) return EndpointHelpers.BadRequest("画面内容不能为空");
-        if (await Screens.ScreenAreaRules.MismatchAsync(db, screen.AreaId, document, ct) is string mismatch) return EndpointHelpers.BadRequest(mismatch);
-        IReadOnlyList<ScreenIssue> warnings = [];
-        if (targetRevision is not null)
-        {
-            var issues = await Screens.ScreenPublication.ValidatePublishedAsync(db, document, id, ct);
-            if (issues.Count > 0) return Results.BadRequest(new
-            {
-                message = Screens.ScreenPublication.RequiresRepublish(document) ? Screens.ScreenPublication.RepublishMessage : "回退校验未通过", issues
-            });
-        }
-        else
-        {
-            var publication = await Screens.ScreenPublication.PrepareAsync(db, document, id, ct);
-            if (publication.Issues.Count > 0) return Results.BadRequest(new { message = "发布校验未通过", issues = publication.Issues, warnings = publication.Warnings });
-            warnings = publication.Warnings;
-            json = JsonSerializer.Serialize(publication.Document, Json);
-        }
-        await ProcessScreenHistory.PreserveCurrentAsync(db, screen, ct);
-        screen.PublishedJson = json; screen.PublishedName = name;
-        // Publishing changes the edit revision, but rollback must not replace the draft.
-        screen.Revision++;
-        screen.PublishedRevision = screen.Revision;
-        screen.DraftDirty = targetRevision is not null;
-        screen.UpdatedTs = ScadaTime.NowMs(); screen.UpdatedBy = http.User.GetUserName();
-        var kind = targetRevision is null ? "publish" : "rollback";
-        var action = targetRevision is int from ? $"回退画面 {name} r{from} → r{screen.Revision}：{text}" : $"发布画面 {name} r{screen.Revision}";
-        ProcessScreenHistory.Record(db, screen, screen.UpdatedTs, screen.UpdatedBy, text, kind, targetRevision);
-        AuditAction(runtime, http, action);
-        try
-        {
-            await db.SaveChangesAsync(ct);
-            await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
-            await transaction.CommitAsync(ct);
-            await runtime.SaveChangesAsync(ct);
-        }
-        catch (DbUpdateConcurrencyException) { return Conflict(); }
-        await notifier.NotifyAsync(screen.Id, screen.PublishedRevision, screen.PublishedName, CancellationToken.None);
-        int? versionId = null; string? warning = null;
-        try { versionId = (await projects.SnapshotAsync("screen-" + kind, action, http.User.GetUserId(), http.User.GetUserName(), CancellationToken.None)).Id; }
-        catch (Exception ex)
-        {
-            projects.ReportSnapshotFailure(action, ex);
-            warning = "运行画面已更新，但自动创建配置快照失败，请在工程管理中手动创建快照；详情见系统告警";
-        }
-        return Results.Ok(new { screen.Id, screen.Revision, screen.PublishedRevision, versionId, warning, warnings });
+        return MapWrite(result);
     }
 
-    private static bool ValidName(string? name) => !string.IsNullOrWhiteSpace(name) && name.Trim().Length <= 100;
     private static string? ShortThumbnailText(string? text) =>
         string.IsNullOrWhiteSpace(text) ? null : text.Length <= 40 ? text : text[..40];
+    private static IResult MapWrite(ScreenCommandResult result, bool created = false)
+    {
+        if (result.Success)
+        {
+            var body = new { result.Screen!.Id, result.Screen.Revision, result.Screen.AreaId };
+            return created ? Results.Created($"/api/screens/{result.Screen.Id}", body) : Results.Ok(body);
+        }
+        return result.Error switch
+        {
+            ScreenCommandError.InvalidName => EndpointHelpers.BadRequest("画面名称须为 1～100 个字符"),
+            ScreenCommandError.InvalidNote => EndpointHelpers.BadRequest(result.Message ?? "说明无效"),
+            ScreenCommandError.InvalidDocument => Results.BadRequest(new { message = "画面格式无效", issues = result.Issues }),
+            ScreenCommandError.EmptyDocument => EndpointHelpers.BadRequest("画面内容不能为空"),
+            ScreenCommandError.Unreadable => EndpointHelpers.BadRequest("画面内容无法解析"),
+            ScreenCommandError.AreaMissing => EndpointHelpers.BadRequest("区域不存在"),
+            ScreenCommandError.AreaMismatch => EndpointHelpers.BadRequest(result.Message ?? "画面绑定了其他区域的测点"),
+            ScreenCommandError.NotFound or ScreenCommandError.VersionNotFound => Results.NotFound(),
+            ScreenCommandError.Conflict => Conflict(),
+            ScreenCommandError.ValidationFailed => Results.BadRequest(new { message = result.Message ?? "发布校验未通过", issues = result.Issues, warnings = result.Warnings }),
+            _ => EndpointHelpers.BadRequest(result.Message ?? "画面写入失败")
+        };
+    }
+
     private static IResult Denied() => Results.Json(new { message = "需要该画面所属区域的配置权限" }, statusCode: StatusCodes.Status403Forbidden);
     private static async Task<IResult?> GuardAsync(HttpContext http, ConfigDbContext db, int id, CancellationToken ct)
     {

@@ -94,17 +94,40 @@ export const textProtocols = shallowRef<ProtocolDef[]>([])
 
 let pending: Promise<void> | null = null
 let loaded = false
+// Session-local only: do not persist metadata across users or deployments.
+export const protocolCatalogError = shallowRef(false)
+export const protocolCatalogLoading = shallowRef(false)
+let generation = 0
+export function resetProtocolCatalog(): void {
+  generation++
+  loaded = false
+  pending = null
+  textProtocols.value = []
+  protocolCatalogError.value = false
+  protocolCatalogLoading.value = false
+}
 
 export async function ensureProtocolCatalog(): Promise<void> {
   if (loaded) return
   if (!pending) {
+    const requestGeneration = generation
+    protocolCatalogLoading.value = true
     pending = (async () => {
       const { data } = await http.get<ProtocolCatalogItem[]>('/protocols')
-      textProtocols.value = (data ?? []).map(localizeProtocol)
+      if (!Array.isArray(data) || data.length === 0) throw new Error('Empty protocol catalog')
+      const catalog = data.map(localizeProtocol)
+      if (requestGeneration !== generation) return
+      textProtocols.value = catalog
+      protocolCatalogError.value = false
       loaded = true
     })().catch(error => {
-      pending = null
+      if (requestGeneration === generation) {
+        protocolCatalogError.value = true
+        pending = null
+      }
       throw error
+    }).finally(() => {
+      if (requestGeneration === generation) protocolCatalogLoading.value = false
     })
   }
   await pending
@@ -130,7 +153,9 @@ export function protocolLabel(protocol: string): string {
 export function isTextProtocol(protocol?: string): boolean { return protocolDef(protocol) !== undefined }
 
 export function defaultOptions(def: ProtocolDef): Record<string, string | number | boolean> {
-  return Object.fromEntries(def.fields.map(f => [f.key, f.default]))
+  // A numeric sentinel below the valid range means "must be explicitly entered".
+  // Omit it, so Element Plus renders an empty input and JSON cannot silently send 0.
+  return Object.fromEntries(def.fields.filter(f => !(f.type === 'number' && typeof f.default === 'number' && f.min != null && f.default < f.min)).map(f => [f.key, f.default]))
 }
 
 /** 解析已保存的协议参数 JSON，缺失字段补默认值，未知字段保留。 */
@@ -139,4 +164,13 @@ export function parseOptions(def: ProtocolDef | undefined, json: string | undefi
   let saved: Record<string, string | number | boolean> = {}
   try { saved = json ? JSON.parse(json) : {} } catch { saved = {} }
   return { ...defaultOptions(def), ...saved }
+}
+
+/** Numeric metadata with an out-of-range default requires an explicit, finite input. */
+export function protocolOptionsComplete(def: ProtocolDef | undefined, values: Record<string, string | number | boolean>): boolean {
+  return !def || def.fields.every(f => {
+    if (f.type !== 'number' || typeof f.default !== 'number' || f.min == null || f.default >= f.min) return true
+    const value = values[f.key]
+    return typeof value === 'number' && Number.isInteger(value) && value >= f.min && (f.max == null || value <= f.max)
+  })
 }

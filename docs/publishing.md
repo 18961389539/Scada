@@ -108,6 +108,10 @@ dotnet .\Scada.Server.dll --environment=Development --contentRoot="$PWD" --Kestr
 Do not use the development preview as a production deployment. Set explicit
 data directories and production secrets before connecting field equipment.
 
+## Optional Loopback Collection via Gateway.Host
+
+In-process collection remains the default. To keep the Server from opening field connections and route all enabled devices through a same-machine `Gateway.Host`, set `Scada:LocalCollectionEnabled` to `false`, assign every enabled device a `GatewayId`, and enable `Gateway:AllowLoopbackHttp` on the Server plus `GatewayAgent:AllowLoopbackHttp` on the agent. See [local collection](local-collection.md). This is a limited, supported optional mode — it is not plugin process isolation, and `reconnect_device` over MCP still does not issue gateway engineering commands. Do not start a real control link to verify the mode.
+
 ## Desktop Interaction: Tray Icon, Startup Failures and Logs
 
 Interactive Windows starts keep a notification-area icon. Double-click it to
@@ -471,3 +475,44 @@ The Chromium/Edge navigation regression also disables cache and tests login at
 150 ms latency and 200,000 bytes/second download, requiring editable login fields
 within 20 seconds and no eager chart/editor requests. This is a reproducible
 browser-emulation check, not a substitute for testing the site's real network.
+
+
+### Backup encryption: first setup and plaintext migration (2026-11-16)
+
+Production startup now warns when `Scada:BackupPassword` is empty. Local plaintext backups remain
+available for compatibility, but **Directory and S3 offsite targets refuse plaintext before any
+remote call or remote retention deletion**. A failed offsite target is recorded in backup runs
+and surfaced through the existing health warning. Renaming `.zip` to `.enc` does not bypass the check.
+
+For Windows first setup, in a stopped-server maintenance window run the repository tool:
+
+```powershell
+.\tools\deployment\Set-BackupPassword.ps1 -SiteSettingsPath 'D:\ScadaData\appsettings.Site.json'
+```
+
+It prompts twice without echo, accepts at least 12 characters, preserves unrelated settings and
+copies the existing file ACL onto the temporary file before writing. Replacement is atomic. Use
+the server-generated JSON file, coordinate with other configuration editors, and restrict its ACL
+to the service account and trusted administrators: like `Jwt:Key`, this value is a credential.
+The script refuses to rotate an existing password. It never changes running settings; restart is
+required, and environment/command-line overrides still win. No web password-setting endpoint is
+exposed: this repository has no general authenticated secret-bearing site-file writer, and adding
+one casually would expand the credential attack surface. Keep a separate, access-controlled
+recovery copy of the password, NOT solely inside the backup it unlocks. Do not log it or pass it
+in command-line arguments.
+
+After restart create a **new** `.zip.enc`, run the server restore drill, then independently verify
+with the offline tool's hidden input (or `SCADA_BACKUP_PASSWORD` supplied through approved secret
+management):
+
+```powershell
+.\Scada.BackupTool.exe verify --backup 'D:\ScadaBackups\full_example.zip.enc' --prompt-password
+```
+
+A console prompt is refused when input is redirected. Older encrypted bundles still need their
+original password. Setup is not rotation or key escrow. Scheduled bundles and offsite transfer
+use the same configured password. No one-time conversion or deletion of old plaintext bundles is performed; existing backup retention policies still apply to subsequent runs. Inventory
+local/share/S3/vendor copies, create and verify replacement encrypted bundles, obtain retention
+approval, then remove the old copies in a separate controlled operation. Never remove the last
+known-good restore point merely to clear a warning. This change performs no migration/deletion
+of existing site data or backups.

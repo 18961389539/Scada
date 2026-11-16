@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -133,6 +134,8 @@ public sealed class DeviceCommandService(
     {
         var issues = ConfigurationValidator.DeviceIssues(device, settings.Value, drivers);
         if (issues.Count > 0) return issues;
+        if (!settings.Value.LocalCollectionEnabled && LocalCollection.IsUnassignedEnabled(device))
+            return [new ValidationIssue("device.gateway.required", nameof(Device.GatewayId), LocalCollection.UnassignedDeviceMessage)];
         if (await ValidateChannelStationAsync(db, device, cancellationToken) is { } station) return [station];
         if (await ValidateSerialBusAsync(db, device, cancellationToken) is { } bus) return [bus];
 

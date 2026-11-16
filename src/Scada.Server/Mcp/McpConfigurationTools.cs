@@ -6,7 +6,6 @@ using Scada.Core.Entities;
 using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Endpoints;
-using Scada.Server.Projects;
 using Scada.Server.Services;
 using static Scada.Server.Mcp.McpActors;
 using static Scada.Server.Mcp.McpAuditLog;
@@ -20,60 +19,42 @@ namespace Scada.Server.Mcp;
 public sealed class McpConfigurationTools(
     IDbContextFactory<ConfigDbContext> factory,
     IDbContextFactory<RuntimeDbContext> runtimeFactory,
-    ProjectService projects,
-    ScreenPublicationNotifier notifier)
+    ScreenCommandService screens,
+    HmiLayoutCommandService layouts,
+    ObjectTemplateCommandService objectTemplates)
 {
     private static readonly JsonSerializerOptions ConfigJson = new(JsonSerializerDefaults.Web);
 
     [McpServerTool(Name = "create_screen", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Create one empty screen draft as mcp:lan and return its screenId and revision. Drafts do not affect the operator HMI. Write the document with save_screen_draft, then publish_screen.")]
-    public async Task<McpScreenSaved> CreateScreen(string name, CancellationToken cancellationToken)
+    public async Task<McpScreenSaved> CreateScreen(string name, CancellationToken cancellationToken,
+        [Description("Optional area ID. Omit to leave the screen unassigned.")] int? areaId = null)
     {
         var text = RequiredText(name, 100, "name");
+        if (areaId is int area && area <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "areaId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var now = ScadaTime.NowMs();
-        var screen = new ProcessScreen
-        {
-            Name = text, DraftJson = JsonSerializer.Serialize(new ScreenDocument(), ConfigJson),
-            UpdatedTs = now, UpdatedBy = McpActorName
-        };
-        db.ProcessScreens.Add(screen);
-        await db.SaveChangesAsync(cancellationToken);
-        runtime.OperationLogs.Add(Audit($"创建画面 {screen.Name}", "ProcessScreen", screen.Id, "成功", null, null, now));
-        await runtime.SaveChangesAsync(cancellationToken);
-        return new(screen.Id, true, "Screen draft created.", screen.Revision, screen.PublishedRevision, [], now);
+        var result = await screens.CreateAsync(db, runtime, text, areaId, McpActorName, null, cancellationToken);
+        return MapSaved(result, result.Success ? "Screen draft created." : result.Message);
     }
 
     [McpServerTool(Name = "save_screen_draft", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Replace the draft document of one existing screen as mcp:lan with an optimistic revision check. Structural validation only; publish_screen also checks referenced tags and screen IDs. Drafts do not affect the running HMI. success=false lists revision conflicts or validation issues.")]
-    public async Task<McpScreenSaved> SaveScreenDraft(int screenId, int revision, string name, ScreenDocument document, CancellationToken cancellationToken)
+    public async Task<McpScreenSaved> SaveScreenDraft(int screenId, int revision, string name, ScreenDocument document, CancellationToken cancellationToken,
+        [Description("New area ID; omit to keep the current area.")] int? areaId = null,
+        [Description("Set true to clear the screen area. Do not pass areaId at the same time.")] bool clearArea = false)
     {
         if (screenId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "screenId must be positive.");
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
         var text = RequiredText(name, 100, "name");
         if (document is null) throw new McpToolException(McpErrorCodes.InvalidArgument, "document is required.");
+        if (clearArea && areaId is not null)
+            throw new McpToolException(McpErrorCodes.InvalidArgument, "Do not pass areaId when clearArea is true.");
+        var updateArea = areaId is not null || clearArea;
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var screen = await db.ProcessScreens.SingleOrDefaultAsync(x => x.Id == screenId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
-        var now = ScadaTime.NowMs();
-        if (screen.Revision != revision)
-            return new(screen.Id, false, $"Screen was changed by another editor (current revision {screen.Revision}); reload and retry.",
-                screen.Revision, screen.PublishedRevision, [], now);
-        var issues = ScreenValidator.Validate(document).Select(Describe).ToArray();
-        if (issues.Length > 0)
-            return new(screen.Id, false, "Screen document is invalid.", screen.Revision, screen.PublishedRevision, issues, now);
-        screen.Name = text;
-        screen.DraftJson = JsonSerializer.Serialize(document, ConfigJson);
-        screen.DraftDirty = true;
-        screen.Revision++;
-        screen.UpdatedTs = now;
-        screen.UpdatedBy = McpActorName;
-        runtime.OperationLogs.Add(Audit($"保存画面 {screen.Name} r{screen.Revision}", "ProcessScreen", screen.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        return new(screen.Id, true, "Draft saved.", screen.Revision, screen.PublishedRevision, [], now);
+        var result = await screens.SaveDraftAsync(db, runtime, screenId, text, revision, document, areaId, updateArea, McpActorName, null, cancellationToken);
+        return MapSaved(result, result.Success ? "Draft saved." : result.Message);
     }
 
     [McpServerTool(Name = "publish_screen", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -89,61 +70,22 @@ public sealed class McpConfigurationTools(
         if (text.Length > 500) throw new McpToolException(McpErrorCodes.InvalidArgument, "note must not exceed 500 characters.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var screen = await db.ProcessScreens.SingleOrDefaultAsync(x => x.Id == screenId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
+        var result = await screens.PublishAsync(db, runtime, screenId, revision, rollbackToRevision, text, McpActorName, null, cancellationToken);
         var now = ScadaTime.NowMs();
-        if (screen.Revision != revision)
-            return new(screen.Id, false, $"Screen was changed by another editor (current revision {screen.Revision}); reload and retry.",
-                screen.Revision, screen.PublishedRevision, null, null, [], now);
-        var json = screen.DraftJson;
-        var name = screen.Name;
-        if (rollbackToRevision is int target)
+        if (result.Error is ScreenCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
+        if (result.Error is ScreenCommandError.VersionNotFound) throw new McpToolException(McpErrorCodes.NotFound, "Screen version does not exist.");
+        var screen = result.Screen;
+        var issues = result.Issues.Select(Describe).ToArray();
+        if (!result.Success)
         {
-            var version = await db.ProcessScreenVersions.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.ScreenId == screenId && x.Revision == target, cancellationToken)
-                ?? throw new McpToolException(McpErrorCodes.NotFound, "Screen version does not exist.");
-            json = version.DocumentJson; name = version.Name;
+            return new(screenId, false, result.Message ?? "Publish validation failed.",
+                screen?.Revision ?? 0, screen?.PublishedRevision, null, null, issues, now);
         }
-        ScreenDocument? document;
-        try { document = JsonSerializer.Deserialize<ScreenDocument>(json, ConfigJson); }
-        catch (JsonException ex) { return new(screen.Id, false, "Stored screen cannot be parsed: " + ex.Message, screen.Revision, screen.PublishedRevision, null, null, [], now); }
-        if (document is null) return new(screen.Id, false, "Stored screen is empty.", screen.Revision, screen.PublishedRevision, null, null, [], now);
-        var publication = rollbackToRevision is null
-            ? await Screens.ScreenPublication.PrepareAsync(db, document, screen.Id, cancellationToken)
-            : new Screens.ScreenPublicationResult(document, await Screens.ScreenPublication.ValidatePublishedAsync(db, document, screen.Id, cancellationToken), []);
-        var issues = publication.Issues.Select(Describe).ToArray();
-        if (issues.Length > 0)
-            return new(screen.Id, false, "Publish validation failed.", screen.Revision, screen.PublishedRevision, null, null, issues, now);
-        await ProcessScreenHistory.PreserveCurrentAsync(db, screen, cancellationToken);
-        screen.PublishedJson = rollbackToRevision is null ? JsonSerializer.Serialize(publication.Document, ConfigJson) : json;
-        screen.PublishedName = name;
-        screen.Revision++;
-        screen.PublishedRevision = screen.Revision;
-        screen.DraftDirty = rollbackToRevision is not null;
-        screen.UpdatedTs = now;
-        screen.UpdatedBy = McpActorName;
-        var kind = rollbackToRevision is null ? "publish" : "rollback";
-        var action = rollbackToRevision is int from ? $"回退画面 {name} r{from} → r{screen.Revision}：{text}" : $"发布画面 {name} r{screen.Revision}";
-        ProcessScreenHistory.Record(db, screen, now, McpActorName, text, kind, rollbackToRevision);
-        runtime.OperationLogs.Add(Audit(action, "ProcessScreen", screen.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        await ProcessScreenHistory.TrimAsync(db, screen.Id, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        await notifier.NotifyAsync(screen.Id, screen.PublishedRevision, screen.PublishedName, CancellationToken.None);
-        int? versionId = null;
-        string? warning = null;
-        try
-        {
-            versionId = (await projects.SnapshotAsync("screen-" + kind, action, null, McpActorName, CancellationToken.None)).Id;
-        }
-        catch (Exception ex)
-        {
-            projects.ReportSnapshotFailure(action, ex);
-            warning = "Screen runtime updated, but the automatic configuration snapshot failed; create one manually in project management. Details are in system alarms.";
-        }
-        return new(screen.Id, true, rollbackToRevision is null ? "Screen published." : "Screen rolled back.", screen.Revision, screen.PublishedRevision, versionId, warning, [], ScadaTime.NowMs(), publication.Warnings.Select(Describe).ToArray());
+        var warning = result.SnapshotFailed
+            ? "Screen runtime updated, but the automatic configuration snapshot failed; create one manually in project management. Details are in system alarms."
+            : null;
+        return new(screen!.Id, true, rollbackToRevision is null ? "Screen published." : "Screen rolled back.",
+            screen.Revision, screen.PublishedRevision, result.ConfigVersionId, warning, [], now, result.Warnings.Select(Describe).ToArray());
     }
 
     [McpServerTool(Name = "save_hmi_layout", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -157,32 +99,8 @@ public sealed class McpConfigurationTools(
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var now = ScadaTime.NowMs();
-        var row = layoutId is int layoutKey ? await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == layoutKey, cancellationToken) : null;
-        if (layoutId is not null && row is null) throw new McpToolException(McpErrorCodes.NotFound, "Layout does not exist.");
-        if (row is not null && row.Revision != revision)
-            return new(row.Id, false, $"Layout was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.PublishedRevision, row.PublishedJson is null, now);
-        if (HmiLayoutValidator.ValidateDraft(document) is string error)
-            return new(row?.Id ?? 0, false, error, row?.Revision ?? 0, row?.PublishedRevision, row?.PublishedJson is null, now);
-        if (await db.HmiLayouts.AnyAsync(x => x.Name == text && x.Id != (layoutId ?? 0), cancellationToken))
-            return new(row?.Id ?? 0, false, "Layout name already exists.", row?.Revision ?? 0, row?.PublishedRevision, row?.PublishedJson is null, now);
-        var creating = row is null;
-        if (row is null)
-        {
-            row = new HmiLayout();
-            db.HmiLayouts.Add(row);
-            row.Revision = 1;
-        }
-        else row.Revision++;
-        row.Name = text;
-        row.DocumentJson = JsonSerializer.Serialize(document, HmiLayoutEndpoints.Json);
-        row.UpdatedTs = now;
-        row.UpdatedBy = McpActorName;
-        await db.SaveChangesAsync(cancellationToken);
-        runtime.OperationLogs.Add(Audit($"{(creating ? "新建" : "保存")}运行布局草稿 {row.Name}", "HmiLayout", row.Id, "成功", null, null, now));
-        await runtime.SaveChangesAsync(cancellationToken);
-        var hasDraft = row.PublishedJson is null || row.Name != row.PublishedName || row.DocumentJson != row.PublishedJson;
-        return new(row.Id, true, creating ? "Layout draft created." : "Layout draft saved.", row.Revision, row.PublishedRevision, hasDraft, now);
+        var result = await layouts.SaveAsync(db, runtime, layoutId, text, document, revision, McpActorName, null, cancellationToken);
+        return MapLayoutSaved(result);
     }
 
     [McpServerTool(Name = "publish_hmi_layout", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -196,46 +114,16 @@ public sealed class McpConfigurationTools(
         if (rollbackToRevision is int restore && restore <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "rollbackToRevision must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var row = await db.HmiLayouts.SingleOrDefaultAsync(x => x.Id == layoutId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Layout does not exist.");
+        var result = await layouts.PublishAsync(db, runtime, layoutId, revision, text, rollbackToRevision, McpActorName, null, cancellationToken);
         var now = ScadaTime.NowMs();
-        var kind = rollbackToRevision is null ? "publish" : "rollback";
-        if (row.Revision != revision)
-            return new(row.Id, false, $"Layout was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.PublishedRevision, kind, text, now);
-        var name = row.Name;
-        var documentJson = row.DocumentJson;
-        if (rollbackToRevision is int target)
-        {
-            var version = await db.HmiLayoutVersions.AsNoTracking()
-                .SingleOrDefaultAsync(x => x.LayoutId == layoutId && x.Revision == target, cancellationToken)
-                ?? throw new McpToolException(McpErrorCodes.NotFound, "Layout version does not exist.");
-            name = version.Name;
-            documentJson = version.DocumentJson;
-        }
-        HmiLayoutDocument? document;
-        try { document = JsonSerializer.Deserialize<HmiLayoutDocument>(documentJson, HmiLayoutEndpoints.Json); }
-        catch (JsonException ex) { return new(row.Id, false, "Layout document cannot be parsed: " + ex.Message, row.Revision, row.PublishedRevision, kind, text, now); }
-        var published = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(cancellationToken)).ToHashSet();
-        if (HmiLayoutValidator.Validate(document, published) is string error)
-            return new(row.Id, false, error, row.Revision, row.PublishedRevision, kind, text, now);
-        row.Revision++;
-        row.PublishedName = name;
-        row.PublishedJson = documentJson;
-        row.PublishedRevision = row.Revision;
-        row.PublishedTs = now;
-        row.PublishedBy = McpActorName;
-        db.HmiLayoutVersions.Add(new HmiLayoutVersion
-        {
-            LayoutId = row.Id, Revision = row.Revision, Name = name, DocumentJson = documentJson,
-            PublishedTs = now, PublishedBy = McpActorName, Note = text,
-            RestoredFromRevision = rollbackToRevision, Kind = kind
-        });
-        runtime.OperationLogs.Add(Audit(
-            rollbackToRevision is int from ? $"回退运行布局 {name} r{from} → r{row.Revision}：{text}" : $"发布运行布局 {name} r{row.Revision}：{text}",
-            "HmiLayout", row.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        return new(row.Id, true, rollbackToRevision is null ? "Layout published." : "Layout rolled back.", row.Revision, row.PublishedRevision, kind, text, now);
+        if (result.Error is HmiLayoutCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Layout does not exist.");
+        if (result.Error is HmiLayoutCommandError.VersionNotFound) throw new McpToolException(McpErrorCodes.NotFound, "Layout version does not exist.");
+        var row = result.Layout;
+        if (result.Error is HmiLayoutCommandError.Conflict)
+            return new(row!.Id, false, $"Layout was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.PublishedRevision, rollbackToRevision is null ? "publish" : "rollback", text, now);
+        if (!result.Success)
+            return new(row?.Id ?? layoutId, false, result.Message ?? "Rejected.", row?.Revision ?? 0, row?.PublishedRevision, result.Kind, text, now);
+        return new(row!.Id, true, rollbackToRevision is null ? "Layout published." : "Layout rolled back.", row.Revision, row.PublishedRevision, result.Kind, text, now);
     }
 
     [McpServerTool(Name = "save_object_template", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -247,35 +135,10 @@ public sealed class McpConfigurationTools(
         var text = RequiredText(name, 100, "name");
         if (templateId is int id && id <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "templateId must be positive.");
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
-        var errors = ObjectTemplateValidator.Validate(document, false).ToArray();
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var now = ScadaTime.NowMs();
-        var row = templateId is int templateKey ? await db.ObjectTemplates.SingleOrDefaultAsync(x => x.Id == templateKey, cancellationToken) : null;
-        if (templateId is not null && row is null) throw new McpToolException(McpErrorCodes.NotFound, "Object template does not exist.");
-        if (row is not null && row.Revision != revision)
-            return new(row.Id, false, $"Template was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.LatestVersion, [], now);
-        if (errors.Length > 0)
-            return new(row?.Id ?? 0, false, "Object template is invalid.", row?.Revision ?? 0, row?.LatestVersion ?? 0, errors, now);
-        if (await db.ObjectTemplates.AnyAsync(x => x.Name == text && x.Id != (templateId ?? 0), cancellationToken))
-            return new(row?.Id ?? 0, false, "Template name already exists.", row?.Revision ?? 0, row?.LatestVersion ?? 0, [], now);
-        var creating = row is null;
-        if (row is null)
-        {
-            row = new DeviceObjectTemplate { Revision = 1 };
-            db.ObjectTemplates.Add(row);
-        }
-        else row.Revision++;
-        row.Name = text;
-        row.DraftJson = ObjectTemplateJson.Write(document);
-        row.UpdatedTs = now;
-        row.UpdatedBy = McpActorName;
-        try { await db.SaveChangesAsync(cancellationToken); }
-        catch (DbUpdateException) { return new(row.Id, false, "Template name conflicts with another template; reload and retry.", row.Revision, row.LatestVersion, [], now); }
-        runtime.OperationLogs.Add(Audit(creating ? $"创建对象模板：{row.Name}" : $"保存对象模板 {row.Name} r{row.Revision}", "DeviceObjectTemplate", row.Id, "成功", null, null, now));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        return new(row.Id, true, creating ? "Object template draft created." : "Object template draft saved.", row.Revision, row.LatestVersion, [], now);
+        var result = await objectTemplates.SaveAsync(db, runtime, templateId, text, document, revision, McpActorName, null, cancellationToken);
+        return MapObjectSaved(result, creating: templateId is null);
     }
 
     [McpServerTool(Name = "publish_object_template", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -286,34 +149,55 @@ public sealed class McpConfigurationTools(
         if (revision < 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "revision must not be negative.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var row = await db.ObjectTemplates.SingleOrDefaultAsync(x => x.Id == templateId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Object template does not exist.");
+        var result = await objectTemplates.PublishAsync(db, runtime, templateId, revision, McpActorName, null, cancellationToken);
         var now = ScadaTime.NowMs();
-        if (row.Revision != revision)
-            return new(row.Id, false, $"Template was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.LatestVersion, [], now);
-        ObjectTemplateDocument? document;
-        try { document = ObjectTemplateJson.Read<ObjectTemplateDocument>(row.DraftJson); }
-        catch (JsonException ex) { return new(row.Id, false, "Stored draft cannot be parsed: " + ex.Message, row.Revision, row.LatestVersion, [], now); }
-        var errors = ObjectTemplateValidator.Validate(document, true).ToList();
-        var targets = await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(cancellationToken);
-        if (document?.Panel?.Nodes?.Any(n => n?.Action?.Type is "navigate" or "popup" && !targets.Contains(n.Action.ScreenId ?? 0)) == true)
-            errors.Add("Panel navigation targets must reference published screens.");
-        if (errors.Count > 0)
-            return new(row.Id, false, "Publish validation failed.", row.Revision, row.LatestVersion, errors, now);
-        row.LatestVersion++;
-        row.Revision++;
-        row.UpdatedTs = now;
-        row.UpdatedBy = McpActorName;
-        db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion
-        {
-            TemplateId = row.Id, Version = row.LatestVersion, DocumentJson = row.DraftJson,
-            CreatedTs = now, CreatedBy = McpActorName
-        });
-        runtime.OperationLogs.Add(Audit($"发布对象模板 {row.Name} v{row.LatestVersion}", "DeviceObjectTemplate", row.Id, "成功", null, null, now));
-        try { await db.SaveChangesAsync(cancellationToken); await transaction.CommitAsync(cancellationToken); await runtime.SaveChangesAsync(cancellationToken); }
-        catch (DbUpdateException) { return new(row.Id, false, "Template was changed concurrently; reload and retry.", row.Revision, row.LatestVersion, [], now); }
-        return new(row.Id, true, "Object template published.", row.Revision, row.LatestVersion, [], ScadaTime.NowMs());
+        if (result.Error is ObjectTemplateCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Object template does not exist.");
+        var row = result.Template;
+        if (result.Error is ObjectTemplateCommandError.Conflict)
+            return new(row!.Id, false, $"Template was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.LatestVersion, result.Errors.ToArray(), now);
+        if (!result.Success)
+            return new(row?.Id ?? templateId, false, result.Message ?? "Publish validation failed.", row?.Revision ?? 0, row?.LatestVersion ?? 0, result.Errors.ToArray(), now);
+        return new(row!.Id, true, "Object template published.", row.Revision, row.LatestVersion, [], ScadaTime.NowMs());
+    }
+
+    private static McpHmiLayoutSaved MapLayoutSaved(HmiLayoutCommandResult result)
+    {
+        var now = ScadaTime.NowMs();
+        if (result.Error is HmiLayoutCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Layout does not exist.");
+        var row = result.Layout;
+        var hasDraft = row is null || row.PublishedJson is null || row.Name != row.PublishedName || row.DocumentJson != row.PublishedJson;
+        if (result.Error is HmiLayoutCommandError.Conflict)
+            return new(row!.Id, false, $"Layout was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.PublishedRevision, hasDraft, now);
+        if (result.Error is HmiLayoutCommandError.DuplicateName)
+            return new(row?.Id ?? 0, false, "Layout name already exists.", row?.Revision ?? 0, row?.PublishedRevision, row?.PublishedJson is null, now);
+        if (!result.Success)
+            return new(row?.Id ?? 0, false, result.Message ?? "Rejected.", row?.Revision ?? 0, row?.PublishedRevision, row?.PublishedJson is null, now);
+        return new(row!.Id, true, result.Created ? "Layout draft created." : "Layout draft saved.", row.Revision, row.PublishedRevision, hasDraft, now);
+    }
+
+    private static McpObjectTemplateSaved MapObjectSaved(ObjectTemplateCommandResult result, bool creating)
+    {
+        var now = ScadaTime.NowMs();
+        if (result.Error is ObjectTemplateCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Object template does not exist.");
+        var row = result.Template;
+        if (result.Error is ObjectTemplateCommandError.Conflict)
+            return new(row!.Id, false, $"Template was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.LatestVersion, result.Errors.ToArray(), now);
+        if (result.Error is ObjectTemplateCommandError.DuplicateName)
+            return new(row?.Id ?? 0, false, "Template name already exists.", row?.Revision ?? 0, row?.LatestVersion ?? 0, [], now);
+        if (!result.Success)
+            return new(row?.Id ?? 0, false, result.Message ?? "Object template is invalid.", row?.Revision ?? 0, row?.LatestVersion ?? 0, result.Errors.ToArray(), now);
+        return new(row!.Id, true, result.Created ? "Object template draft created." : "Object template draft saved.", row.Revision, row.LatestVersion, [], now);
+    }
+
+    private static McpScreenSaved MapSaved(ScreenCommandResult result, string? message)
+    {
+        var now = ScadaTime.NowMs();
+        if (result.Error is ScreenCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Screen does not exist.");
+        if (result.Error is ScreenCommandError.AreaMissing) throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
+        var issues = result.Issues.Select(Describe).ToArray();
+        var screen = result.Screen;
+        return new(screen?.Id ?? 0, result.Success, message ?? result.Message ?? "Rejected.",
+            screen?.Revision ?? 0, screen?.PublishedRevision, issues, now);
     }
 
     private static string Describe(ScreenIssue issue) => string.IsNullOrEmpty(issue.NodeId) ? issue.Message : $"{issue.NodeId}: {issue.Message}";

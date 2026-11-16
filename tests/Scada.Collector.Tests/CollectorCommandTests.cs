@@ -95,7 +95,7 @@ public class CollectorCommandTests
         Assert.Equal(1, offline.Metrics.PollFailures); Assert.True(offline.Metrics.NextRetryTs > offline.CapturedTs);
         Assert.Equal("simulated read failure", offline.Metrics.LastFailure);
         await UntilAsync(() => rig.Cache.Get(1)?.Quality == TagQuality.CommFailure);
-        rig.Driver.FailReads = false; Assert.True(rig.Engine.RequestReconnect(1));
+        rig.Driver.FailReads = false; Assert.True(rig.Engine.RequestReconnect(1).Accepted);
         await UntilAsync(() => rig.Engine.GetDiagnostics(1) is { State: "Online", Metrics.ConnectAttempts: >= 2 });
         var recovered = rig.Engine.GetDiagnostics(1)!;
         Assert.Null(recovered.Metrics.NextRetryTs); Assert.Equal(0, recovered.Metrics.ConsecutiveFailures);
@@ -110,7 +110,7 @@ public class CollectorCommandTests
         var command = rig.Engine.WriteAsync(1, rig.Tag, 20);
         await rig.Driver.WriteBlocked.Task.WaitAsync(TimeSpan.FromSeconds(3));
         var writing = rig.Engine.GetDiagnostics(1)!; Assert.Equal("Writing", writing.Operation); Assert.Equal(1, writing.OperationTagId);
-        var disconnects = rig.Driver.Disconnects; Assert.True(rig.Engine.RequestReconnect(1));
+        var disconnects = rig.Driver.Disconnects; Assert.True(rig.Engine.RequestReconnect(1).Accepted);
         Assert.Equal(disconnects, rig.Driver.Disconnects); Assert.False(command.IsCompleted);
         rig.Driver.ResumeWrites.TrySetResult(); Assert.True((await command).Success);
         await UntilAsync(() => rig.Engine.GetDiagnostics(1) is { State: "Online", Metrics.ConnectAttempts: >= 2 });
@@ -123,10 +123,10 @@ public class CollectorCommandTests
         await using var rig = new Rig(); await rig.StartAsync();
         rig.Config.Tags = []; rig.Config.Version++;
         await UntilAsync(() => rig.Engine.GetStatuses().Count == 0);
-        Assert.Equal("NoTags", rig.Engine.GetDiagnostics(1)!.State); Assert.False(rig.Engine.RequestReconnect(1));
+        Assert.Equal("NoTags", rig.Engine.GetDiagnostics(1)!.State); Assert.False(rig.Engine.RequestReconnect(1).Accepted);
         rig.Config.Device.Enabled = false; rig.Config.Version++;
         Assert.Equal("Disabled", rig.Engine.GetDiagnostics(1)!.State);
-        Assert.Null(rig.Engine.GetDiagnostics(999)); Assert.False(rig.Engine.RequestReconnect(999));
+        Assert.Null(rig.Engine.GetDiagnostics(999)); Assert.False(rig.Engine.RequestReconnect(999).Accepted);
     }
 
     private static async Task UntilAsync(Func<bool> predicate)

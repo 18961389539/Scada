@@ -1,3 +1,4 @@
+using Scada.Tests;
 using Microsoft.Data.Sqlite;
 
 namespace Scada.Data.Tests;
@@ -9,6 +10,7 @@ internal sealed class TempRoot : IDisposable
     {
         Root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "scada-data-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Root);
+        TempCleanup.Track(Root);
     }
 
     public string Root { get; }
@@ -51,6 +53,6 @@ internal sealed class TempRoot : IDisposable
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        try { Directory.Delete(Root, true); } catch (IOException) { }
+        try { Directory.Delete(Root, true); } catch (IOException) { if (Directory.Exists(Root)) TempCleanup.Track(Root); }
     }
 }

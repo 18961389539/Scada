@@ -41,49 +41,25 @@ public static class ObjectTemplateEndpoints
             return row is null ? Results.NotFound() : Results.Ok(new { row.Version, Document = ObjectTemplateJson.Read<ObjectTemplateDocument>(row.DocumentJson) });
         });
         templates.MapPost("/validate", (ObjectTemplateDocument document) => Results.Ok(new { errors = ObjectTemplateValidator.Validate(document) }));
-        templates.MapPost("", async (ObjectTemplateSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        templates.MapPost("", async (ObjectTemplateSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ObjectTemplateCommandService commands, CancellationToken ct) =>
         {
-            var errors = Validate(request);
-            if (errors.Count > 0) return Results.BadRequest(new { message = "模板定义无效", errors });
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var row = new DeviceObjectTemplate { Name = request.Name.Trim(), DraftJson = ObjectTemplateJson.Write(request.Document), UpdatedTs = ScadaTime.NowMs(), UpdatedBy = http.User.GetUserName() };
-            db.ObjectTemplates.Add(row); AuditAction(runtime, http, $"创建对象模板 {row.Name}");
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
-            return Results.Created($"/api/object-templates/{row.Id}", new { row.Id, row.Revision });
+            return MapSave(await commands.SaveAsync(db, runtime, null, request.Name, request.Document, request.Revision, http.User.GetUserName(), http.User.GetUserId(), ct), created: true);
         });
-        templates.MapPut("/{id:int}", async (int id, ObjectTemplateSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        templates.MapPut("/{id:int}", async (int id, ObjectTemplateSaveRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ObjectTemplateCommandService commands, CancellationToken ct) =>
         {
-            var errors = Validate(request);
-            if (errors.Count > 0) return Results.BadRequest(new { message = "模板定义无效", errors });
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var row = await db.ObjectTemplates.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (row is null) return Results.NotFound();
-            if (row.Revision != request.Revision) return Collision();
-            row.Name = request.Name.Trim(); row.DraftJson = ObjectTemplateJson.Write(request.Document); row.Revision++;
-            row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName(); AuditAction(runtime, http, $"保存对象模板 {row.Name} r{row.Revision}");
-            try { await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
-            return Results.Ok(new { row.Id, row.Revision });
+            return MapSave(await commands.SaveAsync(db, runtime, id, request.Name, request.Document, request.Revision, http.User.GetUserName(), http.User.GetUserId(), ct));
         });
-        templates.MapPost("/{id:int}/publish", async (int id, ObjectTemplatePublishRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        templates.MapPost("/{id:int}/publish", async (int id, ObjectTemplatePublishRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ObjectTemplateCommandService commands, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            await using var tx = await db.Database.BeginTransactionAsync(ct);
-            var row = await db.ObjectTemplates.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (row is null) return Results.NotFound();
-            if (row.Revision != request.Revision) return Collision();
-            var doc = ObjectTemplateJson.Read<ObjectTemplateDocument>(row.DraftJson);
-            var errors = ObjectTemplateValidator.Validate(doc).ToList();
-            var targets = await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct);
-            if (doc.Panel.Nodes.Any(n => n.Action.Type is "navigate" or "popup" && !targets.Contains(n.Action.ScreenId ?? 0))) errors.Add("面板导航目标不存在或未发布");
-            if (errors.Count > 0) return Results.BadRequest(new { message = "模板发布校验未通过", errors });
-            row.LatestVersion++; row.Revision++; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
-            db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = id, Version = row.LatestVersion, DocumentJson = row.DraftJson, CreatedTs = row.UpdatedTs, CreatedBy = row.UpdatedBy });
-            AuditAction(runtime, http, $"发布对象模板 {row.Name} v{row.LatestVersion}");
-            try { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); await runtime.SaveChangesAsync(ct); } catch (DbUpdateException) { return Collision(); }
-            return Results.Ok(new { row.Id, row.Revision, row.LatestVersion });
+            var result = await commands.PublishAsync(db, runtime, id, request.Revision, http.User.GetUserName(), http.User.GetUserId(), ct);
+            if (result.Success) return Results.Ok(new { result.Template!.Id, result.Template.Revision, result.Template.LatestVersion });
+            return MapObjectError(result);
         });
         templates.MapDelete("/{id:int}", async (int id, int revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
@@ -136,11 +112,22 @@ public static class ObjectTemplateEndpoints
             return Results.NoContent();
         });
     }
-    private static IReadOnlyList<string> Validate(ObjectTemplateSaveRequest request)
+    private static IResult MapSave(ObjectTemplateCommandResult result, bool created = false)
     {
-        if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Trim().Length > 100) return ["模板名称须为 1～100 个字符"];
-        return ObjectTemplateValidator.Validate(request.Document, false);
+        if (result.Success)
+        {
+            var body = new { result.Template!.Id, result.Template.Revision };
+            return created ? Results.Created($"/api/object-templates/{result.Template.Id}", body) : Results.Ok(body);
+        }
+        return MapObjectError(result);
     }
+    private static IResult MapObjectError(ObjectTemplateCommandResult result) => result.Error switch
+    {
+        ObjectTemplateCommandError.NotFound => Results.NotFound(),
+        ObjectTemplateCommandError.Conflict or ObjectTemplateCommandError.DuplicateName => Collision(),
+        ObjectTemplateCommandError.InvalidName => EndpointHelpers.BadRequest(result.Message ?? ObjectTemplateCommandService.InvalidNameMessage),
+        _ => Results.BadRequest(new { message = result.Message ?? ObjectTemplateCommandService.InvalidDraftMessage, errors = result.Errors })
+    };
     private static IResult Collision() => Results.Conflict(new { message = "名称冲突或版本已变化，请重新打开并预览" });
     private static async Task<IResult> Run(Func<Task<object>> action)
     {

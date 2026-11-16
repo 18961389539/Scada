@@ -21,4 +21,8 @@
     <ProjectReference Include="..\..\src\Scada.Data\Scada.Data.csproj" />
   </ItemGroup>
 
+
+  <ItemGroup>
+    <Compile Include="..\shared\TempCleanup.cs" Link="TempCleanup.cs" />
+  </ItemGroup>
 </Project>

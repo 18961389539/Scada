@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.Configuration;
@@ -134,7 +134,7 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
                 result = request.Operation == GatewayEngineeringOperation.DiagnosticsExport ? snapshot
                     : CollectorDiagnosticPaging.Page(snapshot, request.Payload.Deserialize<CollectorDiagnosticQuery>(GatewayProtocol.Json) ?? new()); break;
             case GatewayEngineeringOperation.Reconnect:
-                if (!_engine!.RequestReconnect(device.Id)) throw new InvalidOperationException("设备停用或没有测点，无可重连的采集任务");
+                if (!_engine!.RequestReconnect(device.Id).Accepted) throw new InvalidOperationException("设备停用或没有测点，无可重连的采集任务");
                 result = new { message = "已请求在当前采集及命令结束后重连" }; break;
             case GatewayEngineeringOperation.ImmediateRead:
             case GatewayEngineeringOperation.ImmediateWrite:

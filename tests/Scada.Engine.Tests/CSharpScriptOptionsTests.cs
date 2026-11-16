@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using Scada.Core.Scripting;
 using Scada.Engine.Calculations;
+using Scada.Tests;
 
 namespace Scada.Engine.Tests;
 
@@ -54,16 +55,19 @@ public sealed class CSharpScriptOptionsTests
     }
 
     // 进程被强杀时 Stop 来不及删工作目录；宿主启动只清理一天前的 scada-script-<guid>，
-    // 日志目录与编译缓存目录不能被误删（它们同样以 scada-script- 开头）。
+    // 非 GUID 后缀（日志、编译缓存等同样以 scada-script- 开头）不能被误删。
+    // 不用生产默认的 %TEMP%/scada-script-cache，避免改写本机缓存时间戳。
     [Fact]
     public void OrphanWorkerDirectoriesAreSweptOnStartup()
     {
         var orphan = Path.Combine(Path.GetTempPath(), "scada-script-" + Guid.NewGuid().ToString("N"));
         var recent = Path.Combine(Path.GetTempPath(), "scada-script-" + Guid.NewGuid().ToString("N"));
-        var cache = Path.Combine(Path.GetTempPath(), "scada-script-cache");
-        Directory.CreateDirectory(orphan);
-        Directory.CreateDirectory(recent);
-        Directory.CreateDirectory(cache);
+        var cache = Path.Combine(Path.GetTempPath(), "scada-script-cache-" + Guid.NewGuid().ToString("N"));
+        foreach (var path in new[] { orphan, recent, cache })
+        {
+            Directory.CreateDirectory(path);
+            TempCleanup.Track(path);
+        }
         try
         {
             Directory.SetLastWriteTimeUtc(orphan, DateTime.UtcNow.AddDays(-2));
@@ -75,7 +79,7 @@ public sealed class CSharpScriptOptionsTests
         }
         finally
         {
-            foreach (var path in new[] { recent, orphan })
+            foreach (var path in new[] { recent, orphan, cache })
                 try { if (Directory.Exists(path)) Directory.Delete(path, recursive: true); } catch (IOException) { }
         }
     }

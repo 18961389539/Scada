@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
+using Scada.Core;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using Scada.Core.Entities;
@@ -373,14 +374,18 @@ public sealed class McpControlTools(
         var now = ScadaTime.NowMs();
         if (!snapshot.Enabled || snapshot.PointCount == 0)
             return new(deviceId, false, "Device is disabled or has no points to collect.", now);
-        var accepted = diagnostics.RequestReconnect(deviceId);
+        var reconnect = diagnostics.RequestReconnect(deviceId);
+        var accepted = reconnect.Accepted;
+        var message = accepted
+            ? "Reconnect requested; it runs after the current poll and queued commands."
+            : reconnect.LocalCollectionDisabled
+                ? LocalCollection.DisabledMessage
+                : "Device configuration changed; refresh and retry.";
         runtime.OperationLogs.Add(Audit($"请求采集重连：设备 #{deviceId} {device.Name}", "Device", deviceId,
-            accepted ? "MCP 请求，等待采集引擎执行" : "MCP 请求被拒绝：设备配置已变化", null, null, now));
+            accepted ? "MCP 请求，等待采集引擎执行" : "MCP 请求被拒绝：" + message, null, null, now));
         await db.SaveChangesAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
-        return accepted
-            ? new(deviceId, true, "Reconnect requested; it runs after the current poll and queued commands.", now)
-            : new(deviceId, false, "Device configuration changed; refresh and retry.", now);
+        return new(deviceId, accepted, message, now);
     }
 
     private static async Task<(RecipeTemplate Template, Recipe Recipe, RecipeVersion Version)> LoadRecipeAsync(

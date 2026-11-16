@@ -1,3 +1,4 @@
+using Scada.Tests;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
@@ -85,6 +86,7 @@ public sealed class HaClusterTests : IAsyncLifetime
     public Task InitializeAsync()
     {
         Directory.CreateDirectory(_root);
+        TempCleanup.Track(_root);
         var witness = Path.Combine(_root, "witness");
         int pa = FreePort(), pb = FreePort();
         _a = new Node("node-a", pa, pb, Path.Combine(_root, "a"), witness, true);
@@ -155,11 +157,31 @@ public sealed class HaClusterTests : IAsyncLifetime
 
     private async Task<string> LoginAsync(Node node)
     {
-        HttpResponseMessage response;
-        try { response = await _http.PostAsJsonAsync(node.Url + "api/auth/login", new { userName = "admin", password = "admin123" }); }
-        catch (Exception ex) { throw new InvalidOperationException($"登录 {node.Url} 失败：{ex.Message}\n{node.Tail()}", ex); }
-        Assert.True(response.IsSuccessStatusCode, $"{await response.Content.ReadAsStringAsync()}\n{node.Tail()}");
-        return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+        // 只重试连接/启动暂态（连不上、超时、5xx/429）。认证类 4xx 立即失败，避免把错误口令或强制改密重试成“偶发失败”。
+        var deadline = DateTime.UtcNow.AddSeconds(30);
+        Exception? lastError = null;
+        HttpResponseMessage? last = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                using var attempt = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                last = await _http.PostAsJsonAsync(node.Url + "api/auth/login", new { userName = "admin", password = "admin123" }, attempt.Token);
+                if (last.IsSuccessStatusCode)
+                    return (await last.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+                var code = (int)last.StatusCode;
+                if (code is 400 or 401 or 403 or 404 or 409 or 422 or 428)
+                    Assert.Fail($"登录 {node.Url} 被拒绝：{code} {await last.Content.ReadAsStringAsync()}\n{node.Tail()}");
+            }
+            catch (Exception ex) when (ex is HttpRequestException or SocketException or IOException or OperationCanceledException or TaskCanceledException)
+            {
+                lastError = ex;
+            }
+            await Task.Delay(150);
+        }
+        var detail = last is null ? lastError?.Message ?? "无响应" : $"{(int)last.StatusCode} {await last.Content.ReadAsStringAsync()}";
+        Assert.Fail($"等待登录就绪超时：{node.Url} => {detail}\n{node.Tail()}");
+        return "";
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, Node node, string path, string token, object? body = null)

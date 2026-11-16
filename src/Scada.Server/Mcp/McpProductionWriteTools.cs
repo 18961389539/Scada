@@ -9,6 +9,7 @@ using Scada.Data;
 using Scada.Engine.Oee;
 using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
+using Scada.Server.Services;
 using Scada.Server.Reports;
 using static Scada.Server.Mcp.McpActors;
 using static Scada.Server.Mcp.McpAuditLog;
@@ -24,6 +25,8 @@ public sealed class McpProductionWriteTools(
     IDbContextFactory<RuntimeDbContext> runtimeFactory,
     ReportArchiveService reportArchive,
     OeeRollupService rollups,
+    DowntimeCommandService downtimes,
+    ReportTemplateCommandService reports,
     McpIdempotency idempotency)
 {
     [McpServerTool(Name = "confirm_downtime", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
@@ -37,33 +40,28 @@ public sealed class McpProductionWriteTools(
         var text = OptionalText(note, 500, "note");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        var row = await runtime.DowntimeEvents.SingleOrDefaultAsync(x => x.Id == downtimeId, cancellationToken)
-            ?? throw new McpToolException(McpErrorCodes.NotFound, "Downtime event does not exist.");
-        var line = await db.ProductionLines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == row.LineId, cancellationToken);
-        var now = ScadaTime.NowMs();
-        if (line is null)
-            return new(row.Id, false, "The production line of this downtime event no longer exists.", row.LineId, null,
-                row.Confirmed, row.ReasonId, row.State.ToString(), row.StartTs, row.EndTs, row.Note, null, now);
-        if (reasonId is int classify && !await db.DowntimeReasons.AnyAsync(x => x.Id == classify, cancellationToken))
+        var result = await downtimes.ConfirmAsync(db, runtime, rollups, downtimeId, reasonId, text, text is not null, McpActorName,
+            (row, line, already, previousReason, previousNote, now) =>
+            {
+                runtime.OperationLogs.Add(Audit($"确认停机 #{row.Id}：{(reasonId is int r ? $"原因 #{r}" : "保持原因")}{(text is null ? "" : $"；{text}")}",
+                    "DowntimeEvent", (int)row.Id, "成功",
+                    $"confirmed={already};reasonId={previousReason}",
+                    $"confirmed=True;reasonId={row.ReasonId}", now));
+            },
+            cancellationToken);
+        if (result.Error is DowntimeCommandError.NotFound)
+            throw new McpToolException(McpErrorCodes.NotFound, "Downtime event does not exist.");
+        if (result.Error is DowntimeCommandError.ReasonMissing)
             throw new McpToolException(McpErrorCodes.NotFound, "Downtime reason does not exist.");
-        var reasonChanged = reasonId is int target && target != row.ReasonId;
-        var noteChanged = text is not null && text != row.Note;
-        if (row.Confirmed && !reasonChanged && !noteChanged)
-            return new(row.Id, true, "Downtime event was already confirmed; nothing changed.", row.LineId, line.Name,
-                true, row.ReasonId, row.State.ToString(), row.StartTs, row.EndTs, row.Note, null, now);
-        var before = $"confirmed={row.Confirmed};reasonId={row.ReasonId}";
-        row.Confirmed = true;
-        if (reasonId is int classified) row.ReasonId = classified;
-        if (text is not null) row.Note = text;
-        row.UpdatedBy = McpActorName;
-        row.UpdatedTs = now;
-        runtime.OperationLogs.Add(Audit($"确认停机 #{row.Id}：{(reasonId is int r ? $"原因 #{r}" : "保持原因")}{(text is null ? "" : $"；{text}")}",
-            "DowntimeEvent", (int)row.Id, "成功", before, $"confirmed=True;reasonId={row.ReasonId}", now));
-        await db.SaveChangesAsync(cancellationToken);
-        await runtime.SaveChangesAsync(cancellationToken);
-        await rollups.RequestRebuildAsync(row.StartTs, cancellationToken);
-        return new(row.Id, true, "Downtime event confirmed.", row.LineId, line.Name, true, row.ReasonId,
-            row.State.ToString(), row.StartTs, row.EndTs, row.Note, row.StartTs, ScadaTime.NowMs());
+        var row = result.Event!;
+        var now = ScadaTime.NowMs();
+        if (result.Error is DowntimeCommandError.LineMissing)
+            return new(row.Id, false, result.Message ?? "The production line of this downtime event no longer exists.", row.LineId, null,
+                row.Confirmed, row.ReasonId, row.State.ToString(), row.StartTs, row.EndTs, row.Note, null, now);
+        var line = result.Line!;
+        return new(row.Id, result.Success, result.Message ?? "Downtime event confirmed.", row.LineId, line.Name,
+            row.Confirmed, row.ReasonId, row.State.ToString(), row.StartTs, row.EndTs, row.Note,
+            result.Unchanged ? null : row.StartTs, now);
     }
 
     [McpServerTool(Name = "save_report_template", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
@@ -89,68 +87,32 @@ public sealed class McpProductionWriteTools(
             throw new McpToolException(McpErrorCodes.InvalidArgument, "emailChannelId must be positive.");
         columns ??= [];
         if (columns.Any(x => x is null)) throw new McpToolException(McpErrorCodes.InvalidArgument, "columns must not contain null entries.");
-        var shifts = OptionalText(shiftStarts, 100, "shiftStarts") ?? "08:00,20:00";
-        var recipients = OptionalText(emailRecipients, 1000, "emailRecipients") ?? "";
-        var candidate = new ReportTemplate
-        {
-            Name = text, Period = period, AreaId = areaId, ShiftStarts = shifts, ColumnsJson = JsonSerializer.Serialize(columns, ReportTemplates.Json),
-            ScheduleEnabled = scheduleEnabled, ScheduleDelayMin = scheduleDelayMin ?? ReportTemplate.DefaultScheduleDelayMin,
-            EmailChannelId = emailChannelId, EmailRecipients = recipients
-        };
-        var now = ScadaTime.NowMs();
-        try { ReportTemplates.Validate(candidate, columns); }
-        catch (ReportTemplateException ex) { return new(templateId ?? 0, false, ex.Message, 0, null, now); }
+        var shifts = OptionalText(shiftStarts, 100, "shiftStarts");
+        var recipients = OptionalText(emailRecipients, 1000, "emailRecipients");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
-        if (!await db.Areas.AnyAsync(x => x.Id == areaId, cancellationToken))
-            throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
-        var tagIds = columns.Where(c => c.Kind <= ReportColumnKind.TagSum && c.TagId is int).Select(c => c.TagId!.Value).Distinct().ToArray();
-        var missingTags = tagIds.Except(await db.Tags.Where(x => tagIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(cancellationToken)).ToArray();
-        if (missingTags.Length > 0)
-            return new(templateId ?? 0, false, $"Referenced tags do not exist: {string.Join(",", missingTags)}", 0, null, now);
-        foreach (var column in columns.Where(c => c.Kind == ReportColumnKind.CalcSnapshot))
-        {
-            if (column.JobId is not int jobId || !await db.CalcJobs.AnyAsync(x => x.Id == jobId, cancellationToken))
-                return new(templateId ?? 0, false, $"Calculation job {column.JobId} does not exist.", 0, null, now);
-        }
-        if (emailChannelId is int email)
-        {
-            var channel = await db.NotificationChannels.AsNoTracking().SingleOrDefaultAsync(x => x.Id == email, cancellationToken);
-            if (channel is null || channel.Type != NotificationChannelType.Email)
-                return new(templateId ?? 0, false, "Reports can only be delivered through an email channel.", 0, null, now);
-        }
-        var row = templateId is int key ? await db.ReportTemplates.SingleOrDefaultAsync(x => x.Id == key, cancellationToken) : null;
-        if (templateId is not null && row is null) throw new McpToolException(McpErrorCodes.NotFound, "Report template does not exist.");
-        if (row is not null && row.Revision != revision)
-            return new(row.Id, false, $"Template was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.ScheduleSinceTs, now);
-        if (await db.ReportTemplates.AnyAsync(x => x.Name == text && x.Id != (templateId ?? 0), cancellationToken))
+        var result = await reports.SaveAsync(db, runtime, templateId, text, period, areaId, shifts, columns, scheduleEnabled, scheduleDelayMin,
+            emailChannelId, recipients, revision, McpActorName, null, cancellationToken);
+        var now = ScadaTime.NowMs();
+        if (result.Error is ReportTemplateCommandError.NotFound) throw new McpToolException(McpErrorCodes.NotFound, "Report template does not exist.");
+        if (result.Error is ReportTemplateCommandError.AreaMissing) throw new McpToolException(McpErrorCodes.NotFound, "Area does not exist.");
+        var row = result.Template;
+        if (result.Error is ReportTemplateCommandError.Conflict)
+            return new(row!.Id, false, $"Template was changed by another editor (current revision {row.Revision}); reload and retry.", row.Revision, row.ScheduleSinceTs, now);
+        if (result.Error is ReportTemplateCommandError.DuplicateName)
             return new(row?.Id ?? 0, false, "Template name already exists.", row?.Revision ?? 0, row?.ScheduleSinceTs, now);
-        var creating = row is null;
-        var wasScheduled = row?.ScheduleEnabled ?? false;
-        if (row is null)
-        {
-            row = new ReportTemplate { Revision = 1 };
-            db.ReportTemplates.Add(row);
-        }
-        else row.Revision++;
-        row.Name = text;
-        row.Period = period;
-        row.AreaId = areaId;
-        row.ShiftStarts = shifts;
-        row.ColumnsJson = candidate.ColumnsJson;
-        row.ScheduleEnabled = scheduleEnabled;
-        row.ScheduleDelayMin = candidate.ScheduleDelayMin;
-        if (scheduleEnabled && !wasScheduled) row.ScheduleSinceTs = now;
-        row.EmailChannelId = emailChannelId;
-        row.EmailRecipients = recipients;
-        row.UpdatedTs = now;
-        await db.SaveChangesAsync(cancellationToken);
-        runtime.OperationLogs.Add(Audit(creating ? $"创建报表模板：{row.Name}" : $"修改报表模板：{row.Name}", "ReportTemplate", row.Id, "成功", null, null, now));
-        await runtime.SaveChangesAsync(cancellationToken);
-        return new(row.Id, true, creating ? "Report template created." : "Report template saved.", row.Revision, row.ScheduleSinceTs, ScadaTime.NowMs());
+        if (result.Error is ReportTemplateCommandError.TagsMissing)
+            return new(templateId ?? 0, false, $"Referenced tags do not exist: {string.Join(",", result.MissingTagIds)}", 0, null, now);
+        if (result.Error is ReportTemplateCommandError.JobMissing)
+            return new(templateId ?? 0, false, $"Calculation job {result.MissingJobId} does not exist.", 0, null, now);
+        if (result.Error is ReportTemplateCommandError.EmailChannelInvalid)
+            return new(templateId ?? 0, false, "Reports can only be delivered through an email channel.", 0, null, now);
+        if (!result.Success)
+            return new(templateId ?? 0, false, result.Message ?? "Rejected.", row?.Revision ?? 0, row?.ScheduleSinceTs, now);
+        return new(row!.Id, true, result.Created ? "Report template created." : "Report template saved.", row.Revision, row.ScheduleSinceTs, ScadaTime.NowMs());
     }
 
-    [McpServerTool(Name = "generate_report", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
+        [McpServerTool(Name = "generate_report", ReadOnly = false, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Generate one report from an existing template as mcp:lan, appending a new immutable version in the archive with XLSX/PDF hashes and audit. Omit at to generate the previous complete period, or pass a Unix-millisecond timestamp inside the required period. Returns run metadata only, never file paths. success=false when the template or stored columns are invalid.")]
     public Task<McpReportGenerated> GenerateReport(int templateId, CancellationToken cancellationToken,
         [Description("Unix milliseconds inside the period to generate; omit for the previous complete period.")] long? at = null,

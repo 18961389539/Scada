@@ -120,6 +120,7 @@ var app = builder.Build();
 // 让"这台机器和那台机器行为不同"有据可查：只记录与默认值不同的标量配置（敏感项跳过）。
 // 必须放在 Build() 之后：Serilog 在 Build 时才接管 ILogger，之前的 Console 输出在服务模式下会丢。
 ScadaStartupLog.NonDefaultSettings(app.Logger, scadaOptions);
+Scada.Engine.Maintenance.BackupSecurity.WarnIfUnencrypted(builder.Environment.IsDevelopment(), scadaOptions, app.Logger);
 
 await DatabaseInitializer.InitializeAsync(app.Services);
 

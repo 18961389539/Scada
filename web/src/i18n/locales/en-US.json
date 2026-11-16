@@ -3599,6 +3599,7 @@
   "closeAll": "Close all tabs",
   "closeDialog": "Close",
   "closeOthers": "Close other tabs",
+  "closeRight": "Close tabs to the right",
   "closeTab": "Close tab",
   "duplicateTab": "Duplicate tab",
   "emptyHint": "Choose a published screen from the catalog to start multi-page monitoring.",
@@ -3607,6 +3608,7 @@
   "loadFailed": "Failed to load the screen catalog",
   "maxTabs": "At most {0} screens can be open",
   "noMatches": "No matching screens",
+  "noClosedTabs": "No closed tabs to reopen",
   "noScreens": "No screens available",
   "noTabs": "No screens open",
   "openFailed": "This screen is not published or is not visible to the current account",
@@ -3620,6 +3622,7 @@
   "refresh": "Refresh screen catalog",
   "reloadTab": "Reload tab",
   "removed": "Some screens are no longer available and were removed from the workspace",
+  "reopenTab": "Reopen closed tab",
   "retry": "Retry",
   "searchPlaceholder": "Search by screen name or id",
   "shortcuts": "Ctrl+Tab switch · Ctrl+W close · Alt+←/→ back/forward",
@@ -4462,5 +4465,10 @@
   "stopBits": "Stop bits",
   "timeout": "Timeout (ms)",
   "title": "Channels"
+ },
+ "protocolRecovery": {
+  "title": "Protocol catalog unavailable",
+  "hint": "Configuration pages are blocked to prevent missing protocol parameters. Runtime monitoring remains available. Check the server connection and retry.",
+  "retry": "Reload protocol catalog"
  }
 }

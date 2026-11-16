@@ -704,3 +704,129 @@ NRE，连带 Engine 3 条、Collector 1 条红。字段顺序调整后恢复。�
    其中 `ReportBuilder` 应按 `Scada:ReportLocale` 取 provider，而不是一律 `InvariantCulture`——需要单独一轮。
 2. 备份包加密只覆盖「新建的包」。已在现场流通的历史明文包不会自动加密，需要重新建包并删除旧包。
 3. 加密口令目前只有 `Scada:BackupPassword` 一个来源（配置文件 / 环境变量），没有做口令轮换与密钥托管。
+
+
+## 20. 2026-11-16：审查建议第一批（备份姿态 / BACnet / 容量护栏 / 协议目录恢复）
+
+本机只改源码与测试，起点 `74038f2`，工作区起初干净。本批未提交、未推送；没有读取/修改真实站点
+口令、密钥、数据库或旧备份，没有启动生产控制链路。测试仅使用隔离临时库与本机模拟器。
+
+| 项 | 已落地 |
+| --- | --- |
+| 备份姿态 | `BackupSecurity` 对非开发环境空口令给出启动告警；流水线在构造目标前、Directory/S3 在发送前检查包头，拒绝明文外发和外部保留清理，错误提示“设置口令→重启→新建并验证加密包”。不靠 `.enc` 后缀判定。已有本地明文包仍可校验/恢复，既有保留策略不变，不做批量迁移/删除。 |
+| 设置与验证入口 | 新增 `tools/deployment/Set-BackupPassword.ps1`：停机窗口、本地隐藏输入两次、保留未知配置、沿用原 ACL、原子替换、拒绝轮换及检测到的并发编辑；不创建公开配置写入口。`Scada.BackupTool --prompt-password` 隐藏输入验证口令，重定向输入时拒绝交互。实际站点没有执行设置；脚本回归只写临时假配置。 |
+| BACnet | 元数据默认改为与后端一致的未填哨兵 -1（有效范围仍从 0 起）；前端对低于下界的数值默认不赋值，显示空框并标记必填。缺失/非整数不能保存，显式 0 仍可用。不改旧有显式 0 的设备。 |
+| 容量 | `HistorySizingPlan` 按启用物理/计算点的实际配置周期建立压力情景，不虚构死区节省；明确不是预测/严格上界，排除项可见。`SystemWatch` 接现有健康告警与系统页；>=1000 归档点且大小告警关闭时提示配置。补 Medium 示例，不改任何采样/保留默认、不接 Timescale。 |
+| 协议目录 | 失败/空成功响应显式进入恢复态，组态页不挂载、设备表单也守住目录和必填参数；用户可重试。运行监视仍能显示，失败不强行阻断运行端；无磁盘缓存，登录/改密/退出清目录，generation 丢弃旧会话迟到响应。 |
+
+**验证（均本机，本次实跑，不冒充全量）**
+
+- `dotnet build Scada.sln -c Release --nologo -v:q`：0 错误 / 0 警告。
+- Server `BackupSecurityTests|BackupPipelineTests|BackupServiceTests`：30 / 30（含旧明文兼容、错口令、改后缀不能绕过、发送前拒绝、加密目录/S3 流水线）；`--blame-hang-timeout 3m`。
+- Engine `HistorySizingPlanTests|SystemWatchTests|ArchivePolicyTests`：20 / 20（含实际配置周期、死区不打折、禁用/派生点、Periodic 非上限、健康接线与重评估）；同样 3 分钟挂起保护。
+- Collector `BacnetRequiredInstanceTests|BacnetTests|ProtocolFormCatalogTests`：16 / 16。
+- `Test-BackupPasswordSetup.ps1`：通过（首次设置、确认、不丢未知字段、拒绝轮换、两次不一致不落盘、临时文件清理）。测试发现 PowerShell 把 `File.Replace` 的 `$null` 绑定成空字符串，已改 `[NullString]::Value` 后通过。
+- `dotnet build tools/Scada.BackupTool -c Release`：0 错误 / 0 警告。真实口令与人工交互控制台未做现场验证。
+- 前端 `npm run test:unit`：73 / 73，另 Node 脚本测试 16 / 16，覆盖率棘轮通过，mock 契约通过。
+- `npm run build`（含 vue-tsc / 包体预算）、`i18n:check`（4277 键）、`check:hygiene`（any=30、log=0）、`check:access`、ESLint 全通过。ESLint 仍有 309 条存量 warning（0 error），Vite 仍有依赖注释/大分块提示；不把它们写成前端“零警告”。
+- 新 `protocol-recovery.spec.ts`：1 / 1（503→组态阻断、总览仍显示→手动重试恢复）。首版用错按钮中文名，改为既有 `data-test=device-create` 后通过。
+- `core-smoke.spec.ts` 三条 + 原有 BACnet/OPC DA 表单 E2E：4 / 4；Playwright 本次均设 global timeout。
+- `check:access` 首跑暴露既有 `/workspace` 未声明策略且未豁免。没有关闭门禁或加豁免，给路由与导航同时补 `any-view` 后通过；这是轻微收紧，仅无任何 View 权限的账号会失去此运行入口。
+
+**范围边界与续批**：没有跑全仓后端测试、全量 E2E、24 小时容量压测、真实 S3/现场 PLC 或真实恢复演练。
+本批只完成前四项。MCP/REST 剩余共用命令服务、可选 Gateway.Host 回环隔离、HA 登录就绪/报表与临时目录
+测试治理尚未开始，也没有为凑行数拆大文件。备份入口目前是本地维护工具而非 Web 管理表单；
+仓库尚无通用的安全站点密钥文件写入 API，不能临时暴露一个公开配置端点代替。
+
+## 21. 第二批落地（2026-11-16）：MCP/REST 共用写入、可选本机采集隔离、测试治理
+
+本批在未提交工作区上继续，不回滚第一批，不 commit、不 push，不操作真实站点数据、口令、密钥或旧备份，不启动真实控制链路或 Gateway.Host 进程。
+
+### 已完成
+
+1. **MCP/REST 共用命令服务（先核实再抽取，不是 SaveChanges 搜索替换）**
+   - 抽出 `ScreenCommandService`：创建、草稿保存、发布/回退共用名称与区域存在性、交叉区域测点（`ScreenAreaRules.MismatchAsync`）、结构校验、乐观锁、发布冻结与历史、快照失败标记。授权与 HTTP/MCP 返回形态仍在入口。MCP `create_screen`/`save_screen_draft` 增加可选 `areaId`（及 `clearArea`），发布现在与 REST 一样拒绝跨区域测点（此前 MCP 发布缺少该项检查）。
+   - 抽出 `AreaCommandService`：创建/重命名/删除与引用检查共用；**更新区域后也会使访问模型失效**（REST PUT 以前漏了 `Invalidate`）。
+   - 抽出 `DowntimeCommandService.ConfirmAsync`：REST 确认入口与 MCP `confirm_downtime`（含可选归类）共用确认与 OEE 重建；审计行形态仍由入口写入。
+   - **已核实、有意保持分叉**：`set_device_control_mode` 仍拒绝切换（MCP 无区域用户）；挂牌仅允许 MCP 自挂的 NoOperate，与 REST 维护牌/代摘规则不同。布局、对象模板、报表模板保存仍各写一处，未做机械替换。
+   - 关键双入口测试：`ScreenCommandDualEntryTests`、`AreaCommandDualEntryTests`。
+
+2. **采集隔离：默认一体化，可选关闭本机采集、全部走 Gateway.Host 回环**
+   - 新增 `Scada:LocalCollectionEnabled`（默认 `true`，改后需重启）。为 `false` 时：`CollectorEngine` 不再启动未分配网关设备的 worker；协调器/本机 OPC 浏览与元数据拒绝本机路径；启用且未分配网关的设备在 `DeviceCommandService` 保存时被拒绝；`SystemWatch` 给出 `local_collection_disabled` / `local_collection_unassigned`。
+   - **未删除** Server 对 Collector 的项目引用，不冒充进程隔离。驱动插件仍在网关进程内加载。
+   - 文档与示例：`docs/local-collection.md`、`docs/examples/appsettings.LocalCollection.GatewayLoopback.json`、`docs/examples/gateway-agent.Loopback.json`；`docs/configuration.md` 已用 `python tools/config-doc/generate.py` 重生；`docs/publishing.md`、`README.md` 有入口。
+   - 明确限制：启用设备必须有 `GatewayId`；两侧都要开 `AllowLoopbackHttp` 才能用 HTTP 回环；MCP `reconnect_device` 仍不下发网关工程重连；部分协议立即读/无命令号的字符串写沿用既有网关限制。测试不启动 Gateway.Host，也不连接现场设备（`LocalCollectionIsolationTests`）。
+
+3. **测试治理**
+   - `HaClusterTests.LoginAsync` 按就绪条件等待（最多 30 秒，单次尝试 3 秒）：只重试连接失败、超时、5xx/429；400/401/403/404/409/422/428 立即失败，不掩盖认证错误。HA 临时目录登记到 `TempCleanup`。
+   - 报表归档：`ReportSigningTests` 与 `AuthorizationTests.Site` 一样使用夹具独立的 `ReportsRoot` 与配置库旁的签名证书，无需再拆夹具；本批未发现共享默认 `data/reports` 的残留问题。
+   - `TempCleanup` 抽到 `tests/shared/TempCleanup.cs`，挂到 Server/Engine/Data/Collector/Desktop/Gateway/Core/Protocols 测试项目。清池改为反射调用，避免给不引用 Sqlite 的项目加程序集。Engine `TempDir`、Data `TempRoot`、Collector 插件/OPC 临时目录、HA 根目录会 `Track`。大文件未按行数拆分。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- `dotnet build src/Scada.Server/Scada.Server.csproj -warnaserror` 以及 Server/Engine/Data/Collector/Desktop/Core/Gateway/Protocols 测试项目：均为 0 错误 / 0 警告。
+- Server 定向：`ScreenCommandDualEntryTests|AreaCommandDualEntryTests|LocalCollectionIsolationTests|ScreenVersionMcpTests|ScreenPublicationTests|HaClusterTests|ReportSigningTests|TestSqliteTests|McpMasterDataTests|DeviceValidationTests`：**32 / 32**（约 56 秒）。中间曾因替换方法体时丢掉若干 `[McpServerTool]` 导致工具未注册，补回属性后通过；交叉区域发布用例曾在“保存已拒绝、草稿仍合法”时误断言发布失败，改为把非法文档写入草稿后再测发布，随后通过。
+- Engine `HistorySizingPlanTests`：**5 / 5**（确认默认 `LocalCollectionEnabled=true` 时不误报新健康码）。
+- Server `McpConfigurationTests|HmiLayoutLifecycleTests|OeeApiTests`：**32 / 32**。曾因 MCP `publishedRevision` 把未发布的 `null` 写成 `0` 失败，已改为保留 `null`。
+- 未跑：全仓后端测试、前端 unit/E2E/build（本批未改 web）、真实 Gateway.Host 启动、现场设备或真实控制链路。
+
+### 兼容影响与未完成
+
+- 兼容：MCP 发布现在会拒绝跨区域测点（与 REST 对齐，属于缺口修复）。REST 更新区域会失效访问模型。MCP 画面工具新增可选参数，旧调用不传则行为与以前一致。默认仍是一体化本机采集。
+- 未完成：HMI 布局、对象模板、报表模板保存仍未抽共用服务；控制挂牌因 MCP 策略不同未合并；Desktop 等处仍有少量临时目录未全部改走共享 `TempDir`；运行画面/报警等大文件未拆。
+
+## 22. 第三批落地（2026-11-16）：重连提示、模板共用命令服务、脚本缓存测试隔离
+
+本批在未提交工作区上继续，不回滚第一、二批，不 commit、不 push，不操作真实站点数据、口令、密钥或旧备份，不启动真实控制链路或 Gateway.Host。
+
+### 已完成
+
+1. **关闭本机采集后，未分配网关设备的重连不再报「配置已变化」**
+   - `ICollectorDiagnostics.RequestReconnect` 改为返回 `CollectorReconnectResult`：本机采集关闭时给出 `LocalCollection.DisabledMessage`，与设备配置变化区分。
+   - REST `/diagnostics/reconnect` 对未分配网关设备返回 409 和该明确原因；已分配网关的网页 `EngineerAsync(Reconnect)` 路径未改。MCP `reconnect_device` 对未分配设备同样返回 `DisabledMessage`，对已分配网关设备仍为 unsupported，未改走工程重连。
+   - `docs/local-collection.md` 已更新。`LocalCollectionIsolationTests.UnassignedReconnectExplainsThatLocalCollectionIsDisabled` 覆盖 REST 与 MCP。
+
+2. **布局、对象模板、报表模板抽共用命令服务**
+   - 新增 `HmiLayoutCommandService`、`ObjectTemplateCommandService`、`ReportTemplateCommandService`。校验、修订冲突、唯一名、`ScheduleSinceTs`、版本追加、事务和成功审计在服务内；区域/测点可见性等授权与 HTTP/MCP 结果形状仍在入口。
+   - REST 保存报表成功时现在会写 `OperationLogs`（此前只有 MCP 写）。MCP 保存/发布布局现在与 REST 一样使用数据库事务；`HmiLayoutLifecycleTests` 的历史写入失败回滚用例仍然有效，并在双入口测试中对 MCP 发布做了同样的触发器回滚断言。
+   - 双入口测试：`TemplateCommandDualEntryTests`。
+
+3. **脚本编译缓存测试不再改写生产默认目录**
+   - `CSharpScriptOptionsTests.OrphanWorkerDirectoriesAreSweptOnStartup` 改用带 GUID 的隔离目录，并挂 `TempCleanup`，跑完删除自己创建的目录，不再碰 `%TEMP%\scada-script-cache`。
+   - 顺手给 Desktop 若干已有唯一 GUID 临时目录加上 `TempCleanup.Track`（`ClientIdentityTests`、`DesktopConfigResolverTests`、`ProvisionCommandTests`、`SettingsStoreTests`），未改测试结构。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- `dotnet build` `-c Release -warnaserror`：`Scada.Core`、`Scada.Server`、`Scada.Gateway.Host`，以及 Server/Engine/Desktop/Collector 测试项目，均为 0 错误 / 0 警告。
+- Server 定向：`LocalCollectionIsolationTests|TemplateCommandDualEntryTests|McpConfigurationTests|HmiLayoutLifecycleTests|McpWriteTests|HmiLayoutTests`：**39 / 39**（约 27 秒，`--blame-hang-timeout 3m`）。隔离站点补了 MCP 允许 CIDR 后，重连的 REST/MCP 用例通过。
+- Engine `CSharpScriptOptionsTests`：**5 / 5**。
+- Collector `CollectorCommandTests`：**16 / 16**。
+- Desktop `ClientIdentityTests|DesktopConfigResolverTests|ProvisionCommandTests|SettingsStoreTests`：**19 / 19**。
+- 未跑：全仓后端测试、前端 unit/E2E/build（本批未改 web）、真实 Gateway.Host 启动、现场设备或真实控制链路。
+
+### 兼容影响与未完成
+
+- 兼容：关闭本机采集后，对未分配网关设备点重连会从「配置已变化」改为明确的「本机采集已关闭」提示（REST 仍是 409）。报表网页保存成功会多一条操作日志。MCP 布局保存/发布失败时的事务回滚与网页一致。默认一体化采集行为不变。
+- 未做（有意）：Timescale、AD/OIDC、默认强制 HTTPS、`FilterPublishedScreensByArea`、控制模式/挂牌合并、MCP 对已分配网关设备走工程重连。工作站保存、模板实例化/升级仍在原入口。
+
+## 23. 第四批落地（2026-11-16）：关闭本机采集后禁止中心试连
+
+记录时间：2026-11-16 21:05（Asia/Shanghai）。本批只补上一轮审查留下的试连缺口，不回滚前三批，也不扩大到产品决策项。
+
+### 改动
+
+- LocalCollectionEnabled=false 时，未分配网关设备的 POST /api/devices/{id}/test 与 POST /api/devices/test-draft 在权限校验之后、创建本机驱动之前返回 HTTP 409 和 LocalCollection.DisabledMessage，不再调用 DeviceProbe.ReadAsync / ConnectAsync。
+- 已分配网关的网页工程试连保持原状：已保存设备的 /{id}/test 仍走 EngineerAsync(Probe)；/test-draft 仍返回「请保存后通过网关诊断测试连接」。
+- docs/local-collection.md 已写明试连也不会从中心建链。
+- 测试：LocalCollectionIsolationTests.UnassignedDeviceTestsExplainThatLocalCollectionIsDisabled 覆盖上述两条入口；对不可达地址的草稿试连还断言 409 在 2 秒内返回，避免静默走到 ConnectAsync 再等超时。默认开启本机采集时，DraftDeviceTestConnectsWithFormValuesAndRequiresControlPermission 行为不变。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- dotnet build -c Release -warnaserror：Scada.Core、Scada.Server、Scada.Server.Tests，均为 0 错误 / 0 警告。
+- Server 定向：LocalCollectionIsolationTests 与 DraftDeviceTestConnectsWithFormValuesAndRequiresControlPermission：**4 / 4**（约 9 秒，--blame-hang-timeout 3m）。
+- 未跑：全仓后端测试、前端 unit/E2E/build（本批未改 web）、真实 Gateway.Host 启动、现场设备或真实控制链路。
+
+### 兼容影响与未完成
+
+- 兼容：默认一体化采集（LocalCollectionEnabled=true）的试连行为不变。关闭本机采集后，对未分配网关设备的试连从中心建链改为 409「本机采集已关闭」。
+- 未做（有意）：Timescale、AD/OIDC、默认强制 HTTPS、FilterPublishedScreensByArea、控制模式/挂牌合并、MCP 对已分配网关设备走工程重连。

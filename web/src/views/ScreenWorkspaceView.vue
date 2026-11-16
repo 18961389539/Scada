@@ -17,7 +17,8 @@
           <el-button :icon="MoreFilled" :title="$t('workspace.tabActions')" :aria-label="$t('workspace.tabActions')" data-test="workspace-tab-actions" />
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="closeOthers" :disabled="tabs.length <= 1" data-test="workspace-close-others">{{ $t('workspace.closeOthers') }}</el-dropdown-item>
+              <el-dropdown-item command="reopen" :disabled="!closedStack.length" data-test="workspace-reopen">{{ $t('workspace.reopenTab') }}</el-dropdown-item>
+              <el-dropdown-item divided command="closeOthers" :disabled="tabs.length <= 1" data-test="workspace-close-others">{{ $t('workspace.closeOthers') }}</el-dropdown-item>
               <el-dropdown-item command="closeAll" :disabled="!tabs.length" data-test="workspace-close-all">{{ $t('workspace.closeAll') }}</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -32,20 +33,22 @@
     </el-alert>
     <el-alert v-if="notice" :title="notice" type="warning" closable show-icon data-test="workspace-notice" @close="notice = ''" />
 
-    <div ref="tabStrip" class="ws-tabs" role="tablist" :aria-label="$t('workspace.title')" data-test="workspace-tabs" @wheel="onTabsWheel">
+    <div ref="tabStrip" class="ws-tabs" role="tablist" :aria-label="$t('workspace.title')" data-test="workspace-tabs" @wheel="onTabsWheel" @dblclick.self="openCatalog">
       <div
         v-for="(tab, index) in tabs"
         :key="tab.key"
+        :id="`ws-tab-${tab.key}`"
         class="ws-tab"
         :class="{ active: tab.key === activeKey, dragging: dragIndex === index, 'drag-over': dragOverIndex === index && dragIndex !== index }"
         role="tab"
-        tabindex="0"
+        :tabindex="tab.key === activeKey ? 0 : -1"
         draggable="true"
         :aria-selected="tab.key === activeKey"
+        :aria-controls="`ws-pane-${tab.key}`"
         :data-test="`workspace-tab-${tab.key}`"
         :data-screen-id="tab.screenId"
         @click="activate(tab.key)"
-        @keydown.enter="activate(tab.key)"
+        @keydown="onTabKeydown($event, index)"
         @mousedown.middle.prevent
         @auxclick="onAuxClick($event, tab.key)"
         @contextmenu.prevent.stop="openMenu($event, tab.key)"
@@ -55,7 +58,7 @@
         @dragend="endDrag"
       >
         <span v-if="tab.pinned" class="ws-tab-pin" data-test="workspace-pin-icon" :title="$t('workspace.pinned')"><el-icon><StarFilled /></el-icon></span>
-        <span class="ws-tab-name">{{ tab.name }}</span>
+        <span class="ws-tab-name" :title="tab.name">{{ tab.name }}</span>
         <span class="ws-tab-id">#{{ tab.screenId }}</span>
         <span v-if="tab.key !== activeKey && cachePages" class="ws-tab-paused" :title="$t('workspace.backgroundPaused')" aria-hidden="true">Ⅱ</span>
         <span
@@ -89,7 +92,7 @@
         <el-button type="primary" :icon="Plus" @click="openCatalog">{{ $t('workspace.openScreen') }}</el-button>
       </el-empty>
       <template v-else>
-        <div v-for="tab in tabs" v-show="tab.key === activeKey" :key="tab.key" class="ws-pane" :data-test="`workspace-pane-${tab.key}`">
+        <div v-for="tab in tabs" v-show="tab.key === activeKey" :id="`ws-pane-${tab.key}`" :key="tab.key" class="ws-pane" role="tabpanel" :aria-labelledby="`ws-tab-${tab.key}`" :data-test="`workspace-pane-${tab.key}`">
           <ScreenRuntime
             v-if="tab.mounted"
             :key="`${tab.key}-${tab.reloadNonce}`"
@@ -161,6 +164,7 @@
       <button type="button" role="menuitem" data-test="workspace-menu-pin" @click="onMenuCommand('pin')">{{ menuTab.pinned ? $t('workspace.unpinTab') : $t('workspace.pinTab') }}</button>
       <div class="ws-menu-sep"></div>
       <button type="button" role="menuitem" data-test="workspace-menu-close" :disabled="menuTab.pinned" @click="onMenuCommand('close')">{{ $t('workspace.closeTab') }}</button>
+      <button type="button" role="menuitem" data-test="workspace-menu-close-right" @click="onMenuCommand('closeRight')">{{ $t('workspace.closeRight') }}</button>
       <button type="button" role="menuitem" data-test="workspace-menu-close-others" @click="onMenuCommand('closeOthers')">{{ $t('workspace.closeOthers') }}</button>
       <button type="button" role="menuitem" data-test="workspace-menu-close-all" @click="onMenuCommand('closeAll')">{{ $t('workspace.closeAll') }}</button>
     </div>
@@ -200,6 +204,7 @@ interface StoredState { tabs: StoredTab[]; activeIndex: number; cache: boolean }
 
 const MAX_TABS = 8
 const MAX_HISTORY = 20
+const MAX_CLOSED = 10
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const screens = ref<ScreenSummary[]>([])
 const tabs = ref<WorkspaceTab[]>([])
@@ -214,6 +219,7 @@ const dragIndex = ref<number | null>(null)
 const dragOverIndex = ref<number | null>(null)
 const tabStrip = ref<HTMLElement | null>(null)
 const menu = ref<{ x: number; y: number; tabKey: number } | null>(null)
+const closedStack = ref<StoredTab[]>([])
 let nextKey = 1
 const storageKey = computed(() => `scada-screen-workspace:${auth.user?.id ?? auth.user?.userName ?? 'anonymous'}`)
 const activeTab = computed(() => tabs.value.find(tab => tab.key === activeKey.value) ?? null)
@@ -474,6 +480,38 @@ function jumpTrail(index: number): void {
   persist()
 }
 
+function rememberClosed(tab: WorkspaceTab): void {
+  closedStack.value.unshift({
+    screenId: tab.screenId,
+    name: tab.name,
+    history: tab.history.map(entry => ({ ...entry })),
+    index: tab.index
+  })
+  if (closedStack.value.length > MAX_CLOSED) closedStack.value.length = MAX_CLOSED
+}
+
+function rememberClosedTabs(list: WorkspaceTab[]): void {
+  for (const tab of list) rememberClosed(tab)
+}
+
+function reopenClosed(): void {
+  while (closedStack.value.length) {
+    const item = closedStack.value.shift()!
+    if (screens.value.length && !screens.value.some(screen => screen.id === item.screenId && screen.publishedRevision != null)) continue
+    if (tabs.value.length >= MAX_TABS) {
+      closedStack.value.unshift(item)
+      ElMessage.warning(tr('workspace.maxTabs', [MAX_TABS]))
+      return
+    }
+    const normalized = normalizeHistory(item.history, item.screenId, screenName(item.screenId, item.name))
+    const tab = makeTab(item.screenId, screenName(item.screenId, item.name), normalized.history, item.index ?? normalized.index)
+    tabs.value.push(tab)
+    activate(tab.key)
+    return
+  }
+  ElMessage.info(tr('workspace.noClosedTabs'))
+}
+
 function closeTab(key: number): void {
   const index = tabs.value.findIndex(tab => tab.key === key)
   if (index < 0) return
@@ -481,6 +519,8 @@ function closeTab(key: number): void {
     ElMessage.warning(tr('workspace.pinBlocked'))
     return
   }
+  const tab = tabs.value[index]
+  rememberClosed(tab)
   const wasActive = key === activeKey.value
   tabs.value.splice(index, 1)
   if (wasActive) {
@@ -496,6 +536,7 @@ function closeTab(key: number): void {
 function closeOthers(keepKey = activeKey.value): void {
   const keep = tabs.value.find(tab => tab.key === keepKey) ?? activeTab.value
   if (!keep) return
+  rememberClosedTabs(tabs.value.filter(tab => !tab.pinned && tab.key !== keep.key))
   tabs.value = tabs.value.filter(tab => tab.pinned || tab.key === keep.key)
   keep.mounted = true
   activeKey.value = keep.key
@@ -504,6 +545,7 @@ function closeOthers(keepKey = activeKey.value): void {
 
 function closeAll(): void {
   const kept = tabs.value.filter(tab => tab.pinned)
+  rememberClosedTabs(tabs.value.filter(tab => !tab.pinned))
   tabs.value = kept
   if (!kept.some(tab => tab.key === activeKey.value)) {
     const next = kept[0] ?? null
@@ -511,6 +553,17 @@ function closeAll(): void {
     if (next) next.mounted = true
   }
   persist()
+}
+
+function closeRight(key: number): void {
+  const index = tabs.value.findIndex(tab => tab.key === key)
+  if (index < 0) return
+  const removed = tabs.value.slice(index + 1).filter(tab => !tab.pinned)
+  if (!removed.length) return
+  rememberClosedTabs([...removed].reverse())
+  tabs.value = tabs.value.filter((tab, at) => at <= index || tab.pinned)
+  if (!tabs.value.some(tab => tab.key === activeKey.value)) activate(key)
+  else persist()
 }
 
 function reorderTabs(): void {
@@ -547,7 +600,7 @@ function openMenu(event: MouseEvent, key: number): void {
   activate(key)
   menu.value = {
     x: Math.max(8, Math.min(event.clientX, window.innerWidth - 208)),
-    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 268)),
+    y: Math.max(8, Math.min(event.clientY, window.innerHeight - 320)),
     tabKey: key
   }
 }
@@ -564,6 +617,7 @@ function onMenuCommand(command: string): void {
   else if (command === 'duplicate') duplicateTab(tab.key)
   else if (command === 'pin') togglePin(tab.key)
   else if (command === 'close') closeTab(tab.key)
+  else if (command === 'closeRight') closeRight(tab.key)
   else if (command === 'closeOthers') closeOthers(tab.key)
   else if (command === 'closeAll') closeAll()
 }
@@ -576,7 +630,8 @@ function onTabsWheel(event: WheelEvent): void {
 }
 
 function onTabCommand(command: string | number | object): void {
-  if (command === 'closeOthers') closeOthers()
+  if (command === 'reopen') reopenClosed()
+  else if (command === 'closeOthers') closeOthers()
   else if (command === 'closeAll') closeAll()
 }
 
@@ -648,6 +703,20 @@ function isOpen(id: number): boolean {
   return tabs.value.some(tab => tab.screenId === id)
 }
 
+function onTabKeydown(event: KeyboardEvent, index: number): void {
+  let nextIndex: number | null = null
+  if (event.key === 'ArrowRight') nextIndex = (index + 1) % tabs.value.length
+  else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + tabs.value.length) % tabs.value.length
+  else if (event.key === 'Home') nextIndex = 0
+  else if (event.key === 'End') nextIndex = tabs.value.length - 1
+  if (nextIndex == null) return
+  event.preventDefault()
+  const tab = tabs.value[nextIndex]
+  if (!tab) return
+  activate(tab.key)
+  void nextTick(() => tabStrip.value?.querySelector<HTMLElement>(`[data-test="workspace-tab-${tab.key}"]`)?.focus())
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && menu.value) {
     event.preventDefault()
@@ -657,6 +726,11 @@ function onKeydown(event: KeyboardEvent): void {
   if (catalogVisible.value) return
   const target = event.target as HTMLElement | null
   if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)) return
+  if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 't') {
+    event.preventDefault()
+    reopenClosed()
+    return
+  }
   if (event.ctrlKey && !event.altKey && event.key === 'Tab') {
     if (!tabs.value.length) return
     event.preventDefault()
@@ -772,11 +846,12 @@ watch(activeKey, async () => {
 .ws-tab.dragging { opacity: 0.5; }
 .ws-tab.drag-over { box-shadow: inset 2px 0 0 var(--scada-primary); }
 .ws-tab-id { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
+.ws-tab-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
 .ws-tab-paused { font-size: 10px; color: var(--scada-text-muted); opacity: 0.7; letter-spacing: -1px; }
 .ws-tab-pin { display: inline-flex; align-items: center; color: var(--scada-primary); font-size: 12px; }
 .ws-tab-close { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 4px; }
 .ws-tab-close:hover { background: color-mix(in srgb, var(--el-color-danger) 14%, transparent); color: var(--el-color-danger); }
-.ws-tabs-empty { padding: 8px 4px; font-size: 12px; }
+.ws-tabs-empty { padding: 8px 4px; font-size: 12px; pointer-events: none; }
 .ws-trail { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 12px; min-height: 20px; }
 .ws-trail button { background: transparent; border: 0; color: var(--scada-primary); cursor: pointer; padding: 0; font: inherit; }
 .ws-trail button:hover { text-decoration: underline; }

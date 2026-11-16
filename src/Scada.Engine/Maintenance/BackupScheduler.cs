@@ -76,6 +76,8 @@ public sealed class BackupScheduler(BackupService backups, IOptions<ScadaSetting
                 IBackupTarget? target = null;
                 try
                 {
+                    // Fail before constructing a target or making ANY remote call (including retention).
+                    BackupSecurity.RequireEncryptedOffsite(summary.Path);
                     target = (targetFactory ?? (x => BackupTargetFactory.Create(x)))(o);
                     await target.UploadAsync(summary.Path, summary.FileName, ct);
                     var remote = await target.ListAsync(ct);

@@ -1,3 +1,4 @@
+using Scada.Tests;
 namespace Scada.Engine.Tests;
 
 internal sealed class TempDir : IDisposable
@@ -8,10 +9,12 @@ internal sealed class TempDir : IDisposable
     {
         Path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path);
+        TempCleanup.Track(Path);
     }
 
     public void Dispose()
     {
         try { if (Directory.Exists(Path)) Directory.Delete(Path, true); } catch { /* 句柄释放失败不影响断言 */ }
+        if (Directory.Exists(Path)) TempCleanup.Track(Path);
     }
 }

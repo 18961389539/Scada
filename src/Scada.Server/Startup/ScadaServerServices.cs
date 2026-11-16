@@ -139,6 +139,12 @@ internal static class ScadaServerServices
         builder.Services.AddSingleton<Scada.Engine.Health.IHealthContributor>(sp => sp.GetRequiredService<ScreenRuntimeHealth>());
         builder.Services.AddSingleton<DeviceCommandService>();
         builder.Services.AddSingleton<AlarmRuleCommandService>();
+        builder.Services.AddSingleton<ScreenCommandService>();
+        builder.Services.AddSingleton<AreaCommandService>();
+        builder.Services.AddSingleton<DowntimeCommandService>();
+builder.Services.AddSingleton<HmiLayoutCommandService>();
+builder.Services.AddSingleton<ObjectTemplateCommandService>();
+builder.Services.AddSingleton<ReportTemplateCommandService>();
         builder.Services.AddSingleton<Scada.Engine.Templates.ObjectTemplateService>();
 
         // 首屏 JS/CSS 与历史/报警等大 JSON 走 Brotli/Gzip；Hashed 静态资源可长期缓存。
