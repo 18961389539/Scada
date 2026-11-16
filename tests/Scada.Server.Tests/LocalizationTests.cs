@@ -11,6 +11,8 @@ namespace Scada.Server.Tests;
 // 多语言：个人语言偏好、后端提示翻译（精确/插值/前缀）、报表表头、后端提示对照表覆盖率。
 public sealed partial class LocalizationTests : IClassFixture<ControlTests.ControlSite>
 {
+    // 历史欠账上限：只允许下降。翻译一批就从基线删除并同步下调本常量；新增中文提示必须翻译，不能塞进基线。
+    private const int BaselineCeiling = 973;
     private readonly ControlTests.ControlSite _site;
     public LocalizationTests(ControlTests.ControlSite site) => _site = site;
 
@@ -135,6 +137,13 @@ public sealed partial class LocalizationTests : IClassFixture<ControlTests.Contr
         }
         Assert.True(File.Exists(baselinePath), "缺少 i18n 基线文件：tests/Scada.Server.Tests/i18n-baseline.json");
         var baseline = JsonSerializer.Deserialize<HashSet<string>>(File.ReadAllText(baselinePath))!;
+        // 基线只降不升：手工把新欠账塞进基线（绕过下面的 added 断言）会先在这里失败。
+        Assert.True(baseline.Count <= BaselineCeiling,
+            $"i18n 基线从 {BaselineCeiling} 条涨到 {baseline.Count} 条；新增提示必须翻译，不能加进基线。");
+        // 已翻译的旧条目必须从基线删除，否则基线会一直虚高，"清零"永远做不到。
+        var stale = baseline.Except(missing).Order(StringComparer.Ordinal).ToArray();
+        Assert.True(stale.Length == 0,
+            "以下条目已有英文翻译，请从 i18n-baseline.json 删除并下调 BaselineCeiling：\n" + string.Join("\n", stale));
         var added = missing.Except(baseline).ToArray();
         Assert.True(added.Length == 0,
             "新增了未翻译的后端提示（请加到 src/Scada.Server/Localization/messages.en-US.json）：\n" + string.Join("\n", added));

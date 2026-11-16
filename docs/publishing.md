@@ -392,6 +392,52 @@ Rotating the password only affects new bundles; old bundles need the password
 that was active when they were written. Record it with the same care as the JWT
 signing key, and store offsite copies on media that is not shared with the site.
 
+`Scada.BackupTool reencrypt` rewrites one encrypted bundle beside the original,
+so existing retention and offsite copies do not have to be rebuilt by hand:
+
+```powershell
+.\Scada.BackupTool.exe reencrypt --backup 'D:\ScadaBackups\full_example.zip.enc' `
+  --new-password '<new password>' --prompt-password
+.\Scada.BackupTool.exe verify --backup 'D:\ScadaBackups\full_example.zip.reenc.zip.enc' --prompt-password
+```
+
+- The source bundle is never modified. The tool decrypts to a temporary file,
+  writes a sibling `full_*.zip.enc`, decrypts the new bundle again with the new
+  password and compares the plaintext byte-for-byte. Any mismatch removes the
+  new bundle and leaves the original untouched.
+- The target must stay in the same directory as the source, because retention,
+  backup listings and offsite copies only scan the backup root. Plain bundles
+  are rejected; rebuild them through the normal backup pipeline after setting
+  `Scada:BackupPassword`.
+- `--prompt-new-password` hides the new password and asks for it twice, so a
+  typo cannot produce a bundle nobody can decrypt. Delete the old bundle
+  manually only after `verify` and a restore drill succeed.
+- There is no in-service key rotation or KMS integration: the password still
+  lives in site configuration (or the environment). Treat rotation as a
+  maintenance-window action, not a background job.
+
+### Quarterly Recovery Drills
+
+Run these before connecting field equipment and once per quarter. CI proves the code path; these drills prove the site's data, credentials and operator procedure still work.
+
+Prerequisites: a stopped or isolated copy of the site, a verified encrypted bundle, and a maintenance window. Never restore over a running instance.
+
+1. **Full restore**
+   - `Scada.BackupTool verify --backup <bundle> --prompt-password` → expect a successful verification.
+   - `Scada.BackupTool restore --backup <bundle> --target <empty dir> --prompt-password`.
+   - Point a copy of the server at the restored directory, start it, log in, open a screen, and confirm device/tag/alarm counts match the manifest.
+   - Record the bundle name, restore duration, manifest counts and operator.
+2. **HA failover**
+   - With both nodes healthy, stop the active node; the standby must take over after the lease expires and keep writing history.
+   - Issue one control command and one alarm acknowledgement; each must appear once in the audit log, not twice.
+   - Restart the former active node and confirm it rejoins as standby without duplicating rows.
+3. **Migration failure rollback**
+   - Take a fresh backup before upgrading.
+   - On the copy, force the upgrade to fail (read-only data directory or a deliberately missing table).
+   - Confirm the process exits non-zero and writes the reason to `startup.log`; then restore the pre-upgrade bundle and compare device/tag/alarm counts with the backup manifest.
+
+Pass criteria: every step completes inside the window, counts match, and no control command is duplicated. Keep the drill report with the backup register. These drills do not replace CI and are not part of the merge gate.
+
 ## Release Gates and Package Verification
 
 CI blocks on backend tests, frontend type/build and gzip bundle budgets,

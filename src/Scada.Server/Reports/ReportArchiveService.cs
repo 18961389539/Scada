@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
+using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
@@ -140,12 +141,18 @@ public sealed class ReportArchiveService(
 }
 
 // 定时生成：启动时及每分钟检查启用定时的模板，补齐最近 N 个已结束且超过延迟的周期（停机回补），并执行归档保留期清理。
-public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<ReportScheduler> logger) : BackgroundService
+// 依赖走构造函数：后台服务的依赖关系在组合根可见，RunOnceAsync 也能在测试里直接构造，不必搭一棵 DI 树。
+public sealed class ReportScheduler(
+    ReportArchiveService archive,
+    IOptions<ScadaSettings> settings,
+    INodeRole role,
+    IDbContextFactory<ConfigDbContext> factory,
+    IDbContextFactory<RuntimeDbContext> runtimeFactory,
+    ILogger<ReportScheduler> logger) : BackgroundService
 {
     public async Task<int> RunOnceAsync(long now, CancellationToken ct)
     {
-        var archive = services.GetRequiredService<ReportArchiveService>();
-        var maxPeriods = Math.Clamp(services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportBackfillMaxPeriods, 1, 366);
+        var maxPeriods = Math.Clamp(settings.Value.ReportBackfillMaxPeriods, 1, 366);
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var templates = await db.ReportTemplates.AsNoTracking().Where(x => x.ScheduleEnabled).ToListAsync(ct);
@@ -184,7 +191,7 @@ public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportSchedulerEnabled) return;
+        if (!settings.Value.ReportSchedulerEnabled) return;
         // 启动后先跑一次：回补停机期间错过的周期。
         await Task.Delay(TimeSpan.FromSeconds(15), stoppingToken).ContinueWith(_ => { });
         if (!stoppingToken.IsCancellationRequested)
@@ -194,7 +201,7 @@ public sealed class ReportScheduler(IServiceProvider services, IDbContextFactory
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken))
-                if (services.GetService<Scada.Core.Interfaces.INodeRole>() is { IsActive: false }) continue; // 备机不生成、不投递报表
+                if (!role.IsActive) continue; // 备机不生成、不投递报表
                 else try { await RunOnceAsync(ScadaTime.NowMs(), stoppingToken); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { logger.LogWarning(ex, "报表定时任务异常"); }
         }

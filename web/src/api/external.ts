@@ -15,8 +15,14 @@ export type ExternalApiKey = {
   notes?: string
 }
 
+export type ExternalStatus = {
+  rest?: { enabled?: boolean }
+  tcp?: { enabled?: boolean; listenAddress?: string; port?: number }
+  opcUa?: { enabled?: boolean; running?: boolean; endpoint?: string; endpointUrl?: string }
+}
+
 export const externalApi = {
-  status: () => http.get('/external/status').then(r => r.data),
+  status: () => http.get<ExternalStatus>('/external/status').then(r => r.data),
   listKeys: () => http.get<ExternalApiKey[]>('/external/keys').then(r => r.data),
   createKey: (body: { name: string; scopes: string[]; areaIds?: number[] | null; rateLimitPerMinute?: number; notes?: string }) =>
     http.post<{ key: ExternalApiKey; secret: string }>('/external/keys', body).then(r => r.data),

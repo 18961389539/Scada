@@ -45,6 +45,8 @@ import { tr } from '../i18n'
 import type { Device, Tag, TagValue } from '../types'
 
 const props = withDefaults(defineProps<{
+  // 单选/多选共用同一组件，modelValue 的联合类型无法在模板里无损收窄；这里是 any 的唯一合理落点。
+  // 下一步用 <script setup generic> 或拆成 TagSelect/TagMultiSelect 两个组件替代。
   modelValue?: any
   tags: Tag[]
   devices?: Device[]

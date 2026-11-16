@@ -112,13 +112,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { externalApi, type ExternalApiKey } from '../api/external'
+import { externalApi, type ExternalApiKey, type ExternalStatus } from '../api/external'
 import { http, errorMessage } from '../api/http'
 import { tr } from '../i18n'
 import { useEditDialog } from '../composables/useEditDialog'
 
 const loading = ref(false), saving = ref(false), dialog = ref(false), secretDialog = ref(false)
-const keys = ref<ExternalApiKey[]>([]), areas = ref<{ id: number; name: string }[]>([]), status = ref<any>(null)
+const keys = ref<ExternalApiKey[]>([]), areas = ref<{ id: number; name: string }[]>([]), status = ref<ExternalStatus | null>(null)
 const loadError = ref(''), areasError = ref(''), actionError = ref(''), createError = ref(''), copyError = ref('')
 const secret = ref('')
 const form = reactive({ name: '', scopes: ['ReadTags'] as string[], areaIds: [] as number[], rateLimitPerMinute: 120, notes: '' })

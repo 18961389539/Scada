@@ -295,6 +295,9 @@ public sealed class CalcJobEngine(
     {
         if (!job.IsScript || job.PublishedRevision == 0) return;
         job.Script = job.PublishedScript; job.ReadTags = job.PublishedReadTags; job.WriteTags = job.PublishedWriteTags;
+        // 库名也要跟随发布副本：运行时用它做依赖检查与"是否需要重新发布"的判定，
+        // 漏抄会让草稿里新加的库名立刻影响正在运行的脚本。
+        job.Libraries = job.PublishedLibraries;
         job.HistoryWindowSec = job.PublishedHistoryWindowSec; job.AlarmSnapshot = job.PublishedAlarmSnapshot;
         job.Trigger = job.PublishedTrigger; job.IntervalMs = job.PublishedIntervalMs;
         job.ChangeDeadband = job.PublishedChangeDeadband; job.ChangeCooldownMs = job.PublishedChangeCooldownMs;

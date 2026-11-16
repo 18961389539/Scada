@@ -8,8 +8,9 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../src', import.meta.url))
 
-// 当前实测值：30 处 any（集中在 ScreenPropertiesPanel / AlarmAnalyticsView），0 处 console.log。
-const BUDGET = { any: 30, consoleLog: 0 }
+// 当前实测值：26 处 any（ScreenPropertiesPanel 10 / AlarmAnalyticsView 7 / OeeConfigView 5 / TagSelect 4），0 处 console.log。
+// 额度是棘轮：清理后同步下调，不允许上调；新增 any 必须改用具体类型。
+const BUDGET = { any: 26, consoleLog: 0 }
 
 const files = []
 const walk = (dir) => {

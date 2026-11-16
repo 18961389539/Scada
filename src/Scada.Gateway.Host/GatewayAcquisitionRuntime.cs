@@ -35,6 +35,13 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
     private IHost? _host;
     private CollectorEngine? _engine;
     private GatewayConfiguration? _configuration;
+    // 工程操作需要的服务在 StartAsync 成功时解析一次；EngineerAsync 只读字段，不再按请求反查容器。
+    private IConfigSnapshot? _snapshot;
+    private IDeviceDriverFactory? _drivers;
+    private IReadPlanBuilder? _plans;
+    private OpcUaRuntime? _opc;
+    private OpcBrowseRegistry? _catalog;
+    private OpcCertificateService? _certs;
     public GatewayConfiguration? Configuration => _configuration;
     public IReadOnlyList<CollectorDeviceStatus> Statuses => _engine?.GetStatuses() ?? [];
     public bool HasFaultedWorker => _configuration?.Devices.Any(x => x.Device.Enabled && _engine?.GetDiagnostics(x.Device.Id)?.State == "Faulted") == true;
@@ -101,6 +108,12 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
         builder.Services.AddScadaCollector(builder.Configuration);
         builder.Services.AddSingleton<OpcBrowseRegistry>(); builder.Services.AddHostedService<OpcBrowseRegistryCleanup>();
         var host = builder.Build(); _host = host; _engine = host.Services.GetRequiredService<CollectorEngine>(); _configuration = configuration;
+        _snapshot = host.Services.GetRequiredService<IConfigSnapshot>();
+        _drivers = host.Services.GetRequiredService<IDeviceDriverFactory>();
+        _plans = host.Services.GetRequiredService<IReadPlanBuilder>();
+        _opc = host.Services.GetService<OpcUaRuntime>();
+        _catalog = host.Services.GetRequiredService<OpcBrowseRegistry>();
+        _certs = host.Services.GetService<OpcCertificateService>();
         try { await host.StartAsync(ct); }
         catch { await StopAsync(); throw; }
     }
@@ -115,19 +128,20 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
             while (configuration.Devices.Any(x => !engine.IsDeviceQuiescent(x.Device.Id))) await Task.Delay(100);
         if (host is IAsyncDisposable asyncHost) await asyncHost.DisposeAsync(); else host.Dispose();
         _engine = null; _host = null; _configuration = null;
+        _snapshot = null; _drivers = null; _plans = null; _opc = null; _catalog = null; _certs = null;
     }
 
     public async Task<JsonElement> EngineerAsync(GatewayEngineeringRequest request, CancellationToken ct)
     {
         var host = _host; var configuration = _configuration;
-        if (host is null || configuration?.Revision != request.ConfigurationRevision || !host.Services.GetRequiredService<IConfigSnapshot>().TryGetDevice(request.DeviceId, out var device))
+        if (host is null || configuration?.Revision != request.ConfigurationRevision || _snapshot is null || !_snapshot.TryGetDevice(request.DeviceId, out var device))
             throw new InvalidOperationException("工程操作配置或设备归属已变化");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(device.TimeoutMs); ct = deadline.Token;
         object result;
         switch (request.Operation)
         {
             case GatewayEngineeringOperation.Probe:
-                result = await DeviceProbe.ReadAsync(device, request.Payload.Deserialize<DeviceProbeRequest>(GatewayProtocol.Json), host.Services.GetRequiredService<IDeviceDriverFactory>(), host.Services.GetRequiredService<IReadPlanBuilder>(), ct); break;
+                result = await DeviceProbe.ReadAsync(device, request.Payload.Deserialize<DeviceProbeRequest>(GatewayProtocol.Json), _drivers!, _plans!, ct); break;
             case GatewayEngineeringOperation.Diagnostics:
             case GatewayEngineeringOperation.DiagnosticsExport:
                 var snapshot = (_engine!.GetDiagnostics(device.Id) ?? throw new KeyNotFoundException("设备诊断不存在")) with { GatewayId = options.GatewayId, ConfigurationRevision = configuration.Revision };
@@ -151,14 +165,16 @@ public sealed class GatewayAcquisitionRuntime(GatewayAgentOptions options, Gatew
                 {
                     var write = request.Payload.Deserialize<ImmediateWriteRequest>(GatewayProtocol.Json) ?? throw new ArgumentException("追溯应答参数无效");
                     if (!double.IsFinite(write.Value)) throw new ArgumentException("追溯应答数值无效");
-                    var tag = host.Services.GetRequiredService<IConfigSnapshot>().Tags.SingleOrDefault(x => x.Id == write.TagId && x.DeviceId == device.Id);
+                    var tag = _snapshot!.Tags.SingleOrDefault(x => x.Id == write.TagId && x.DeviceId == device.Id);
                     if (tag?.Writable != true) throw new ArgumentException("追溯应答测点不存在或不可写");
                     result = await _engine.WriteAsync(device.Id, tag, write.Value, ct);
                 }
                 break;
             default:
                 if (device.Protocol != Scada.Core.Enums.ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
-                var opc = host.Services.GetRequiredService<OpcUaRuntime>(); var catalog = host.Services.GetRequiredService<OpcBrowseRegistry>(); var certs = host.Services.GetRequiredService<OpcCertificateService>();
+                var opc = _opc ?? throw new InvalidOperationException("OPC UA 运行时尚未就绪");
+                var catalog = _catalog ?? throw new InvalidOperationException("OPC 浏览服务尚未就绪");
+                var certs = _certs ?? throw new InvalidOperationException("OPC 证书服务尚未就绪");
                 switch (request.Operation)
                 {
                     case GatewayEngineeringOperation.OpcBrowse:
