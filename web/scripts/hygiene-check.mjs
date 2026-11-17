@@ -8,10 +8,9 @@ import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../src', import.meta.url))
 
-// 当前实测值：17 处 any（ScreenPropertiesPanel 10 / AlarmAnalyticsView 7），0 处 console.log。
-// TagSelect 已泛型化、OeeConfigView 表单已类型化，这两处额度已清零。
-// 额度是棘轮：清理后同步下调，不允许上调；新增 any 必须改用具体类型。
-const BUDGET = { any: 17, consoleLog: 0 }
+// 当前实测值：0 处 any（ScreenPropertiesPanel / AlarmAnalyticsView 已类型化），0 处 console.log。
+// 额度是棘轮：清理后同步下调，不允许上调；新增 any 必须改用具体类型或带类型守卫的 unknown。
+const BUDGET = { any: 0, consoleLog: 0 }
 
 const files = []
 const walk = (dir) => {
@@ -28,7 +27,7 @@ let consoleLog = 0
 const offenders = []
 for (const file of files) {
   const source = readFileSync(file, 'utf8')
-  const anyHits = source.match(/:\s*any\b|\bas any\b|<any>/g) ?? []
+  const anyHits = source.match(/:\s*any\b|\bas any\b|<any\b|\bany\s*>/g) ?? []
   const logHits = source.match(/console\.(log|debug)\(/g) ?? []
   if (anyHits.length) offenders.push([anyHits.length, 'any', relative(root, file)])
   any += anyHits.length

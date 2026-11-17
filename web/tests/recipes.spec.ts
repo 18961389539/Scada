@@ -1,7 +1,6 @@
 import { test, expect, type Page, loginApi } from './fixtures'
 import { createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
-import { randomUUID } from 'node:crypto'
 
 async function signIn(page: Page, session: { token: string; user: unknown }) {
   await page.goto('/login'); await page.evaluate(s => { localStorage.setItem('scada_token', s.token); localStorage.setItem('scada_user', JSON.stringify(s.user)) }, session)

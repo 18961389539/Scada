@@ -2,7 +2,6 @@ import { http, readPage } from './http'
 import type { CommandSubmissionResult, GatewayCommandStatus } from './commandTypes'
 import { createCommandId } from './commandTypes'
 import type {
-  AccessRoleItem,
   Area,
   Permission,
   RoleCatalog,

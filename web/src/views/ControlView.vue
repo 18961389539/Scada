@@ -180,7 +180,6 @@ function tagArea(tagId?: number | null): number | null | undefined {
   const tag = tags.value.find(x => x.id === tagId)
   return tag ? deviceArea(tag.deviceId) : undefined
 }
-const canConfigureDevice = (id: number) => canConfigureArea(deviceArea(id))
 const canControlDevice = (id: number) => canControlArea(deviceArea(id))
 const canConfigureTag = (id?: number | null) => canConfigureArea(tagArea(id))
 const canControlTag = (id?: number | null) => canControlArea(tagArea(id))

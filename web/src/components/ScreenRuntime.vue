@@ -220,7 +220,7 @@ const runtimeLibrary = computed(() => draftPreview.value ? library.items : [])
 const runtimeNodes = computed(() => expandNodes(document.value?.nodes ?? [], runtimeLibrary.value))
 const usesLibrary = computed(() => draftPreview.value && (document.value?.nodes ?? []).some(n => n.type === 'template' || !!n.symbol?.startsWith('user:')))
 const catalogs = useScreenCatalogs({ isDisposed: () => disposed, monitorMode: () => props.monitorMode, runtimeNodes })
-const { devices, deviceError, tagsById, tagError, canControlBoundTag, needsDeviceCatalog, tagMeta, sampleMaxAge, loadTags, loadDevices, deviceCatalogBlocks } = catalogs
+const { deviceError, tagsById, tagError, canControlBoundTag, needsDeviceCatalog, tagMeta, sampleMaxAge, loadTags, loadDevices, deviceCatalogBlocks } = catalogs
 const usesAlarms = computed(() => runtimeNodes.value.some(node => ['alarm-banner', 'alarm-list', 'alarm-stats'].includes(node.type)))
 const boundIds = computed(() => [...new Set(runtimeNodes.value.flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
 const unverifiedCount = computed(() => {
@@ -240,8 +240,8 @@ const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => gen
 const { history, alarmEvents, alarmLimited, oeeByLine, recipeTemplates, recipes, sequences, scriptJobs,
   alarmError, historyError, oeeError, recipeError, sequenceError, scriptError,
   alarmUnavailable, historyUnavailable, oeeUnavailable,
-  lineTagIds, usesSequences, reset: resetAux,
-  loadHistory, loadAlarms, loadOee, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
+  lineTagIds, reset: resetAux,
+  loadHistory, loadAlarms, loadAll: loadAux, startTimers: startAuxTimers, stopTimers: stopAuxTimers } = aux
 // 运行端异常上报：同一画面同一类型每次运行会话只报一次，服务端再做 30 秒节流并写健康/审计。
 type RuntimeReportKind = 'loadFailed' | 'requiresRepublish' | 'valueReadFailed' | 'tagCatalogFailed' | 'alarmLoadFailed' | 'historyLoadFailed' | 'deviceCatalogFailed' | 'connectionLost' | 'clientError'
 const reportedRuntime = new Set<string>()

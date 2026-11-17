@@ -12,7 +12,7 @@ namespace Scada.Server.Tests;
 public sealed partial class LocalizationTests : IClassFixture<ControlTests.ControlSite>
 {
     // 历史欠账上限：只允许下降。翻译一批就从基线删除并同步下调本常量；新增中文提示必须翻译，不能塞进基线。
-    private const int BaselineCeiling = 847;
+    private const int BaselineCeiling = 735;
     private readonly ControlTests.ControlSite _site;
     public LocalizationTests(ControlTests.ControlSite site) => _site = site;
 

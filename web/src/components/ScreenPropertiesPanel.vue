@@ -53,10 +53,10 @@
         </div>
         <el-divider>{{ $t('screenDesignerView.multiBindTitle') }}</el-divider>
         <el-form-item :label="$t('screenDesignerView.alarmStateTag')">
-          <TagSelect :model-value="commonOf('alarmTagId')" :tags="tags" :devices="devices" :values="tagValues" :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.alarmStateTag')" :placeholder="mixedOf('alarmTagId') ? $t('screenDesignerView.mixedValue') : ''" @update:model-value="(v: any) => applyAll('alarmTagId', v ?? null)" />
+          <TagSelect :model-value="commonOf('alarmTagId')" :tags="tags" :devices="devices" :values="tagValues" :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.alarmStateTag')" :placeholder="mixedOf('alarmTagId') ? $t('screenDesignerView.mixedValue') : ''" @update:model-value="(v: number | null | undefined) => applyAll('alarmTagId', v ?? null)" />
         </el-form-item>
         <el-form-item :label="$t('screenDesignerView.inputTag')">
-          <TagSelect :model-value="commonOf('tagId')" :tags="tags" :devices="devices" :values="tagValues" :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.inputTag')" :placeholder="mixedOf('tagId') ? $t('screenDesignerView.mixedValue') : ''" @update:model-value="(v: any) => applyAll('tagId', v ?? null)" />
+          <TagSelect :model-value="commonOf('tagId')" :tags="tags" :devices="devices" :values="tagValues" :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.inputTag')" :placeholder="mixedOf('tagId') ? $t('screenDesignerView.mixedValue') : ''" @update:model-value="(v: number | null | undefined) => applyAll('tagId', v ?? null)" />
         </el-form-item>
         <el-divider>{{ $t('screenDesignerView.clickAction') }}</el-divider>
         <p class="muted tiny">{{ $t('screenDesignerView.multiActionHint') }}</p>
@@ -96,7 +96,7 @@
         </el-form-item>
         <template v-if="batchShowsCommand">
           <el-form-item :label="$t('screenDesignerView.outputTag')">
-            <TagSelect :model-value="commonAction(action => action.tagId)" :tags="tags" :devices="devices" :values="tagValues" writable :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.outputTag')" @update:model-value="(v: any) => applyAction({ type: 'command', tagId: v ?? null })" />
+            <TagSelect :model-value="commonAction(action => action.tagId)" :tags="tags" :devices="devices" :values="tagValues" writable :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.outputTag')" @update:model-value="(v: number | null | undefined) => applyAction({ type: 'command', tagId: v ?? null })" />
           </el-form-item>
           <el-form-item :label="$t('screenDesignerView.valueToWrite')">
             <el-input-number :model-value="commonAction(action => action.value)" :controls="false" @change="(v: number | undefined) => v !== undefined && applyAction({ value: v })" />
@@ -150,9 +150,9 @@
             </el-radio-group>
           </el-form-item>
           <div v-if="showTextStyle" class="style-flags">
-            <el-checkbox :model-value="!!selected.wrap" data-test="text-wrap" @update:model-value="(v: any) => setStyleFlag('wrap', v)">{{ $t('screenDesignerView.textWrap') }}</el-checkbox>
-            <el-checkbox :model-value="!!selected.autoFit" data-test="text-autofit" @update:model-value="(v: any) => setStyleFlag('autoFit', v)">{{ $t('screenDesignerView.textAutoFit') }}</el-checkbox>
-            <el-checkbox :model-value="!!selected.bold" data-test="text-bold" @update:model-value="(v: any) => setStyleFlag('bold', v)">{{ $t('screenDesignerView.textBold') }}</el-checkbox>
+            <el-checkbox :model-value="!!selected.wrap" data-test="text-wrap" @update:model-value="(v: string | number | boolean) => setStyleFlag('wrap', v)">{{ $t('screenDesignerView.textWrap') }}</el-checkbox>
+            <el-checkbox :model-value="!!selected.autoFit" data-test="text-autofit" @update:model-value="(v: string | number | boolean) => setStyleFlag('autoFit', v)">{{ $t('screenDesignerView.textAutoFit') }}</el-checkbox>
+            <el-checkbox :model-value="!!selected.bold" data-test="text-bold" @update:model-value="(v: string | number | boolean) => setStyleFlag('bold', v)">{{ $t('screenDesignerView.textBold') }}</el-checkbox>
           </div>
           <el-form-item v-if="showShapeStyle" :label="$t('screenDesignerView.shapeOpacity')" data-test="shape-opacity">
             <el-slider :model-value="selected.opacity ?? 1" :min="0" :max="1" :step="0.05" @update:model-value="(v: number) => setStyleNumber('opacity', v)" />
@@ -314,9 +314,9 @@
         <template v-if="chartOptionTypes.includes(selected.type)">
           <el-divider data-field="chartOptions">{{ $t('screenDesignerView.chartOptions') }}</el-divider>
           <div class="style-flags">
-            <el-checkbox :model-value="selected.chartOptions?.legend ?? true" data-test="chart-legend" @update:model-value="(v: any) => setChartOption('legend', !!v)">{{ $t('screenDesignerView.chartLegend') }}</el-checkbox>
-            <el-checkbox :model-value="selected.chartOptions?.grid ?? true" data-test="chart-grid" @update:model-value="(v: any) => setChartOption('grid', !!v)">{{ $t('screenDesignerView.chartGrid') }}</el-checkbox>
-            <el-checkbox :model-value="selected.chartOptions?.dataLabels ?? false" data-test="chart-labels" @update:model-value="(v: any) => setChartOption('dataLabels', !!v)">{{ $t('screenDesignerView.chartDataLabels') }}</el-checkbox>
+            <el-checkbox :model-value="selected.chartOptions?.legend ?? true" data-test="chart-legend" @update:model-value="(v: unknown) => setChartOption('legend', !!v)">{{ $t('screenDesignerView.chartLegend') }}</el-checkbox>
+            <el-checkbox :model-value="selected.chartOptions?.grid ?? true" data-test="chart-grid" @update:model-value="(v: unknown) => setChartOption('grid', !!v)">{{ $t('screenDesignerView.chartGrid') }}</el-checkbox>
+            <el-checkbox :model-value="selected.chartOptions?.dataLabels ?? false" data-test="chart-labels" @update:model-value="(v: unknown) => setChartOption('dataLabels', !!v)">{{ $t('screenDesignerView.chartDataLabels') }}</el-checkbox>
           </div>
           <el-form-item>
             <template #label>{{ $t('screenDesignerView.chartYUnit') }}</template>
@@ -352,7 +352,7 @@
             <el-option :label="$t('screenDesignerView.stateTrigger')" value="state" />
           </el-select></el-form-item>
           <el-form-item v-if="selected.animation?.source === 'value'" :label="$t('screenDesignerView.driverTag')">
-            <TagSelect :model-value="selected.animation.tagId" :tags="tags" :devices="devices" :values="tagValues" :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.driverTag')" data-test="node-anim-tag" @update:model-value="(v: any) => setAnimField('tagId', v ?? null)" />
+            <TagSelect :model-value="selected.animation.tagId" :tags="tags" :devices="devices" :values="tagValues" :remote="!embedded && tags.length > 400" :label-formatter="tagLabel" :aria-label="$t('screenDesignerView.driverTag')" data-test="node-anim-tag" @update:model-value="(v: number | null | undefined) => setAnimField('tagId', v ?? null)" />
             <p v-if="tagLiveText(selected.animation.tagId)" class="tag-live-row" :class="tagLiveClass(selected.animation.tagId)" :title="tagLiveTitle(selected.animation.tagId)">{{ $t('screenDesignerView.currentValue') }} · {{ tagLiveText(selected.animation.tagId) }}</p>
           </el-form-item>
           <div v-if="selected.animation?.source === 'value'" class="field-pair"><el-form-item :label="$t('screenDesignerView.inputMin')"><el-input-number :model-value="selected.animation.from" :controls="false" :step="1" @update:model-value="(v: number | undefined) => setAnimField('from', v ?? 0)" /></el-form-item>

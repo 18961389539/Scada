@@ -8,8 +8,13 @@ export interface PlanView {
   errors: string[]; forbidden: string[]; warnings: string[]
 }
 export interface ConfigVersion { id: number; kind: string; note: string; createdTs: number; createdBy: string; contentSha256: string; summary: Record<string, number> }
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type ProjectPackage = Record<string, any>
+// 工程包是任意 JSON：只固定控制台展示用到的字段，其余键透传给服务端做校验。
+export interface ProjectPackage {
+  exportedTs?: number
+  exportedBy?: string
+  partial?: boolean
+  [key: string]: unknown
+}
 
 export const projectApi = {
   versions: async () => (await http.get<ConfigVersion[]>('/project/versions')).data,

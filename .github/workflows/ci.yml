@@ -90,7 +90,8 @@ jobs:
           # 未在 sln 里的项目（例如尚在开发中的独立测试工程）不能出现在这份清单里。
           foreach ($project in @("Scada.Core.Tests", "Scada.Collector.Tests", "Scada.Gateway.Tests", "Scada.Data.Tests", "Scada.Desktop.Tests", "Scada.Protocols.Tests")) {
             $out = "TestResults/$project/coverage.cobertura.xml"
-            dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --results-directory TestResults/$project"
+            # --blame-hang：单条用例超过 5 分钟视为挂起，产出手写序列后失败，而不是让作业静默卡到超时。
+            dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type none --results-directory TestResults/$project"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: 网关发布包与部署预演
@@ -136,7 +137,8 @@ jobs:
           $env:DOTNET_COVERAGE_NOLOGO = "1"
           foreach ($project in @("Scada.Server.Tests", "Scada.Engine.Tests")) {
             $out = "TestResults/$project/coverage.cobertura.xml"
-            dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --results-directory TestResults/$project"
+            # 10 分钟对应「单条用例」而非整轮；Server 上偶发无输出的 MCP/HA 用例就是靠它变成可诊断的失败。
+            dotnet-coverage collect -f cobertura -o $out "dotnet test tests/$project -c Release --no-build --nologo --blame-hang --blame-hang-timeout 10m --blame-hang-dump-type none --results-directory TestResults/$project"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
       - name: 上传测试结果

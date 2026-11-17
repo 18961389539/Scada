@@ -166,8 +166,8 @@
     <el-dialog v-model="thOpen" :title="$t('alarmAnalytics.thresholds')" width="min(720px, calc(100% - 24px))" class="aa-threshold-dialog" :close-on-click-modal="!thSaving" :close-on-press-escape="!thSaving" :show-close="!thSaving">
       <el-form v-if="thForm" label-width="260px" size="small" :disabled="thSaving">
         <el-form-item v-for="f in thFields" :key="f.key" :label="$t(`alarmAnalytics.th.${f.key}`)">
-          <el-input-number v-model="(thForm as any)[f.key]" :min="f.min" :max="f.max" :step="f.step ?? 1" :precision="f.precision ?? 0" controls-position="right" :data-test="`th-${f.key}`" />
-          <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmAnalytics.defaultIs', [(thDefaults as any)?.[f.key]]) }}</span>
+          <el-input-number v-model="thForm[f.key]" :min="f.min" :max="f.max" :step="f.step ?? 1" :precision="f.precision ?? 0" controls-position="right" :data-test="`th-${f.key}`" />
+          <span class="tiny muted" style="margin-left: 8px">{{ $t('alarmAnalytics.defaultIs', [thDefaults?.[f.key]]) }}</span>
         </el-form-item>
       </el-form>
       <el-alert v-if="thError" type="error" :closable="false" :title="thError" data-test="th-error" />
@@ -182,6 +182,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { ECElementEvent } from 'echarts'
 import { ElMessage } from 'element-plus'
 import { Download, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
@@ -308,7 +309,7 @@ function chart(el: HTMLElement | undefined): echarts.ECharts | null {
   const c = echarts.init(el); charts.push(c); return c
 }
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+
 function render(): void {
   const r = report.value, k = kpi.value
   if (!r || !k) return
@@ -323,7 +324,7 @@ function render(): void {
     dataZoom: [{ type: 'inside' }, { type: 'slider', height: 14, bottom: 4, ...p.zoom }],
     series: [{
       type: 'bar', name: tr('alarmAnalytics.alarmsPer10'), data: r.rate10.map(b => [b.startTs, b.count]), barMaxWidth: 12,
-      itemStyle: { color: (p: any) => p.value[1] > r.thresholds.floodStartPer10Min * positions ? '#d9534f' : p.value[1] > r.thresholds.manageablePer10Min * positions ? '#e6a23c' : '#5b8ff9' },
+      itemStyle: { color: (params: unknown) => { const raw = (params as { value?: unknown }).value; const count = Array.isArray(raw) ? Number(raw[1]) : NaN; return count > r.thresholds.floodStartPer10Min * positions ? '#d9534f' : count > r.thresholds.manageablePer10Min * positions ? '#e6a23c' : '#5b8ff9' } },
       markLine: { symbol: 'none', data: [
         { yAxis: r.thresholds.floodStartPer10Min * positions, label: { formatter: tr('alarmAnalytics.floodLine'), position: 'insideStartTop', backgroundColor: p.annotationBg, padding: [2, 4], borderRadius: 3, color: p.annotationText }, lineStyle: { color: '#d9534f' } },
         { yAxis: r.thresholds.acceptablePer10Min * positions, label: { formatter: tr('alarmAnalytics.acceptableLine'), position: 'insideStartTop', backgroundColor: p.annotationBg, padding: [2, 4], borderRadius: 3, color: p.annotationText }, lineStyle: { color: '#67c23a' } }
@@ -331,7 +332,7 @@ function render(): void {
       markArea: { itemStyle: { color: 'rgba(217,83,79,0.12)' }, data: k.floods.map(f => [{ xAxis: f.startTs }, { xAxis: f.endTs }]) }
     }]
   }, true)
-  rate?.on('click', (p: any) => { const ts = p.value?.[0]; if (typeof ts === 'number') void drill({}, `${formatTime(ts)} +10min`, { from: ts, to: ts + 600_000 }) })
+  rate?.on('click', (p: ECElementEvent) => { const ts = Array.isArray(p.value) ? p.value[0] : undefined; if (typeof ts === 'number') void drill({}, `${formatTime(ts)} +10min`, { from: ts, to: ts + 600_000 }) })
 
   const t = trend.value
   const tc = chart(trendRef.value)
@@ -347,7 +348,7 @@ function render(): void {
         itemStyle: { color: COLORS[i] }, data: t.points.map(p => [p.ts, p[key]])
       }))
     }, true)
-    tc.on('click', (p: any) => { const ts = p.value?.[0]; if (typeof ts === 'number') void drill({}, formatTime(ts), { from: ts, to: ts + step }) })
+    tc.on('click', (p: ECElementEvent) => { const ts = Array.isArray(p.value) ? p.value[0] : undefined; if (typeof ts === 'number') void drill({}, formatTime(ts), { from: ts, to: ts + step }) })
   }
 
   const pc = chart(priorityRef.value)
@@ -361,7 +362,7 @@ function render(): void {
         data: k.priority.map(item => ({ name: `${levelLabel(item.level)} ${tr('alarmAnalytics.target')}`, value: item.targetPercent, itemStyle: { color: ['#c0c4cc', '#f3d19e', '#f0a8a6'][LEVELS.indexOf(item.level)] } })) }
     ]
   }, true)
-  pc?.on('click', (p: any) => { if (p.seriesIndex === 0) void drill({}, p.name, { levels: [p.data.level] }) })
+  pc?.on('click', (p: ECElementEvent) => { if (p.seriesIndex !== 0) return; const level = (p.data as { level?: number } | undefined)?.level; if (typeof level === 'number') void drill({}, String(p.name ?? ''), { levels: [level] }) })
 
   const pa = chart(paretoRef.value)
   pa?.setOption({
@@ -377,7 +378,7 @@ function render(): void {
       { type: 'line', name: tr('alarmAnalytics.cumulative'), yAxisIndex: 1, data: k.top.map(x => x.cumulativePercent), itemStyle: { color: '#e6a23c' } }
     ]
   }, true)
-  pa?.on('click', (p: any) => { const item = k.top[p.dataIndex]; if (item) void drill({ source: item.source }, item.message) })
+  pa?.on('click', (p: ECElementEvent) => { const item = p.dataIndex != null ? k.top[p.dataIndex] : undefined; if (item) void drill({ source: item.source }, item.message) })
 }
 
 // 下钻：在当前筛选上叠加时段/等级/报警源/种类，打开明细抽屉。

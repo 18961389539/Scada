@@ -34,7 +34,7 @@
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('hmiLibraryView.k6eaa88')" name="builtin">
         <div class="gallery" data-test="builtin-gallery">
-          <figure v-for="s in builtinSymbols" :key="s.key" :data-symbol="s.key"><div class="preview" :style="{ color: previewColor }" v-html="s.svg" /><figcaption>{{ locale === 'en-US' ? s.nameEn : s.name }}<small>{{ s.key }}</small></figcaption></figure>
+          <figure v-for="s in builtinSymbols" :key="s.key" :data-symbol="s.key"><div class="preview" :style="{ color: previewColor }" v-html="safeSvg(s.svg)" /><figcaption>{{ locale === 'en-US' ? s.nameEn : s.name }}<small>{{ s.key }}</small></figcaption></figure>
         </div>
         <div class="toolbar"><span class="tiny">{{ $t('hmiLibraryView.k2a9a07') }}</span><el-radio-group v-model="previewState" size="small" :aria-label="$t('hmiLibraryView.k2a9a07')"><el-radio-button value="stopped">{{ $t('hmiLibraryView.ka17f70') }}</el-radio-button><el-radio-button value="running">{{ $t('hmiLibraryView.k0c3acd') }}</el-radio-button><el-radio-button value="alarm">{{ $t('hmiLibraryView.k9f45b3') }}</el-radio-button><el-radio-button value="unknown">{{ $t('hmiLibraryView.kd9c32a') }}</el-radio-button></el-radio-group></div>
       </el-tab-pane>

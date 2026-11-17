@@ -1104,3 +1104,169 @@ P2 五项先逐项实测再决定做不做；其中两项落地，三项明确�
 - 兼容：REST/MCP 的错误码与文案不变。Excel 对缺失条件测点从“导入成功、运行期不生效”改为跳过并报「第 N 行：条件测点不存在：{id}」。
 - 模拟接口（已保存规则的预览）仍在端点内检查引用测点是否存在，不属于写入路径，未并入命令服务。
 - 未做（有意）：未提交、未推送；控制挂牌等其它工作区改动保持原样。
+
+## 32. 2026-11-17：工程导入走设备命令服务的隔离与总线校验
+
+记录时间：2026-11-17 15:30（Asia/Shanghai）。本批只把工程导入的设备写入校验收进与 REST/MCP 共用的 `InspectIssuesAsync`，并修正通道引用落成错误外键名。不 commit、不 push，也不改动工作区里其它已有改动。
+
+### 改动
+
+- `DeviceCommandService.InspectIssuesAsync` 抽出静态重载（协议字段 → 本机采集隔离 → 通道站号 → 串口总线 → 全局重名），实例方法转调它。REST/MCP 落盘与重载路径不变。
+- `ProjectMasterDataApplier.ApplyDevicesAsync` 在通道端点下发之后调用同一套检查，按条目把失败原因记入导入结果；不再在端点下发前单独跑 `ConfigurationValidator.Device`。更新项先带上本机编号，避免把自己判成站号/串口冲突。同一包内每接受一台设备即在事务内保存，供后一条检查看到。
+- `ProjectApplyContext.Resolve` 把 `acquisitionChannelRef` 写成 `channelId`（此前按默认规则写成不存在的 `acquisitionChannelId`，名称制工程包里的通道绑定会被静默丢掉）。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- Server 定向（Debug，`--blame-hang-timeout 3m`）：`ProjectDeviceImportTests`（4）、`DeviceValidationTests`（4）、`ChannelValidationTests`（7）、`LocalCollectionIsolationTests`（3）、`ProjectApiTests` 中导出导入与冲突回滚 2 条：**20 / 20**（约 25 秒）。
+- 未跑：全仓后端测试（全量 Server 套件会在 MCP/HA 上挂起）、前端 unit/E2E。
+
+### 兼容影响与未做
+
+- 兼容：网页/MCP 创建设备的校验与文案不变。不含 `acquisitionChannelRef`、只带通道数据库编号的旧工程包，仍走原有「本机有则沿用、否则解开绑定」逻辑。
+- 行为变化：带 `acquisitionChannelRef` 的工程包现在会真正绑定到本机同名通道。因此，与现场已有设备抢同一从站号或同一条未共享通道的 RS-485 时，预览会给出可解释的错误并拒绝导入（这是预期）。合法的共享通道多从站仍可导入。
+- 未做（有意）：未提交、未推送；工作区里其它已有改动（CI、i18n、`messages.en-US.json`、`web/eslint-out.json` 等）保持原样。采集档位上限与测点 Excel 导入汇总审计仍待后续处理。
+## 33. 2026-11-17：采集档位预算按有效周期计算
+
+记录时间：2026-11-17 15:55（Asia/Shanghai）。本批只把采集档位上限改成与运行时同一套 `ScanCadence.Effective()` 规则，并让设备改周期、Excel 导入、工程导入、模板实例化走同一检查。不 commit、不 push，也不改动工程导入设备校验等其它未提交工作。
+
+### 改动
+
+- `ScanCadence.ValidateLaneBudget` 按有效周期计档：未填或非正数的 `ScanRateMs` 跟随设备 `PollIntervalMs`，与采集器分组一致。超限文案带设备名、各档毫秒值，并标出设备默认档。
+- `TagCommandService.ValidateLaneBudgetAsync` 读取该设备全部物理测点（不再只统计显式周期），REST/MCP 单点与批量建点共用。
+- `DeviceCommandService.UpdateAsync` 在已有测点协议重校验之后，按新的默认周期重算档位；超限拒绝保存。
+- 测点 Excel 导入、工程导入（`ApplyTagsAsync` 在设备与测点都落进事务之后）和对象模板实例化/升级，都走同一套 `ValidateLaneBudget`。超限出现在预览或导入错误中，不静默入库。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- Collector `ScanLaneTests`：9 / 9（约 1 秒）。
+- Engine `ObjectTemplateTests`：16 / 16（约 7 秒）。
+- Server 定向（Debug，`--blame-hang-timeout 3m`）：`TagLaneBudgetTests`（3）、`ProjectTagLaneBudgetTests`（3）、`TagExcelTests`（13）：**19 / 19**（约 16 秒）。
+- 未跑：全仓后端测试（全量 Server 套件会在 MCP/HA 上挂起）、前端 unit/E2E。
+
+### 兼容影响与未做
+
+- 行为变化：原先「4 个显式覆盖周期 + 若干跟随设备默认的测点」可通过 REST/MCP，运行时实为 5 档；现在会拒绝，并写明设备与各档周期。改设备默认周期若把原先重合的档拆开并超过 4 档，同样拒绝。Excel / 工程导入 / 模板实例化不再绕过该护栏。
+- 未做（有意）：未提交、未推送；工作区里其它已有改动（CI、i18n、`messages.en-US.json`、`web/eslint-out.json` 等）以及第一项工程导入设备校验保持原样。测点 Excel 导入汇总审计仍待后续处理。
+## 34. 2026-11-17：Server 测试并行度实测与挂起可诊断化（P0）
+
+记录时间：2026-11-17 16:35（Asia/Shanghai）。本批只做 Server 测试基础设施：把「8 并发是否导致挂起与内存拐点」从推断变成实测，并让静默挂起在 CI 变成可诊断的失败。不 commit、不 push，不回滚第 32/33 节。
+
+### 34.1 实测方法
+
+- 同一 Release 构建、同一台 12 核机器；每档 `dotnet test --no-build --blame-hang --blame-hang-timeout 12m --blame-hang-dump-type none`，每 2 秒采样 `dotnet,testhost` 的 `WorkingSet`。
+- 测试集合 627 条（含第 32 节新增 `ProjectDeviceImportTests` 4 条）；三档均 **627 / 627 通过**，无 flaky。
+- 单例耗时由 TRX 聚合（脚本 `TestResults/perf/parse-trx.mjs`，产物在 `TestResults/perf/`，已被 `.gitignore` 忽略）。
+
+| `maxParallelThreads` | 墙钟 | 峰值 RSS（单进程） | 单例耗时之和 |
+| --- | --- | --- | --- |
+| 4 | 16 m 01 s | 4079 MB | 450.5 s |
+| 6 | 15 m 29 s | 3407 MB | 456.4 s |
+| 8 | **15 m 27 s** | **3332 MB** | **429.5 s** |
+
+### 34.2 结论
+
+1. **降并发没有收益**。4 并发比 8 并发慢 34 秒（3.5%），峰值内存反而高 747 MB（+22%）。`Scada.Server.Tests.csproj` 原注释「4 个并发足够」与实测不符，已按数据改写，`xunit.runner.json` 保持 8。
+2. **并行度不是瓶颈**。三档的单例耗时之和 430–456 秒，而墙钟 927–961 秒——约一半时间在用例之外。117 个测试类各自启动一次完整宿主（`WebApplicationFactory` + 独立 config.db/runtime.db），固定开销约 470 秒。
+3. **下一步应优化站点初始化，而不是继续调线程数**：共享或池化宿主、预迁移 db 模板均可直接削减这 470 秒；按类分片只减少尾部排空，对固定开销无解，暂不采用（最慢单例 `HaClusterTests` 28 秒，远小于单个 CI 作业）。
+4. 单档实测受本机负载影响约 ±2%（8 档在旧构建上曾测得 10 m 36 s、在新构建上 15 m 27 s，差异来自测试集合与站点工作量，不是并发度）。趋势比绝对值可信。
+
+### 34.3 CI 可诊断化
+
+- `backend-server` 的 `dotnet test` 增加 `--blame-hang --blame-hang-timeout 10m --blame-hang-dump-type none`；`backend-fast` 增加同组参数（5 分钟）。挂起会产出手写序列并失败，而不是让作业静默卡到超时。
+- 工作流用 PyYAML 解析复核：8 个 job，两处测试命令均带参数。
+
+### 34.4 顺带修复的真实回归
+
+- `ab63907` 新增的两条中文提示没有英文翻译：OEE 状态映射兜底、离线 STATE 发布失败。已补进 `messages.en-US.json`（占位符 `{LineId}`/`{LineName}`/`{Error}`/`{0}` 保持不变）。
+- 删除 1 条源码已不存在的 stale（`{0} · {1}/{2}/{3}/{4} · 站号 {5}`）；基线 **847 → 846**，`BaselineCeiling` 同步下调到 846。
+- `LocalizationTests` 定向 **5 / 5** 通过。
+
+### 34.5 验证与未做
+
+- Server 全量三档各 627 / 627 通过（Release，本机实跑）。
+- 未跑：Engine 全量、前端 unit/E2E、真实 GitHub runner。CI 分片与 artifact 合并仍需 2–3 次线上观察（P0-2 未执行）。
+- 工作区含并行会话的第 32/33 节改动；不同构建的测试集合会变（623 → 627），跨构建的耗时不可直接比较。
+## 35. 2026-11-17：P1 第一批（死解构清理 / 内置符号预览统一消毒 / i18n 网关与计算清零）
+
+记录时间：2026-11-17 17:40（Asia/Shanghai）。本批只做前端降噪与 i18n 降债，不动测试站点结构，也不回滚第 32–34 节。
+
+### 35.1 前端死解构清理（226 → 0）
+
+- 先核对 ESLint 不会误报模板引用：`document`、`save`、`publish` 等模板在用的变量均未出现在 `no-unused-vars` 名单里，因此名单是真实死代码。
+- 删除：`ScreenDesignerView.vue` 130、`AlarmsView.vue` 44（含清理后新暴露的 `PageIssue` 类型导入）、`LayoutsView.vue` 35、`useScreenDesigner.ts` 10（图标）、`ScreenRuntime.vue` 3、`ControlView.vue` 1、`api/index.ts` 1、两个 E2E spec 各 1。
+- `ScreenDesignerView.vue` 只有 346 行，却从 `useScreenDesigner` 解构约 200 个返回值、其中 130 个未被引用——返回面过宽已量化，后续按状态/交互/渲染分组。
+- ESLint：**296 → 70** 条警告，剩余全部是 `web/tests` 的 `no-explicit-any`，`src` 已清零。
+
+### 35.2 内置符号预览统一走消毒入口
+
+- `HmiLibraryView.vue` 的内置符号画廊与 `ScreenDesignerView.vue` 的调色板原先直接 `v-html="s.svg"` / `v-html="sym.svg"`，与同文件 `safeSvg` 注释「内置符号也同样过白名单」不一致。
+- 两处改走 `sanitizeSvgForRender`，与导入预览、图库列表保持一致。常量来源本来可信，本次只消除「承诺与实现不一致」的缺口。
+
+### 35.3 i18n 网关与计算模块清零（111 条）
+
+- 计算 42 条：术语沿用既有译法（calculation job / calculated tag / deadband / workbook），占位符 `{0}`、`{1}`、`#{0}` 原样保留。
+- 网关 69 条：gateway center / stream / sequence / lease / inbox / dead letter / installation ownership 等沿用既有对照。
+- 基线 **846 → 735**，`BaselineCeiling` 同步下调到 735；`LocalizationTests` **5 / 5**。
+
+### 35.4 验证（均本机，本次实跑）
+
+- `npm run build`：vue-tsc + vite + bundle 预算通过，最大路由 delta 606361 / 655360。
+- `npm run test:unit`：vitest 16 文件 85 条 + 脚本 16 条 + mock 契约 486/310 全部通过。
+- `npm run check:hygiene`：any=17/17，console.log=0/0，223 文件。
+- `npm run lint`：0 error，70 warning（全部在 `web/tests`）。
+- 后端：Server 测试项目构建 0 警告 0 错误；`LocalizationTests` 5 / 5。
+
+### 35.5 未做（留给后续批次）
+
+- `ReportSigningTests` 归档 flaky 根因仍未确证（串行 collection 只是隔离）。
+- 站点初始化复用（第 34 节实测约 470 秒固定开销）要动全部测试站点，待工作区并行改动收敛后单独一批。
+- 桌面端 `ClientForm`/`SettingsForm` 的 Presenter 抽取、ECharts 6 视觉 E2E 比对。
+- 前端剩余 17 处 `any`（`ScreenPropertiesPanel` 10 / `AlarmAnalyticsView` 7）。
+## 36. 2026-11-17：测点 Excel 导入补齐汇总审计
+
+记录时间：2026-11-17 18:14（Asia/Shanghai）。本批只给测点 Excel 导入在提交成功后补一条汇总操作记录，并与计算测点的逐行审计区分范围。不 commit、不 push，也不改动第 32/33 节及其它工作区改动。
+
+### 改动
+
+- `TagExcelService.ImportAsync` 在事务提交成功后写一条 `导入测点 Excel` 汇总（文件名、新增/更新/跳过数量、前 10 条错误）。计算测点仍按行记录，汇总里注明「计算测点已按行记录，本条仅为整表汇总」及行数，避免再展开一遍。
+- 回滚路径（计算工作簿整体失败、档位超限等未提交）不写汇总，避免把未入库的操作记成成功。
+- `TagEndpoints` `/import` 把上传文件名传给服务；汇总改由服务写入，避免再出现「注释承诺调用方记一条、接口却直接返回」的缺口。
+
+### 验证（均本机，本次实跑，不冒充全量）
+
+- Server 定向（Debug，`--blame-hang-timeout 3m`）：`TagExcelTests` **14 / 14**（约 15 秒）。含原有往返/回滚/档位用例，以及新增的物理导入汇总审计。
+- 未跑：全仓后端测试（全量 Server 套件会在 MCP/HA 上挂起）、前端 unit/E2E。
+
+### 兼容影响与未做
+
+- 行为变化：物理测点 Excel 导入在成功提交后会多一条操作记录；计算测点导入会在原有逐行记录之外多一条整表汇总。档位超限或计算工作簿整体失败仍不写审计。
+- 未做（有意）：未提交、未推送；第 32/33 节工程导入校验与采集档位预算、以及其它工作区改动保持原样。
+## 37. 2026-11-17：P2 第一批（前端 any 清零 / 报表归档可诊断化 / ECharts 6 图表页 E2E）
+
+记录时间：2026-11-17 19:05（Asia/Shanghai）。本批做三件低风险项：前端 any 收口、报表归档 flaky 的可诊断化、ECharts 6 图表页的 E2E 确认。不 commit、不 push，不回滚第 32–36 节。
+
+### 37.1 前端 any 17 → 0，并补掉门禁盲点
+
+- `ScreenPropertiesPanel.vue` 10 处：`TagSelect` 的 `update:model-value` 改 `number | null | undefined`；`el-checkbox` 改 `string | number | boolean`；图表选项回调改 `unknown` 后取布尔。
+- `AlarmAnalyticsView.vue` 7 处：阈值表单去掉 `(thForm as any)[f.key]`（`thFields` 已按 `keyof AlarmThresholds` 声明）；ECharts 点击回调用 `ECElementEvent` 并在体内显式收窄（`Array.isArray` / `dataIndex != null` / `data.level`）；删除整文件级 `/* eslint-disable no-explicit-any */`。
+- **门禁盲点**：`ProjectPackage = Record<string, any>` 因写法是 `, any>` 而绕过了 hygiene 的 `: any` / `<any>` 正则。改为带控制台字段的接口 + `[key: string]: unknown`，正则扩到 `\bany\s*>`；`hygiene-check.mjs` 额度 **17 → 0**。
+- ESLint：`src` 的 any 与 unused 均为 0；剩余 70 条全部在 `web/tests`。
+
+### 37.2 报表归档 flaky：本机未复现，改为可诊断
+
+- 连续 5 轮定向（`ReportApiTests` + `ReportSigningTests`，9 条）全部通过；第 34 节三次全量（627 条）也未复现。
+- 静态核对：归档 `Root = Scada:ReportsRoot`，而 `AuthorizationTests.Site` 为每个测试类建独立临时目录；签名证书 `keys` 目录同样在 Site 目录下。因此第 29.1 节「两个测试类共用归档路径」的措辞不成立，以本节为准。
+- 加固：`GenerateAsync` 在生成端断言归档目录确有文件，失败时输出 `Root` 与目录存在性，用于区分「没写」与「被删/被锁」。**根因仍未确证**，不宣称已修复。
+
+### 37.3 ECharts 6 图表页 E2E 确认
+
+- `analytics-usability.spec.ts` **1 / 1**；`alarm-analytics.spec.ts` **13 / 13**（KPI、抖动、下钻、阈值、导出、报警 KPI 报表模板、1600/390/320 视口）。
+- 用本机 msedge 运行；`PW_CHANNEL=chromium` 缺 `chromium_headless_shell-1248`（已装 1243），未额外下载。
+- 顺带修一条测试缺陷：报表单元格是 `ReportNumbers.ApplyDisplay` 格式化后的字符串，原断言直接对字符串做 `toBeGreaterThanOrEqual`，首轮红；改为 `Number(...)` 后通过。
+
+### 37.4 验证与未做
+
+- 前端：`npm run build`（delta 606363 / 655360）、`test:unit`（vitest 85 + 脚本 16 + mock 486/310）、`check:hygiene`（any=0/0）、`lint`（0 error / 70 warning）。
+- 后端：Server 测试项目构建 0 警告 0 错误；报表定向 5 轮 + 加固后 3 轮均 9/9。
+- 未跑：全量 Server 套件、全量 E2E（150 spec / 689 条）、真实 CI。
+- 站点初始化复用（约 470 秒固定开销）与桌面端 Presenter 抽取仍留给独立批次。

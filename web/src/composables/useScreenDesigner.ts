@@ -27,7 +27,6 @@ import { useDesignerConflict } from '../composables/useDesignerConflict'
 import { useDesignerNodeEditing } from '../composables/useDesignerNodeEditing'
 import { tr } from '../i18n'
 import { openShortcutHelp, registerShortcuts } from '../shortcuts/registry'
-import { ArrowDown, ArrowUp, Close, Hide, Lock, Menu as MenuIcon, Operation, Setting, Unlock, View } from '@element-plus/icons-vue'
 
 export function useScreenDesigner(props: { embedded: boolean; modelValue?: ScreenDocument; bindingTags?: Tag[]; disabled: boolean }, emit: { (e: 'update:modelValue', document: ScreenDocument): void; (e: 'save'): void }) {
   const route = useRoute(), router = useRouter(), id = Number(route.params.id)

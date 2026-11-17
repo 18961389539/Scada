@@ -328,7 +328,8 @@ test('alarm analytics dashboard: KPIs, chattering, drill-down, thresholds, expor
   const run = await post(`/api/report-templates/${tpl.id}/generate`, { at: Date.now() })
   const detail = await (await request.get(`/api/report-runs/${run.id}`, { headers: admin })).json()
   // 第 3 次触发被报警引擎标为抖动，不计入需报警数。
-  expect(detail.table.summary.values[0]).toBeGreaterThanOrEqual(2)
+  // 报表单元格是格式化后的字符串（ReportNumbers.ApplyDisplay），比较前先转数值。
+  expect(Number(detail.table.summary.values[0])).toBeGreaterThanOrEqual(2)
 
   // 英文界面：仪表盘文案、评级与建议类型均已翻译。
   await page.goto('/alarm-analytics')

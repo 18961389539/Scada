@@ -37,6 +37,12 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
         var template = await Json(await cfg.PostAsJsonAsync("/api/report-templates", body));
         var run = await Json(await cfg.PostAsJsonAsync($"/api/report-templates/{template.GetProperty("id").GetInt32()}/generate", new { }));
         Assert.True(run.GetProperty("signed").GetBoolean());
+        // 归档目录按 Site 隔离（Root = Scada:ReportsRoot，每个测试类独立临时目录）。
+        // 这里在生成端就核对文件确实落盘：若此后下载 404，失败信息能直接区分「没写」与「被删/被锁」。
+        var archive = _site.Services.GetRequiredService<ReportArchiveService>();
+        var archived = Directory.Exists(archive.Root) ? Directory.GetFiles(archive.Root, "*", SearchOption.AllDirectories) : [];
+        Assert.True(archived.Length > 0,
+            $"生成接口返回 signed=true，但归档目录没有文件。Root={archive.Root}；存在目录={Directory.Exists(archive.Root)}");
         return run.GetProperty("id").GetInt64();
     }
 

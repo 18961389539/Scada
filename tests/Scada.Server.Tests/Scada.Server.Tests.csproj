@@ -15,8 +15,10 @@
   </ItemGroup>
   <ItemGroup><ProjectReference Include="..\..\src\Scada.Server\Scada.Server.csproj" /></ItemGroup>
   <ItemGroup>
-    <!-- 每个测试站点现在有独立的 config.db + runtime.db，并行度按逻辑核数跑会同时初始化上百个
-         SQLite 文件，native 层会直接把测试宿主跑崩。4 个并发足够，且远低于句柄/内存拐点。 -->
+    <!-- 每个测试站点有独立的 config.db + runtime.db，并行度按逻辑核数跑会同时初始化上百个 SQLite 文件。
+         2026-11-17 实测（627 条、Release、12 核、同一构建）：4/6/8 并发墙钟 16m01s / 15m29s / 15m27s，
+         峰值 RSS 4079 / 3407 / 3332 MB。降并发既不省内存也不更快，因此保持 8。
+         真正的成本在站点初始化：117 个测试类各自启动一次完整宿主，约占墙钟一半（见 full-review 第 33 节）。 -->
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Import Project="..\..\src\Scada.ScriptWorker\Scada.ScriptWorker.targets" />
