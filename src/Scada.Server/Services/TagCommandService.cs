@@ -8,7 +8,8 @@ namespace Scada.Server.Services;
 
 /// <summary>
 /// 测点写入的唯一落地点：REST 端点与 MCP 工具共用同一套顺序与判据。
-/// Excel 导入不走这里——它按名字合并已有测点（upsert），不存在「拒绝重名」这个动作。
+/// Excel 导入、工程导入与模板实例化按名字合并或批量生成，不走本服务的落盘；
+/// 采集档位预算则与这里一样，按 <see cref=ScanCadence.EffectiveRate/> 计入设备默认周期。
 ///
 /// 之前「协议校验 / 采集档位预算 / 同设备重名」在三处各写一遍，且端点先查重名再校验、
 /// MCP 先校验再查重名——同一条非法请求在两个入口给出不同提示。规则只有一份之后，
@@ -124,7 +125,7 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         // 与 ConfigurationValidator.TagIssues(tag, device) 用同一个设备：调用方保证 tag.DeviceId 就是 device.Id，
         // 这里显式取 device.Id，避免两者不一致时档位预算和重名查到别的设备上。
         var deviceId = device.Id;
-        if (await ValidateLaneBudgetAsync(db, deviceId, [tag.ScanRateMs], excludeTagId, cancellationToken) is string laneError)
+        if (await ValidateLaneBudgetAsync(db, device, [tag.ScanRateMs], excludeTagId, cancellationToken) is string laneError)
             return (TagCommandError.LaneBudgetExceeded,
                 [new ValidationIssue("tag.scanRate.laneBudget", nameof(Tag.ScanRateMs), laneError)]);
 
@@ -146,13 +147,14 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
     }
 
     // 档位数量是设备级约束：超限时快慢点混跑会退化成相互打断的密集轮询。
+    // 与采集器一致，按有效周期计档：未填周期的物理测点跟随设备默认，也占一档。
     public async Task<string?> ValidateLaneBudgetAsync(
-        ConfigDbContext db, int deviceId, IEnumerable<int?> candidates, int? excludeTagId, CancellationToken cancellationToken)
+        ConfigDbContext db, Device device, IEnumerable<int?> candidates, int? excludeTagId, CancellationToken cancellationToken)
     {
-        var query = db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId && x.ScanRateMs != null);
+        var query = db.Tags.AsNoTracking().Where(x => x.DeviceId == device.Id && x.Kind == TagKind.Physical);
         if (excludeTagId is int exclude) query = query.Where(x => x.Id != exclude);
         var existing = await query.Select(x => x.ScanRateMs).ToListAsync(cancellationToken);
-        return ScanCadence.ValidateLaneBudget(existing.Concat(candidates));
+        return ScanCadence.ValidateLaneBudget(device, existing.Concat(candidates));
     }
 
     // 审计由 AuditInterceptor 在保存后自动落（Tag 实现了 IAuditedEntity），

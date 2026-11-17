@@ -143,7 +143,8 @@ public sealed class ProjectApplyContext(
                                     else if (name == "screenRef" && allowMissingScreenRefs) WarningList.Add($"运行布局 {entry.FinalKey}：草稿引用的画面 {key} 不存在，已清空，请重新选择");
                                     else { ok = false; Error(entry, $"引用的{RefLabel(name)} {key} 不存在"); }
                                 }
-                                obj[name[..^3] + "Id"] = id;
+                                // acquisitionChannelRef 用来和通知通道区分，但设备外键仍是 ChannelId。
+                                obj[name == "acquisitionChannelRef" ? "channelId" : name[..^3] + "Id"] = id;
                             }
                         }
                         else if (ProjectFormat.ExpressionFields.Contains(name) && value is JsonValue text && text.TryGetValue<string>(out var expression))

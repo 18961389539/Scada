@@ -45,11 +45,31 @@ public class ScanLaneTests
         => Assert.NotNull(ScanCadence.Validate(new Tag { Id = 1, Kind = TagKind.Physical, ScanRateMs = rate }));
 
     [Fact]
-    public void FourTiersAreAllowedAndFiveAreRejected()
+    public void FourEffectiveLanesAreAllowedAndFiveAreRejected()
     {
-        Assert.Null(ScanCadence.ValidateLaneBudget([100, 200, 300, 400], 400));
-        Assert.NotNull(ScanCadence.ValidateLaneBudget([100, 200, 300, 400], 500));
-        Assert.Null(ScanCadence.ValidateLaneBudget([null, 0, 100], null));
+        var device = new Device { Id = 1, Name = "泵站", PollIntervalMs = 1000 };
+        // 四个显式周期且没有跟随默认的测点：运行时只有 4 档，默认周期不凭空占档。
+        Assert.Null(ScanCadence.ValidateLaneBudget(device, [100, 200, 300, 400], 400));
+        Assert.NotNull(ScanCadence.ValidateLaneBudget(device, [100, 200, 300, 400], 500));
+        // 未填或 0 跟随设备默认，与一个显式周期合计 2 档。
+        Assert.Null(ScanCadence.ValidateLaneBudget(device, [null, 0, 100], null));
+        // 4 个显式覆盖周期再加上跟随默认的测点，运行时是 5 档，必须拒绝。
+        var overflow = ScanCadence.ValidateLaneBudget(device, [100, 200, 300, 400, null]);
+        Assert.NotNull(overflow);
+        Assert.Contains("泵站", overflow);
+        Assert.Contains("100ms", overflow);
+        Assert.Contains("1000ms（设备默认）", overflow);
+        Assert.Contains("5 档", overflow);
+        // 3 个覆盖周期 + 默认跟随，正好 4 档。
+        Assert.Null(ScanCadence.ValidateLaneBudget(device, [100, 200, 300, null]));
+        // 显式周期与默认相同的测点和跟随默认的测点共用一档。
+        Assert.Null(ScanCadence.ValidateLaneBudget(device, [100, 200, 300, 1000, null]));
+        // 改设备默认周期后，原先与默认重合的测点会拆成新档。
+        var changed = new Device { Id = 1, Name = "泵站", PollIntervalMs = 500 };
+        var split = ScanCadence.ValidateLaneBudget(changed, [100, 200, 300, 1000, null]);
+        Assert.NotNull(split);
+        Assert.Contains("500ms（设备默认）", split);
+        Assert.Contains("1000ms", split);
     }
 
     [Fact]

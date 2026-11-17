@@ -14,6 +14,11 @@ public sealed record ImportResult(int Created, int Updated, int Skipped, IReadOn
 
 public sealed class TagExcelService
 {
+    private static readonly System.Text.Json.JsonSerializerOptions AuditJson = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
     private static readonly string[] Headers =
     [
         "设备名称", "测点名称", "描述", "区域", "地址", "数据类型", "系数", "偏移",
@@ -95,9 +100,10 @@ public sealed class TagExcelService
     public async Task<ImportResult> ImportAsync(
         Stream stream,
         IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-        CancellationToken cancellationToken, int? userId = null, string userName = "system")
+        CancellationToken cancellationToken, int? userId = null, string userName = "system", string? fileName = null)
     {
-        // 导入是批量写：逐行审计没有意义，导入结果由调用方记一条汇总。
+        // 导入是批量写：物理测点逐行审计没有意义，提交成功后由本方法记一条汇总。
+        // 计算测点仍按行记录（见 ImportCalculationsAsync），汇总里注明范围，避免再展开一遍。
         using var importAudit = Scada.Core.Security.AuditContext.Suppress();
         using var workbook = new XLWorkbook(stream);
         var sheet = workbook.Worksheet(1);
@@ -115,6 +121,7 @@ public sealed class TagExcelService
         var physicalNames = new HashSet<(int DeviceId, string Name)>();
         var devices = await db.Devices.ToDictionaryAsync(x => x.Name, cancellationToken);
         var tags = await db.Tags.Where(x => x.Kind == TagKind.Physical).ToDictionaryAsync(x => (x.DeviceId!.Value, x.Name), cancellationToken);
+        var touchedDevices = new HashSet<int>();
 
         for (var row = 2; row <= lastRow; row++)
         {
@@ -208,6 +215,7 @@ public sealed class TagExcelService
                     created++;
                 }
                 if (sourceId > 0) idMap[sourceId] = tags[key];
+                touchedDevices.Add(device.Id);
             }
             catch (Exception ex)
             {
@@ -216,21 +224,71 @@ public sealed class TagExcelService
             }
         }
 
+        var laneErrors = new List<string>();
+        foreach (var deviceId in touchedDevices)
+        {
+            var device = devices.Values.Single(x => x.Id == deviceId);
+            if (ScanCadence.ValidateLaneBudget(device, tags.Values.Where(x => x.DeviceId == deviceId).Select(x => x.ScanRateMs)) is string laneError)
+                laneErrors.Add(laneError);
+        }
+        errors.AddRange(laneErrors);
+
         if (hasCalculations && errors.Count > 0) return new(0, 0, skipped, errors.Prepend("含计算定义的工作簿须整体有效，未导入任何行").Take(50).ToArray());
+        // 档位是设备级约束，超限时不能部分入库，否则现场会先采到不完整点表。
+        if (laneErrors.Count > 0)
+            return new(0, 0, skipped + created + updated, errors.Take(50).ToList());
         await db.SaveChangesAsync(cancellationToken);
+        var calculationCreated = 0;
+        var calculationUpdated = 0;
         if (hasCalculations)
         {
             try
             {
                 var result = await ImportCalculationsAsync(db, runtime, calculationSheet!, idMap, userId, userName, cancellationToken);
+                calculationCreated = result.Created;
+                calculationUpdated = result.Updated;
                 created += result.Created; updated += result.Updated;
             }
             catch (Exception ex) when (ex is TagExpressionException or ArgumentException or DbUpdateException)
             { return new(0, 0, skipped, [$"计算工作簿校验失败，全部回滚：{(ex is DbUpdateException ? "名称或引用冲突" : ex.Message)}"]); }
         }
         await transaction.CommitAsync(cancellationToken);
+        AddImportSummary(runtime, userId, userName, fileName, created, updated, skipped, errors, calculationCreated + calculationUpdated);
         await runtime.SaveChangesAsync(cancellationToken);
         return new ImportResult(created, updated, skipped, errors.Take(50).ToList());
+    }
+
+    private static void AddImportSummary(RuntimeDbContext runtime, int? userId, string userName, string? fileName, int created, int updated, int skipped, IReadOnlyList<string> errors, int calculationRowLogs)
+    {
+        object details = calculationRowLogs > 0
+            ? new
+            {
+                file = fileName,
+                Created = created,
+                Updated = updated,
+                Skipped = skipped,
+                errors = errors.Take(10).ToArray(),
+                calculationRowLogs,
+                calculationNote = "计算测点已按行记录，本条仅为整表汇总"
+            }
+            : new
+            {
+                file = fileName,
+                Created = created,
+                Updated = updated,
+                Skipped = skipped,
+                errors = errors.Take(10).ToArray()
+            };
+        runtime.OperationLogs.Add(new OperationLog
+        {
+            UserId = userId,
+            UserName = userName,
+            Ts = ScadaTime.NowMs(),
+            Action = "导入测点 Excel",
+            Result = "成功",
+            TargetType = "Tag",
+            Details = System.Text.Json.JsonSerializer.Serialize(details, AuditJson)
+        });
     }
 
     private static async Task<(int Created, int Updated)> ImportCalculationsAsync(ConfigDbContext db, RuntimeDbContext runtime, IXLWorksheet sheet, Dictionary<int, Tag> idMap, int? userId, string userName, CancellationToken ct)

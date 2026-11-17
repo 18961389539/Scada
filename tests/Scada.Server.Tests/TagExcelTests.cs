@@ -26,7 +26,18 @@ public class TagExcelTests
         db.ChangeTracker.Clear(); var source = await db.Tags.SingleAsync(x => x.Name == "source"); var a = await db.Tags.SingleAsync(x => x.Name == "first"); var b = await db.Tags.SingleAsync(x => x.Name == "second");
         Assert.True(source.Id > 100); Assert.Equal($"#{source.Id} * 2", a.Expression); Assert.Equal($"#{a.Id} + #{source.Id}", b.Expression);
         Assert.Null(b.DeviceId); Assert.False(b.CalculationEnabled); Assert.False(b.Writable); Assert.Equal(250, b.CalculationIntervalMs); Assert.Equal("kW", b.Unit);
-        Assert.Equal(3, await db.TagDependencies.CountAsync()); Assert.Equal(2, await runtime.OperationLogs.CountAsync()); Assert.Equal(42, (await runtime.OperationLogs.FirstAsync()).UserId);
+        Assert.Equal(3, await db.TagDependencies.CountAsync());
+        var logs = await runtime.OperationLogs.AsNoTracking().OrderBy(x => x.Id).ToListAsync();
+        Assert.Equal(3, logs.Count);
+        Assert.Equal(2, logs.Count(x => x.Action.StartsWith("导入计算测点：")));
+        Assert.All(logs, x => { Assert.Equal(42, x.UserId); Assert.Equal("engineer", x.UserName); });
+        var summary = logs.Single(x => x.Action == "导入测点 Excel");
+        Assert.Equal("成功", summary.Result);
+        Assert.Equal("Tag", summary.TargetType);
+        Assert.Null(summary.TagId);
+        Assert.Contains("\"Created\":3", summary.Details);
+        Assert.Contains("\"calculationRowLogs\":2", summary.Details);
+        Assert.Contains("计算测点已按行记录，本条仅为整表汇总", summary.Details);
         using var again = new MemoryStream(service.Export([device], await db.Tags.AsNoTracking().ToListAsync()));
         var update = await service.ImportAsync(again, factory, runtimeFactory, default); Assert.Empty(update.Errors); Assert.Equal(4, update.Updated);
         db.ChangeTracker.Clear(); Assert.Equal(2, (await db.Tags.FindAsync(a.Id))!.CalculationRevision); Assert.Equal(3, await db.TagDependencies.CountAsync());
@@ -119,6 +130,94 @@ public class TagExcelTests
         var result = await service.ImportAsync(stream, factory, runtimeFactory, default); Assert.Equal(1, result.Created); Assert.Empty(result.Errors);
         Assert.Equal(tag.NodeId, (await db.Tags.SingleAsync()).NodeId);
     }
+
+    [Fact]
+    public async Task ImportRejectsFiveEffectiveLanesIncludingDeviceDefault()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection); await using var runtime = runtimeFactory.CreateDbContext();
+        var device = new Device { Name = "档位泵", PollIntervalMs = 1000, Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        db.Tags.AddRange(Physical(device.Id, "a", 1, 100), Physical(device.Id, "b", 2, 200), Physical(device.Id, "c", 3, 300), Physical(device.Id, "d", 4, 400));
+        await db.SaveChangesAsync();
+
+        var service = new TagExcelService();
+        using var stream = new MemoryStream(service.Export([device], [
+            Physical(device.Id, "a", 1, 100), Physical(device.Id, "b", 2, 200), Physical(device.Id, "c", 3, 300), Physical(device.Id, "d", 4, 400),
+            Physical(device.Id, "follow", 5, null)
+        ]));
+        var result = await service.ImportAsync(stream, factory, runtimeFactory, default);
+        Assert.Equal(0, result.Created); Assert.Equal(0, result.Updated); Assert.NotEmpty(result.Errors);
+        Assert.Contains(result.Errors, x => x.Contains("档位泵") && x.Contains("1000ms（设备默认）") && x.Contains("5 档"));
+        db.ChangeTracker.Clear();
+        Assert.Equal(4, await db.Tags.CountAsync());
+        Assert.False(await db.Tags.AnyAsync(x => x.Name == "follow"));
+        Assert.Empty(await runtime.OperationLogs.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ImportAllowsFourEffectiveLanesIncludingDeviceDefault()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection); await using var runtime = runtimeFactory.CreateDbContext();
+        var device = new Device { Name = "四档泵", PollIntervalMs = 1000, Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var service = new TagExcelService();
+        using var stream = new MemoryStream(service.Export([device], [
+            Physical(device.Id, "a", 1, 100), Physical(device.Id, "b", 2, 200), Physical(device.Id, "c", 3, 300), Physical(device.Id, "follow", 4, null)
+        ]));
+        var result = await service.ImportAsync(stream, factory, runtimeFactory, default);
+        Assert.Equal(4, result.Created); Assert.Empty(result.Errors);
+        db.ChangeTracker.Clear();
+        Assert.Equal(4, await db.Tags.CountAsync());
+        Assert.Null((await db.Tags.SingleAsync(x => x.Name == "follow")).ScanRateMs);
+    }
+
+    [Fact]
+    public async Task PhysicalImportWritesOneSummaryAuditWithoutPerRowLogs()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection); await using var runtime = runtimeFactory.CreateDbContext();
+        var device = new Device { Name = "modbus", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        db.Tags.Add(new Tag { DeviceId = device.Id, Name = "temp", Area = TagArea.HoldingRegister, Address = 1, DataType = TagDataType.UInt16 });
+        await db.SaveChangesAsync();
+        var service = new TagExcelService();
+        using var source = new MemoryStream(service.Export([device], [
+            new Tag { DeviceId = device.Id, Name = "temp", Area = TagArea.HoldingRegister, Address = 2, DataType = TagDataType.UInt16 },
+            new Tag { DeviceId = device.Id, Name = "flow", Area = TagArea.HoldingRegister, Address = 3, DataType = TagDataType.UInt16 }
+        ]));
+        using var book = new XLWorkbook(source);
+        var sheet = book.Worksheet(1);
+        sheet.Row(3).CopyTo(sheet.Row(4));
+        sheet.Cell(4, 1).Value = "missing-device";
+        sheet.Cell(4, 2).Value = "orphan";
+        using var stream = new MemoryStream(); book.SaveAs(stream); stream.Position = 0;
+        var result = await service.ImportAsync(stream, factory, runtimeFactory, default, 7, "operator", "tags-plant.xlsx");
+        Assert.Equal(1, result.Created); Assert.Equal(1, result.Updated); Assert.Equal(1, result.Skipped); Assert.Single(result.Errors);
+        var logs = await runtime.OperationLogs.AsNoTracking().ToListAsync();
+        var summary = Assert.Single(logs);
+        Assert.Equal("导入测点 Excel", summary.Action);
+        Assert.Equal(7, summary.UserId);
+        Assert.Equal("operator", summary.UserName);
+        Assert.Equal("成功", summary.Result);
+        Assert.Equal("Tag", summary.TargetType);
+        Assert.Null(summary.TagId);
+        Assert.Contains("\"file\":\"tags-plant.xlsx\"", summary.Details);
+        Assert.Contains("\"Created\":1", summary.Details);
+        Assert.Contains("\"Updated\":1", summary.Details);
+        Assert.Contains("\"Skipped\":1", summary.Details);
+        Assert.Contains("missing-device", summary.Details);
+        Assert.DoesNotContain("calculationRowLogs", summary.Details);
+        Assert.DoesNotContain("计算测点已按行记录", summary.Details);
+        Assert.DoesNotContain(logs, x => x.Action.StartsWith("导入计算测点："));
+    }
+
+    private static Tag Physical(int deviceId, string name, int address, int? scanRateMs) => new()
+    {
+        DeviceId = deviceId, Name = name, Area = TagArea.HoldingRegister, Address = address,
+        DataType = TagDataType.UInt16, ScanRateMs = scanRateMs
+    };
 
     private sealed class Factory(SqliteConnection connection) : IDbContextFactory<ConfigDbContext>
     {

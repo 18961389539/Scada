@@ -85,7 +85,6 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             SoftElementByteOrder.Normalize(incoming);
             var existing = entry.Action == "update" ? await Db.Devices.SingleAsync(x => x.Name == entry.FinalKey, ct) : null;
             Need(Permission.Configure, entry, [incoming.AreaId, .. existing is null ? Array.Empty<int>() : [existing.AreaId]]);
-            if (ConfigurationValidator.Device(incoming, Settings, Drivers) is string error) { Error(entry, error); continue; }
             // 旧工程包只带数据库编号。本机还有这条通道就沿用，否则解开绑定，避免指到别的通道。
             if (incoming.ChannelId is int legacy && !entry.Data!.ContainsKey("acquisitionChannelRef") && !await Db.Channels.AnyAsync(x => x.Id == legacy, ct))
             {
@@ -103,18 +102,30 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
                     continue;
                 }
             }
+            // 更新项必须先带上本机编号，否则站号/串口检查会把自己当成冲突对象。
+            if (existing is not null) incoming.Id = existing.Id;
+            // 通道绑定完成后走与 REST/MCP 同一套 InspectIssuesAsync（本机采集隔离、站号、串口、重名）。
+            // 协议字段校验也收在这里，并且在端点下发之后执行，避免空 Host/串口被通道覆盖前误拒。
+            var issues = await DeviceCommandService.InspectIssuesAsync(Db, incoming, existing?.Id, Settings, Drivers, ct);
+            if (issues.Count > 0)
+            {
+                Error(entry, string.Join("；", issues.Select(x => x.Message)));
+                continue;
+            }
             if (existing is null)
             {
                 incoming.DisabledSinceTs = incoming.Enabled ? 0 : Now; Db.Devices.Add(incoming);
             }
             else
             {
-                incoming.Id = existing.Id; incoming.OpcPasswordProtected = existing.OpcPasswordProtected;
+                incoming.OpcPasswordProtected = existing.OpcPasswordProtected;
                 incoming.DisabledSinceTs = incoming.Enabled ? 0 : existing.Enabled ? Now : existing.DisabledSinceTs;
                 Db.Entry(existing).CurrentValues.SetValues(incoming);
             }
+            // 同一包内后一条设备的站号/串口检查要能看到本条已接受的写入；失败时由外层事务回滚。
+            await SaveAsync(ct);
         }
-        await SaveAsync(ct); await LoadAsync(ct);
+        await LoadAsync(ct);
     }
 
     internal async Task<ExpressionMap> ApplyTagsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
@@ -146,8 +157,54 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             if (incoming.Kind == TagKind.Calculated) expressions[target] = (entry, expression);
         }
         await SaveAsync(ct); await LoadAsync(ct);
+        await ValidateImportedLaneBudgetsAsync(work, ct);
         // 计算测点的表达式要等计算任务的派生测点生成后才能解析，交给调用方带入下一段。
         return expressions;
+    }
+
+    // 设备默认周期变更与测点导入必须一起按有效周期重算：只在改周期时检查会漏掉随后改点表的工程包。
+    private async Task ValidateImportedLaneBudgetsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        var deviceIds = new HashSet<int>();
+        foreach (var entry in Upserts(work, "devices"))
+        {
+            if (DeviceIdsByName.TryGetValue(entry.FinalKey, out var id)) deviceIds.Add(id);
+        }
+        foreach (var entry in Upserts(work, "tags"))
+        {
+            var tag = await FindTagAsync(entry.FinalKey, ct);
+            if (tag?.DeviceId is int id) deviceIds.Add(id);
+        }
+        if (deviceIds.Count == 0) return;
+
+        var devices = await Db.Devices.AsNoTracking().Where(x => deviceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        var rates = await Db.Tags.AsNoTracking()
+            .Where(x => x.Kind == TagKind.Physical && x.DeviceId != null && deviceIds.Contains(x.DeviceId.Value))
+            .Select(x => new { x.DeviceId, x.ScanRateMs })
+            .ToListAsync(ct);
+
+        foreach (var deviceId in deviceIds)
+        {
+            if (!devices.TryGetValue(deviceId, out var device)) continue;
+            if (ScanCadence.ValidateLaneBudget(device, rates.Where(x => x.DeviceId == deviceId).Select(x => x.ScanRateMs)) is not string error)
+                continue;
+            var deviceEntry = Upserts(work, "devices").FirstOrDefault(entry => DeviceIdsByName.GetValueOrDefault(entry.FinalKey) == deviceId);
+            if (deviceEntry is not null) { Error(deviceEntry, error); continue; }
+            var tagEntry = (await FindTagEntriesAsync(work, deviceId, ct)).FirstOrDefault();
+            if (tagEntry is not null) Error(tagEntry, error);
+            else Errors.Add(error);
+        }
+    }
+
+    private async Task<List<PlanEntry>> FindTagEntriesAsync(IReadOnlyList<PlanEntry> work, int deviceId, CancellationToken ct)
+    {
+        var entries = new List<PlanEntry>();
+        foreach (var entry in Upserts(work, "tags"))
+        {
+            var tag = await FindTagAsync(entry.FinalKey, ct);
+            if (tag?.DeviceId == deviceId) entries.Add(entry);
+        }
+        return entries;
     }
 
     internal async Task ApplyScriptLibrariesAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)

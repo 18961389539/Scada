@@ -18,7 +18,11 @@ public static class ScanCadence
     public const int MaxLanesPerDevice = 4;
 
     public static int Effective(Device device, Tag? tag = null)
-        => Math.Clamp(tag?.ScanRateMs is int rate && rate > 0 ? rate : device.PollIntervalMs, MinMs, MaxMs);
+        => EffectiveRate(device, tag?.ScanRateMs);
+
+    /// <summary>与运行时分组同一规则：未填或非正数的采集周期跟随设备默认周期，并夹在允许范围内。</summary>
+    public static int EffectiveRate(Device device, int? scanRateMs)
+        => Math.Clamp(scanRateMs is int rate && rate > 0 ? rate : device.PollIntervalMs, MinMs, MaxMs);
 
     /// <summary>设备上所有测点里最慢的有效周期，用于陈旧判定，避免慢档测点被误标超时。</summary>
     public static int SlowestEffective(Device device, IEnumerable<Tag> tags)
@@ -37,17 +41,20 @@ public static class ScanCadence
     }
 
     /// <summary>
-    /// 校验档位数量是否超过上限。<paramref name="rates"/> 为同设备（含待保存）测点的采集周期。
+    /// 按有效周期校验档位数量是否超过上限。<paramref name="rates"/> 为同设备（含待保存）
+    /// 物理测点的 <see cref="Tag.ScanRateMs"/>；空值与非正数按设备默认周期计入，与采集器分组一致。
     /// </summary>
-    public static string? ValidateLaneBudget(IEnumerable<int?> rates)
+    public static string? ValidateLaneBudget(Device device, IEnumerable<int?> rates)
     {
-        var lanes = rates.Where(x => x is > 0).Select(x => x!.Value).Distinct().Count();
-        return lanes > MaxLanesPerDevice
-            ? $"同一设备最多支持 {MaxLanesPerDevice} 个采集周期档位，当前配置为 {lanes} 个，请合并相近周期"
-            : null;
+        var lanes = rates.Select(rate => EffectiveRate(device, rate)).Distinct().OrderBy(x => x).ToArray();
+        if (lanes.Length <= MaxLanesPerDevice) return null;
+        var defaultMs = Effective(device);
+        var listed = string.Join("、", lanes.Select(ms => ms == defaultMs ? $"{ms}ms（设备默认）" : $"{ms}ms"));
+        var name = string.IsNullOrWhiteSpace(device.Name) ? "该设备" : $"设备「{device.Name}」";
+        return $"{name}最多支持 {MaxLanesPerDevice} 个采集周期档位，当前为 {lanes.Length} 档（{listed}），请合并相近周期或调整设备默认周期";
     }
 
-    /// <summary>校验新增一个档位后是否超过上限。</summary>
-    public static string? ValidateLaneBudget(IEnumerable<int?> existing, int? candidate)
-        => ValidateLaneBudget(candidate is > 0 ? existing.Append(candidate) : existing);
+    /// <summary>校验纳入一个待保存测点后是否超过上限。空的候选周期同样跟随设备默认，计入档位。</summary>
+    public static string? ValidateLaneBudget(Device device, IEnumerable<int?> existing, int? candidate)
+        => ValidateLaneBudget(device, existing.Append(candidate));
 }

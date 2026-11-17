@@ -14,8 +14,9 @@ namespace Scada.Server.Services;
 
 /// <summary>
 /// 设备写入的唯一落地点，与 <see cref="TagCommandService"/> 同形：REST 端点与 MCP 工具
-/// 共用同一套校验顺序（协议字段 → 通道站号 → 串口总线 → 全局重名）与落盘顺序
-/// （配置库 → 审计 → 重载）。
+/// 共用同一套校验顺序（协议字段 → 本机采集隔离 → 通道站号 → 串口总线 → 全局重名）与落盘顺序
+/// （配置库 → 审计 → 重载）。工程导入在通道端点下发之后调用同一套 <see cref="InspectIssuesAsync"/>，
+/// 不走本服务的落盘与重载（导入由 ProjectApplier 在事务内统一提交，预览则回滚）。
 ///
 /// 之前这两条路径各自把校验抄了一遍，顺序还不同：端点先查重名再校验协议，MCP 反过来。
 /// 通道端点下发（<see cref="ApplyChannelEndpointIssuesAsync"/>）必须在校验之前跑——设备的
@@ -62,7 +63,7 @@ public sealed class DeviceCommandService(
 
     /// <summary>
     /// 调用方负责把请求字段合并到被跟踪的 <paramref name="device"/>（含 <c>DisabledSinceTs</c>），
-    /// 本方法只做「通道下发 → 校验 → 已有测点重校验 → 落盘」。
+    /// 本方法只做「通道下发 → 校验 → 已有测点重校验（含采集档位预算） → 落盘」。
     /// </summary>
     public async Task<DeviceCommandResult> UpdateAsync(
         ConfigDbContext db, Device device, CancellationToken cancellationToken)
@@ -87,6 +88,15 @@ public sealed class DeviceCommandService(
                         $"已有测点“{tag.Name}”：{tagIssues[0].Message}；请先调整测点再切换协议")
                 ]);
         }
+
+        // 设备默认周期也是一档：改 PollIntervalMs 后，跟随默认周期的测点会换档，必须按有效周期重算。
+        var physicalRates = await db.Tags.AsNoTracking()
+            .Where(x => x.DeviceId == device.Id && x.Kind == TagKind.Physical)
+            .Select(x => x.ScanRateMs)
+            .ToListAsync(cancellationToken);
+        if (ScanCadence.ValidateLaneBudget(device, physicalRates) is string laneError)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation,
+                [new ValidationIssue("device.pollInterval.laneBudget", nameof(Device.PollIntervalMs), laneError)]);
 
         try
         {
@@ -128,13 +138,26 @@ public sealed class DeviceCommandService(
         return DeviceCommandResult.Succeeded(device);
     }
 
-    /// <summary>校验顺序固定，两条入口共用。</summary>
-    public async Task<IReadOnlyList<ValidationIssue>> InspectIssuesAsync(
+    /// <summary>校验顺序固定，REST、MCP 与工程导入共用。</summary>
+    public Task<IReadOnlyList<ValidationIssue>> InspectIssuesAsync(
         ConfigDbContext db, Device device, int? excludeDeviceId, CancellationToken cancellationToken)
+        => InspectIssuesAsync(db, device, excludeDeviceId, settings.Value, drivers, cancellationToken);
+
+    /// <summary>
+    /// 协议字段、本机采集隔离、通道站号、串口总线与全局重名。通道端点须先下发。
+    /// 工程导入没有本服务实例（避免预览路径触碰运行时重载），因此把同一套检查做成静态方法供两端调用。
+    /// </summary>
+    public static async Task<IReadOnlyList<ValidationIssue>> InspectIssuesAsync(
+        ConfigDbContext db,
+        Device device,
+        int? excludeDeviceId,
+        ScadaSettings? settings,
+        IProtocolDriverAvailability? drivers,
+        CancellationToken cancellationToken)
     {
-        var issues = ConfigurationValidator.DeviceIssues(device, settings.Value, drivers);
+        var issues = ConfigurationValidator.DeviceIssues(device, settings, drivers);
         if (issues.Count > 0) return issues;
-        if (!settings.Value.LocalCollectionEnabled && LocalCollection.IsUnassignedEnabled(device))
+        if (settings is { LocalCollectionEnabled: false } && LocalCollection.IsUnassignedEnabled(device))
             return [new ValidationIssue("device.gateway.required", nameof(Device.GatewayId), LocalCollection.UnassignedDeviceMessage)];
         if (await ValidateChannelStationAsync(db, device, cancellationToken) is { } station) return [station];
         if (await ValidateSerialBusAsync(db, device, cancellationToken) is { } bus) return [bus];

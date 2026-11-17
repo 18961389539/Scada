@@ -284,6 +284,48 @@ public class ObjectTemplateTests
         await using var result = rig.Factory.CreateDbContext(); Assert.All(await result.ObjectInstances.ToListAsync(), i => Assert.Equal(1, i.AppliedVersion));
     }
 
+    [Fact]
+    public async Task InstantiateRejectsFiveEffectiveLanesIncludingDeviceDefault()
+    {
+        await using var rig = await Rig.CreateAsync();
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            db.Tags.AddRange(RateTag(100), RateTag(200), RateTag(300), RateTag(400));
+            await db.SaveChangesAsync();
+        }
+        var request = new ObjectBatchRequest(1, [new("P01", 1, 20)]);
+        var preview = await rig.Service.PreviewCreateAsync(rig.TemplateId, request, default);
+        Assert.False(preview.CanApply);
+        Assert.Contains(preview.Plans[0].Errors, error => error.Contains("PLC") && error.Contains("5 档") && error.Contains("1000ms（设备默认）"));
+        await Assert.ThrowsAsync<TemplateOperationException>(() => rig.Service.CreateAsync(rig.TemplateId, request, null, "test", default));
+        await using var check = rig.Factory.CreateDbContext();
+        Assert.Empty(await check.ObjectInstances.ToListAsync());
+        Assert.Equal(4, await check.Tags.CountAsync());
+    }
+
+    [Fact]
+    public async Task InstantiateAllowsFourEffectiveLanesIncludingDeviceDefault()
+    {
+        await using var rig = await Rig.CreateAsync();
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            db.Tags.AddRange(RateTag(100), RateTag(200), RateTag(300));
+            await db.SaveChangesAsync();
+        }
+        var request = new ObjectBatchRequest(1, [new("P01", 1, 20)]);
+        var preview = await rig.Service.PreviewCreateAsync(rig.TemplateId, request, default);
+        Assert.True(preview.CanApply, ObjectTemplateJson.Write(preview));
+        await rig.Service.CreateAsync(rig.TemplateId, request, null, "test", default);
+        await using var check = rig.Factory.CreateDbContext();
+        Assert.Single(await check.ObjectInstances.ToListAsync());
+    }
+
+    private static Tag RateTag(int rate) => new()
+    {
+        DeviceId = 1, Name = "r" + rate, Area = TagArea.HoldingRegister, Address = rate,
+        DataType = TagDataType.UInt16, ScanRateMs = rate
+    };
+
     private sealed class Rig : IAsyncDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "scada-objects-" + Guid.NewGuid().ToString("N"));

@@ -105,6 +105,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             await ValidatePlanAsync(db, plan, ct);
             plans.Add(plan);
         }
+        await AddLaneBudgetErrorsAsync(db, plans, ct);
         return plans;
     }
 
@@ -138,6 +139,7 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         if (!ObjectTemplateJson.Equal(plan.Panel, localPanel) || plan.PanelName != plan.Screen.Name)
             plan.Changes.Add(new("panel", "update", "更新并发布设备面板"));
         await ValidatePlanAsync(db, plan, ct);
+        await AddLaneBudgetErrorsAsync(db, [plan], ct);
         var referenceVersions = await db.ProcessScreens.AsNoTracking().OrderBy(x => x.Id).Select(x => new { x.Id, x.Revision, x.PublishedRevision }).ToListAsync(ct);
         var foreignAlarmRefs = await db.AlarmRules.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && !alarmIds.Contains(x.Id))
             .OrderBy(x => x.Id).Select(x => new { x.Id, x.TagId }).ToListAsync(ct);
@@ -271,6 +273,30 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
     }
 
     private static bool References(ScreenDocument doc, List<int> ids) => doc.Nodes.Any(n => n.TagId is int id && ids.Contains(id) || n.Action.Type == "command" && n.Action.TagId is int output && ids.Contains(output));
+    private static async Task AddLaneBudgetErrorsAsync(ConfigDbContext db, IReadOnlyList<Plan> plans, CancellationToken ct)
+    {
+        var deviceIds = plans.Select(plan => plan.Parameters.DeviceId).Distinct().ToList();
+        var devices = await db.Devices.AsNoTracking().Where(x => deviceIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, ct);
+        var existing = await db.Tags.AsNoTracking()
+            .Where(x => x.Kind == TagKind.Physical && x.DeviceId != null && deviceIds.Contains(x.DeviceId.Value))
+            .Select(x => new { x.Id, x.DeviceId, x.ScanRateMs })
+            .ToListAsync(ct);
+        foreach (var group in plans.GroupBy(plan => plan.Parameters.DeviceId))
+        {
+            if (!devices.TryGetValue(group.Key, out var device)) continue;
+            var deleteIds = group.SelectMany(plan => plan.DeleteTagIds).ToHashSet();
+            var replacedIds = group.SelectMany(plan => plan.Tags.Values.Select(tag => tag.Id)).ToHashSet();
+            var rates = existing
+                .Where(tag => tag.DeviceId == group.Key && !deleteIds.Contains(tag.Id) && !replacedIds.Contains(tag.Id))
+                .Select(tag => tag.ScanRateMs)
+                .Concat(group.SelectMany(plan => plan.Tags.Values.Where(tag => tag.Kind == TagKind.Physical).Select(tag => tag.ScanRateMs)));
+            if (ScanCadence.ValidateLaneBudget(device, rates) is string error)
+            {
+                foreach (var plan in group) plan.Errors.Add(error);
+            }
+        }
+    }
+
     private static List<string> BatchErrors(List<Plan> plans)
     {
         var errors = new List<string>();

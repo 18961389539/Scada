@@ -298,7 +298,7 @@ public static class TagEndpoints
                     $"测点名称重复：{string.Join("、", duplicated)}");
             }
 
-            if (await tagCommands.ValidateLaneBudgetAsync(db, device.Id, tags.Select(x => x.ScanRateMs), null, cancellationToken) is string laneError)
+            if (await tagCommands.ValidateLaneBudgetAsync(db, device, tags.Select(x => x.ScanRateMs), null, cancellationToken) is string laneError)
             {
                 return EndpointHelpers.ValidationProblem(
                     [EndpointHelpers.Issue("tag.scanRate.laneBudget", nameof(Tag.ScanRateMs), laneError)]);
@@ -436,7 +436,7 @@ public static class TagEndpoints
             }
 
             await using var stream = file.OpenReadStream();
-            var result = await excel.ImportAsync(stream, contextFactory, runtimeFactory, cancellationToken, http.User.GetUserId(), http.User.GetUserName());
+            var result = await excel.ImportAsync(stream, contextFactory, runtimeFactory, cancellationToken, http.User.GetUserId(), http.User.GetUserName(), file.FileName);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(result);
         })
