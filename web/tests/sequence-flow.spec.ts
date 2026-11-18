@@ -49,7 +49,8 @@ test('graphical sequence editor: add nodes, connect, validation on nodes, lossle
   await expect(dialog.locator('[data-test="sequence-steps"]')).toBeVisible()
   await dialog.getByRole('button', { name: '取消' }).click()
 
-  const start = await request.post(`/api/control/sequences/${seq.id}/start`, { headers: admin.headers, data: { confirmed: true } }); expect(start.ok()).toBeTruthy()
+  const grant = await request.post(`/api/control/sequences/${seq.id}/check-start`, { headers: admin.headers }); expect(grant.ok()).toBeTruthy()
+  const start = await request.post(`/api/control/sequences/${seq.id}/start`, { headers: admin.headers, data: { confirmed: true, challenge: (await grant.json()).challenge } }); expect(start.ok()).toBeTruthy()
   const runId = (await start.json()).runId
   await page.getByRole('button', { name: '刷新' }).click()
   await page.locator(`[data-test="run-flow-${runId}"]`).click()

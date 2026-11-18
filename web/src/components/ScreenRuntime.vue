@@ -70,6 +70,7 @@
 
 <script setup lang="ts">
 import ControlConfirmDialog from './ControlConfirmDialog.vue'
+import { isMomentaryPressBlockedByConfirm } from '../screens/momentaryConfirm'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { attachPinch, controlBlockedOnMobile, isMobile, loadClientPolicy, mobileControl } from '../mobile'
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
@@ -663,6 +664,13 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
     return { ok: false }
   }
   const needsConfirm = !!check.requireConfirm
+  if (isMomentaryPressBlockedByConfirm(phase, needsConfirm)) {
+    setNodeBusy(node.id, false)
+    commandError.value = tr('hmi.momentaryConfirmBlocked')
+    setFeedback(node.id, 'rejected', tr('screenUx.rejected'))
+    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+    return { ok: false }
+  }
   const confirmed = needsConfirm ? await confirmDialog.value?.open(tagId, value, label, check) ?? false : false
   if (needsConfirm && !confirmed) { setNodeBusy(node.id, false); clearFeedback(node.id); return { ok: false } }
   let requestId: string | undefined

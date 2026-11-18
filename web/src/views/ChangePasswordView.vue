@@ -54,7 +54,7 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { tr } from '../i18n'
-import { defaultLandingPath } from '../access/policies'
+import { startPath } from '../router'
 import { safeRedirect } from '../nav/query'
 
 const auth = useAuthStore()
@@ -91,7 +91,7 @@ async function submit(): Promise<void> {
     const localeChanged = await auth.changePassword(form.currentPassword, form.newPassword)
     ElMessage.success(tr('passwordChange.done'))
     // 与登录页共用同源校验：localeChanged 时也会走 location.href，不能让 //host 之类跳到外域。
-    const redirect = safeRedirect(route.query.redirect, defaultLandingPath(auth.user))
+    const redirect = safeRedirect(route.query.redirect, await startPath(auth.user))
     // 服务端保存的语言偏好与本机不同时，整页跳转才能让模块级文案一起换掉。
     if (localeChanged) { location.href = redirect; return }
     await router.replace(redirect)

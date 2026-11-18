@@ -11,6 +11,21 @@ namespace Scada.Server.Tests;
 public class TagExcelTests
 {
     [Fact]
+    public async Task ImportRejectsWorkbookAboveConfiguredRowLimit()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection);
+        var device = new Device { Name = "plc", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var service = new TagExcelService(Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings { TagImportMaxRows = 2 }));
+        var tags = Enumerable.Range(1, 3).Select(i => new Tag { DeviceId = device.Id, Name = $"t{i}", Address = i }).ToArray();
+        using var stream = new MemoryStream(service.Export([device], tags));
+        var result = await service.ImportAsync(stream, factory, runtimeFactory, default);
+        Assert.Equal(0, result.Created); Assert.Contains(result.Errors, x => x.Contains("行上限"));
+        db.ChangeTracker.Clear(); Assert.Empty(await db.Tags.ToListAsync());
+    }
+
+    [Fact]
     public async Task CalculationsRoundTripAcrossDifferentIdsPreservesDependenciesDisabledStateAndAudit()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);

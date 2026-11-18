@@ -1,15 +1,16 @@
-import { ref, watch } from 'vue'
+import { effectScope, ref, watch } from 'vue'
 import { annunciatorApi } from '../api/annunciators'
 import { setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
 
 /**
  * 报警声音：静音偏好、声光面板播音键同步、报警洪峰下的 300ms 合批重算。
- * 从 AppLayout 抽出后，布局只负责在挂载/卸载时调用 start / dispose。
+ * 全应用共用一份状态，避免布局卸载后运行工作台/Kiosk 各自再造一份。
  */
-export function useAlarmSound() {
+function createAlarmSound() {
   const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
   let annunciatorTimer: number | undefined
   let annunciatorBusy = false
+  const scope = effectScope()
 
   async function refresh(): Promise<void> {
     if (!soundEnabled.value) {
@@ -41,12 +42,21 @@ export function useAlarmSound() {
     }, 300)
   }
 
-  watch(soundEnabled, (enabled) => {
-    localStorage.setItem('scada_sound', enabled ? 'on' : 'off')
-    setAlarmMute(!enabled)
-    if (!enabled) stopAlarmLoop()
-    else void refresh()
+  function onStorage(event: StorageEvent): void {
+    if (event.key !== 'scada_sound' || (event.storageArea && event.storageArea !== localStorage)) return
+    const enabled = event.newValue !== 'off'
+    if (soundEnabled.value !== enabled) soundEnabled.value = enabled
+  }
+
+  scope.run(() => {
+    watch(soundEnabled, (enabled) => {
+      localStorage.setItem('scada_sound', enabled ? 'on' : 'off')
+      setAlarmMute(!enabled)
+      if (!enabled) stopAlarmLoop()
+      else void refresh()
+    })
   })
+  window.addEventListener('storage', onStorage)
 
   function start(): void {
     setAlarmMute(!soundEnabled.value)
@@ -58,5 +68,23 @@ export function useAlarmSound() {
     annunciatorTimer = undefined
   }
 
-  return { soundEnabled, refresh, schedule, start, dispose }
+  function reset(): void {
+    dispose()
+    window.removeEventListener('storage', onStorage)
+    scope.stop()
+  }
+
+  return { soundEnabled, refresh, schedule, start, dispose, reset }
+}
+
+let instance: ReturnType<typeof createAlarmSound> | undefined
+
+export function useAlarmSound() {
+  instance ??= createAlarmSound()
+  return instance
+}
+
+export function resetAlarmSoundForTests(): void {
+  instance?.reset()
+  instance = undefined
 }

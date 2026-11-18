@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { canOperate } from '../utils'
-import { allows, defaultLandingPath, type AccessHolder } from '../access/policies'
+import { allows, type AccessHolder } from '../access/policies'
+import { resolveLandingPath } from '../access/landing'
 import { tr } from '../i18n'
 import { ensureProtocolCatalog } from '../protocols'
 import { readLastText, rememberText } from '../composables/lastChoice'
@@ -13,7 +14,7 @@ const router = createRouter({
     // 强制改密是登录后的第一站：不挂在 AppLayout 下，避免未授权的导航与轮询先跑起来。
     { path: '/change-password', name: 'change-password', component: () => import('../views/ChangePasswordView.vue'), meta: { title: tr('passwordChange.title') } },
     { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('workbench.runtimeTitle') } },
-    { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure' } },
+    { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure', suppressAlarmSession: true } },
     { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
     {
       path: '/',
@@ -121,8 +122,8 @@ function lastVisitedPath(user: AccessHolder): string | null {
 }
 
 /** 登录后或访问根地址时的落点：优先上次停留页面，否则回到角色默认首页。 */
-export function startPath(user: AccessHolder): string {
-  return lastVisitedPath(user) ?? defaultLandingPath(user)
+export async function startPath(user: AccessHolder): Promise<string> {
+  return lastVisitedPath(user) ?? await resolveLandingPath(user)
 }
 
 // 浏览器标签标题跟随路由，便于多标签页识别与屏幕阅读器播报当前页面。
@@ -159,18 +160,18 @@ router.beforeEach(async (to) => {
   }
   if (!auth.mustChangePassword && to.name === 'change-password') {
     try { await auth.confirmSession() } catch { return true }
-    if (!auth.mustChangePassword) return defaultLandingPath(auth.user)
+    if (!auth.mustChangePassword) return await resolveLandingPath(auth.user)
   }
 
   if (!auth.mustChangePassword) {
     try { await ensureProtocolCatalog() } catch { /* App renders a blocking recovery screen with an explicit retry. */ }
   }
 
-  if (to.path === '/') return startPath(auth.user)
+  if (to.path === '/') return await startPath(auth.user)
 
   // 路由与导航共用同一份策略表；路径前缀、页面特判不再参与判权。
   if (!allows(auth.user, to.meta.policy)) {
-    const landing = defaultLandingPath(auth.user)
+    const landing = await resolveLandingPath(auth.user)
     // 落地页本身被拒绝时不再重定向，否则 denied 带上自己会形成无限重定向
     if (to.path === landing) return true
     return { path: landing, query: { denied: to.fullPath } }

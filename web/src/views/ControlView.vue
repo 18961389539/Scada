@@ -8,6 +8,13 @@
       <span class="spacer" />
       <el-button @click="refresh()">{{ $t('controlView.k38108e') }}</el-button>
     </div>
+    <el-alert class="control-write-hint" type="info" :closable="false" show-icon data-test="control-write-hint" :title="$t('controlUx.writeHint')">
+      <div class="control-write-links">
+        <router-link to="/realtime" data-test="control-open-realtime">{{ $t('controlUx.openRealtime') }}</router-link>
+        <router-link to="/screens" data-test="control-open-screens">{{ $t('controlUx.openScreens') }}</router-link>
+        <router-link to="/console" data-test="control-open-console">{{ $t('controlUx.openConsole') }}</router-link>
+      </div>
+    </el-alert>
     <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
@@ -650,6 +657,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .info-icon { color: var(--scada-text-muted); cursor: help; margin-top: -2px; }
+.control-write-hint { margin-bottom: 10px; }
+.control-write-links { display: flex; flex-wrap: wrap; gap: 12px; }
 .control-kbd-hint { margin: 0 0 6px; }
 :deep(.control-row-focused) { --el-table-tr-bg-color: var(--scada-primary-soft); }
 :deep(.control-row-focused td:first-child) { box-shadow: inset 3px 0 0 var(--scada-primary); }

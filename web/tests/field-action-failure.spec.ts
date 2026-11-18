@@ -13,7 +13,7 @@ const recipe: Recipe = {
   updatedTs: 2, updatedBy: 'admin', values: [{ key: 'pressure', value: 12 }], note: null, source: 'manual'
 }
 const recipeCheck: RecipeCheck = {
-  recipeId: 911, version: 2, dualApproval: false, ok: true, refusals: [],
+  recipeId: 911, version: 2, dualApproval: false, ok: true, refusals: [], confirmationChallenge: 'e2e-recipe-challenge', confirmationExpiresTs: Date.now() + 60_000,
   parameters: [{ key: 'pressure', name: '出口压力', tagId: 921, tagName: '出口压力', unit: 'MPa', target: 12, current: 0, refusals: [], dualApproval: false }]
 }
 

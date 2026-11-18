@@ -149,6 +149,7 @@ public sealed class StandbyGateTests : IClassFixture<StandbyGateTests.StandbySit
             Assert.Equal(0, _site.Services.GetRequiredService<ControlTests.FakeCollector>().Count(tag));
         }
         finally { _site.Role.Active = true; }
+        await (await op.PostAsJsonAsync("/api/control/check", new { tagId = tag, value = 1 })).Content.ReadFromJsonAsync<JsonElement>();
         var ok = await (await op.PostAsJsonAsync("/api/commands", new { tagId = tag, value = 1, requestId = Guid.NewGuid(), confirmed = true })).Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(ok.GetProperty("success").GetBoolean(), ok.GetRawText());
     }

@@ -150,7 +150,7 @@ public sealed class McpControlTools(
         await using (var db = await factory.CreateDbContextAsync(cancellationToken))
             if (!await db.Tags.AnyAsync(x => x.Id == tagId, cancellationToken))
                 throw new McpToolException(McpErrorCodes.NotFound, "Tag does not exist.");
-        var result = await commands.SubmitAsync(new ControlSubmission(tagId, value, McpActor, ControlOrigin.Operator,
+        var result = await commands.SubmitAsync(new ControlSubmission(tagId, value, McpActor, ControlOrigin.External,
             "MCP", Confirmed: true, RequestId: requestId), cancellationToken);
         return new(tagId, value, result.Success, result.Message, result.ReadBack, result.Outcome?.ToString(),
             result.CommandId, result.Pending, result.ApprovalId, result.Refusals ?? [], ScadaTime.NowMs());
@@ -173,7 +173,7 @@ public sealed class McpControlTools(
             if (tag.DataType != Scada.Core.Enums.TagDataType.String)
                 throw new McpToolException(McpErrorCodes.InvalidArgument, "Tag is not a string tag.");
         }
-        var result = await commands.SubmitTextAsync(new ControlSubmission(tagId, 0, McpActor, ControlOrigin.Operator,
+        var result = await commands.SubmitTextAsync(new ControlSubmission(tagId, 0, McpActor, ControlOrigin.External,
             "MCP", Confirmed: true, RequestId: requestId, Text: text), cancellationToken);
         return new(tagId, text, result.Success, result.Message, result.ReadBackText, result.Outcome?.ToString(),
             result.CommandId, result.Pending, result.ApprovalId, result.Refusals ?? [], ScadaTime.NowMs());

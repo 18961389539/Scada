@@ -36,8 +36,8 @@ onBeforeUnmount(() => { controller?.abort(); window.clearTimeout(timer) })
 </script>
 <style scoped>
 .command-receipt { margin: 12px 0; }
-.command-receipt :deep(.el-alert__description) { color: #334155; font-size: 14px; line-height: 1.6; }
-.command-receipt :deep(.el-alert__title) { color: #1e293b; font-weight: 600; }
+.command-receipt :deep(.el-alert__description) { color: var(--scada-text-secondary); font-size: 14px; line-height: 1.6; }
+.command-receipt :deep(.el-alert__title) { color: var(--scada-text); font-weight: 600; }
 .command-receipt p { margin: 4px 0; }
 .command-receipt code { overflow-wrap: anywhere; font-size: 12px; }
 </style>

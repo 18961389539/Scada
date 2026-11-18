@@ -33,7 +33,7 @@ public sealed class SequenceBranchTests : IClassFixture<ControlTests.ControlSite
         c.PostAsJsonAsync("/api/control/sequences", new { name, areaId = _site.AreaA, dualApproval = false, steps });
     private async Task<JsonElement> RunAsync(HttpClient c, int sequenceId)
     {
-        var runId = (await Ok(await c.PostAsJsonAsync($"/api/control/sequences/{sequenceId}/start", new { confirmed = true }))).GetProperty("runId").GetInt32();
+        var runId = (await Ok(await c.StartSequenceAsync(sequenceId))).GetProperty("runId").GetInt32();
         await _site.Services.GetRequiredService<ControlWorkflowService>().WaitAsync(runId);
         return await Ok(await c.GetAsync($"/api/control/runs/{runId}"));
     }

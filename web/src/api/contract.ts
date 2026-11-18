@@ -8452,6 +8452,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/control/check-text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ControlTextCheckRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/control/points": {
         parameters: {
             query?: never;
@@ -8968,6 +9005,41 @@ export interface paths {
                 };
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/control/sequences/{id}/check-start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -14077,6 +14149,11 @@ export interface components {
             /** Format: double */
             y?: null | number | string;
         };
+        ControlTextCheckRequest: {
+            /** Format: int32 */
+            tagId: number | string;
+            text: null | string;
+        };
         CountCorrectionRequest: {
             /** Format: int32 */
             lineId: number | string;
@@ -15008,6 +15085,7 @@ export interface components {
             /** Format: int32 */
             version: number | string;
             confirmed: boolean;
+            challenge?: null | string;
         };
         RecipeParameter: {
             key?: string;
@@ -15401,6 +15479,7 @@ export interface components {
         };
         SequenceStartRequest: {
             confirmed: boolean;
+            challenge?: null | string;
         };
         /** @enum {unknown} */
         SerialParity: "None" | "Odd" | "Even";

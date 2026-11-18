@@ -141,8 +141,12 @@ for (const file of files) {
 }
 
 if (files.length === 0) {
-  console.log(`[coverage] ${root} 下没有 cobertura 报告（未启用收集器？），跳过`)
-  process.exit(0)
+  if (process.env.SCADA_COVERAGE_ALLOW_MISSING === '1') {
+    console.log(`[coverage] ${root} 下没有 cobertura 报告，已按 SCADA_COVERAGE_ALLOW_MISSING 跳过`)
+    process.exit(0)
+  }
+  console.error(`[coverage] ${root} 下没有 cobertura 报告：门禁不能静默通过。本地调试可设 SCADA_COVERAGE_ALLOW_MISSING=1`)
+  process.exit(1)
 }
 
 // 报告在但一条都解析不出来，说明格式变了或解析写错了。这里必须失败：
@@ -157,6 +161,12 @@ const rows = [...byAssembly.values()]
   // 只守产品程序集：测试程序集与第三方依赖（RBush、协议库等）不进基线。
   .filter((x) => x.name.startsWith('Scada.') && !x.name.endsWith('.Tests'))
   .sort((a, b) => a.name.localeCompare(b.name))
+
+const missing = baseline ? Object.keys(baseline).filter(name => !rows.some(row => row.name === name)) : []
+if (missing.length > 0) {
+  console.error(`[coverage] 基线中的程序集在本次报告里整份缺失：${missing.join('、')}。请检查测试项目清单、采集器与 artifact 合并，门禁不能静默放行。`)
+  process.exit(1)
+}
 
 const pad = (v, n) => String(v).padEnd(n)
 console.log(pad('程序集', 28) + pad('行覆盖率', 10) + pad('行数', 10) + '基线')
@@ -194,8 +204,8 @@ if (update) {
 }
 
 if (!baseline) {
-  console.log('[coverage] 尚无基线文件，只报告不拦截；确认数值后运行 --update 生成')
-  process.exit(0)
+  console.error('[coverage] 缺少基线文件，门禁无法比较；确认数值后运行 --update 生成')
+  process.exit(1)
 }
 
 if (failures.length > 0) {

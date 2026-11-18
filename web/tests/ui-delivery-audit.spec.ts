@@ -182,7 +182,7 @@ test('delivery audit: runtime / system / full-screen pages', async ({ page, requ
     { module: 'runtime', path: '/screens', name: '工艺画面' },
     { module: 'runtime', path: `/screens/${screenId}`, name: '画面运行' },
     { module: 'runtime', path: `/config/screens/${screenId}`, name: '画面组态' },
-    { module: 'runtime', path: '/control', name: '现场操作' },
+    { module: 'runtime', path: '/control', name: '操作许可' },
     { module: 'runtime', path: '/trends', name: '趋势曲线' },
     { module: 'runtime', path: '/alarms', name: '报警' },
     { module: 'runtime', path: '/alarm-analytics', name: '报警分析' },

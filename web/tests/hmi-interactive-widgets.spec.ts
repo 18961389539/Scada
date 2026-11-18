@@ -50,7 +50,7 @@ async function interactiveScreen(page: Page, request: APIRequestContext, extras:
     { id: 900001, name: '启泵顺控', areaId: 1, description: null, dualApproval: false, revision: 1, updatedTs: Date.now(), updatedBy: 'admin', steps: [{ name: '开泵', tagId: null, value: 0, confirmExpression: null, timeoutMs: 0, delayMs: 0 }] }
   ] }))
   await page.route(url => url.pathname === '/api/recipes/900001/check', route => route.fulfill({ json: {
-    recipeId: 900001, version: 2, dualApproval: false, ok: true, refusals: [],
+    recipeId: 900001, version: 2, dualApproval: false, ok: true, refusals: [], confirmationChallenge: 'e2e-recipe-challenge', confirmationExpiresTs: Date.now() + 60_000,
     parameters: [{ key: 'temp', name: '温度', tagId: 900002, tagName: 'Beta 温度', unit: '℃', target: 180, current: 21, refusals: [], dualApproval: false }]
   } }))
   let downloads = 0
@@ -62,6 +62,7 @@ async function interactiveScreen(page: Page, request: APIRequestContext, extras:
     } })
   })
   let starts = 0
+  await page.route(url => url.pathname === '/api/control/sequences/900001/check-start', route => route.fulfill({ json: { challenge: 'e2e-sequence-challenge', expiresTs: Date.now() + 60_000, revision: 1 } }))
   await page.route(url => url.pathname === '/api/control/sequences/900001/start', route => {
     starts++
     return route.fulfill({ json: { pending: false, approvalId: null, runId: 7 } })

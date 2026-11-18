@@ -1,4 +1,4 @@
-using System.Diagnostics;
+
 using System.Diagnostics.Metrics;
 using Scada.Core.Enums;
 using Scada.Core.Models;
@@ -42,5 +42,4 @@ internal static class CollectorMetrics
             new KeyValuePair<string, object?>("protocol", protocol.ToString()),
             new KeyValuePair<string, object?>("outcome", outcome));
 
-    public static ActivitySource Source { get; } = new("Scada.Collector", "1.0");
 }

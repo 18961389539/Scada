@@ -61,6 +61,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
     {
         var master = _master ?? throw new IOException("Modbus 未连接");
         var result = new List<RawTagValue>();
+        string? blockError = null;
         foreach (var block in plan.Blocks)
         {
             try
@@ -82,7 +83,11 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
                     var value = block.Area is TagArea.Coil or TagArea.DiscreteInput
                         ? (RegisterValueCodec.DecodeCoil(bytes, item.Offset) ? 1d : 0d)
                         : RegisterValueCodec.DecodeRegister(bytes, item.Offset, item.DataType, item.ByteOrder);
-                    if (!double.IsFinite(value)) throw new IOException($"测点 #{item.TagId} 返回非有限值");
+                    if (!double.IsFinite(value))
+                    {
+                        result.Add(new(item.TagId, 0, TagQuality.Bad, null, $"测点 #{item.TagId} 返回非有限值"));
+                        continue;
+                    }
                     result.Add(new(item.TagId, value));
                 }
             }
@@ -93,12 +98,23 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
                 // 从站返回异常码说明链路是通的，只是拒绝了这次请求（地址越界、寄存器不存在等）。
                 // 只有真正的传输层故障才把链路标记为断开——共享通道时代，一个配错的地址
                 // 不该让同一总线上的其它设备全部重连。
-                if (!IsSlaveRejection(ex)) IsConnected = false;
-                throw new IOException(LastError, ex);
+                if (!IsSlaveRejection(ex))
+                {
+                    IsConnected = false;
+                    throw new IOException(LastError, ex);
+                }
+                blockError ??= LastError;
+                AddBadBlock(result, block, LastError);
             }
         }
-        IsConnected = true; LastError = null;
+        IsConnected = true; LastError = blockError;
         return result;
+    }
+
+    private static void AddBadBlock(List<RawTagValue> result, ReadBlock block, string error)
+    {
+        foreach (var item in block.Tags)
+            result.Add(new(item.TagId, 0, TagQuality.Bad, null, error));
     }
 
     private byte[] ReadBlockBytes(IModbusMaster master, Device device, ushort function, ushort start, ushort length)

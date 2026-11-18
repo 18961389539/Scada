@@ -131,7 +131,11 @@ export default {
     runAdviceAborted: '已中止的运行不会自动回退已执行的步骤。请核对现场状态后再决定是否重新执行。',
     kbdRequests: '↑↓ 选择 · Enter 批准或撤回 · R 拒绝',
     kbdLockouts: '↑↓ 选择 · Enter 解除挂牌',
-    kbdRuns: '↑↓ 选择 · Enter 打开流程'
+    kbdRuns: '↑↓ 选择 · Enter 打开流程',
+    writeHint: '实际写值请到「实时监视」或运行中的工艺画面下发，本页用于挂牌、复核、控制权和顺控许可。',
+    openRealtime: '打开实时监视',
+    openScreens: '打开画面目录',
+    openConsole: '打开控制室布局'
   },
   commandUx: {
     outcomeUnknown: '操作结果未知：请求已发出，但没收到服务器回执。请先核对现场设备状态或测点当前值（网关操作可查「命令回执」），确认没有生效再重发。',
@@ -143,7 +147,7 @@ export default {
     openHint: '点击查看报警'
   },
   workbench: {
-    runtimeTitle: '运行工作台', configurationTitle: '工作台配置', configure: '配置工作台', create: '快速创建工作台', createFromScreen: '用此画面创建工作台',
+    navTitle: '控制室布局', runtimeTitle: '运行工作台', configurationTitle: '工作台配置', configure: '配置工作台', create: '快速创建工作台', createFromScreen: '用此画面创建工作台',
     emptyTitle: '暂无可运行的已发布工作台', emptyHelp: '画面已发布不代表工作台已配置。选择一个已发布画面，预览并发布工作台后即可运行；也可直接运行单个画面。',
     contactAdmin: '当前账号没有工作台配置权限，请联系管理员创建并发布工作台。', openScreens: '运行单个画面',
     quickTitle: '快速创建工作台', quickHelp: '选择已发布画面即可开始，无需设置网格或登记工作站。画面发布与工作台发布相互独立。',
@@ -410,7 +414,9 @@ export default {
     silenceMinutes: '消音时长（分钟）', silenceHint: '对所有可见的已启用声光面板消音，到时自动恢复。',
     silenceConfirm: '确认对当前可见声光面板消音 {0} 分钟？', silenceDone: '已消音 {0} 个面板（共 {1} 个）', silenceFailed: '声光消音失败', silenceNote: '画面消音按钮',
     releaseValue: '释放值', maxHoldMs: '最长保持（毫秒）', pulseMs: '脉冲宽度（毫秒）',
-    momentaryHint: '按下走完整控制检查；松开直接写入释放值并跳过联锁，服务端看门狗超时兜底释放。',
+    momentaryHint: '按下走完整控制检查；松开直接写入释放值并跳过联锁，服务端看门狗超时兜底释放。点动测点不要开启操作确认：按下需要按住保持，弹出确认会打断按住-松开。',
+    momentaryConfirmBlocked: '点动不能开启操作确认。按下需按住保持，确认框会打断操作并变成点一下。请关闭该测点的操作确认后再点动。',
+    momentaryConfirmWarning: '该测点已开启操作确认。点动需要按住保持，运行时会拒绝下发，不会弹出确认框。请改用普通按钮，或关闭该测点的操作确认。',
     jogReleaseFailed: '点动释放失败，服务端将在最长保持时间后自动释放',
     positionsHint: '每个位置对应一个控制值，运行画面按反馈值就近显示当前位置；支持 2 至 8 个位置。',
     recipe: '配方选择', recipeTemplate: '配方模板', recipePickTemplate: '请选择配方模板', recipeControlHint: '运行画面从该模板下的配方中选择后下发；需具备配方区域及全部参数测点的控制权限。',
@@ -949,6 +955,9 @@ export default {
     loadFailed: '图片加载失败'
   },
   kioskUx: {
-    alarmPaused: '报警暂停轮播'
+    alarmPaused: '报警暂停轮播',
+    soundMuted: '已静音',
+    soundOn: '播音',
+    criticalTitle: '严重报警'
   }
 }

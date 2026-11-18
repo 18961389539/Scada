@@ -70,4 +70,5 @@ public sealed class GatewayArchiveCursor
     public long Ts { get; set; }
     public double Value { get; set; }
     public TagQuality Quality { get; set; }
+    public string? Text { get; set; }
 }

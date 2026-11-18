@@ -88,6 +88,7 @@ test('正常完成的运行不显示失败摘要', async ({ page, request }) => 
 test('重新执行先弹确认框并列出当前定义，确认后才下发', async ({ page, request }) => {
   await openSequences(page, request, [failedRun])
   let starts = 0
+  await page.route(url => url.pathname === '/api/control/sequences/7/check-start', route => route.fulfill({ json: { challenge: 'e2e-sequence-challenge', expiresTs: Date.now() + 60_000, revision: 1 } }))
   await page.route(url => url.pathname === '/api/control/sequences/7/start', route => {
     starts++
     return route.fulfill({ json: { pending: false, approvalId: null, runId: 45 } })

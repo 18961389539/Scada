@@ -58,7 +58,10 @@ test('control polling keeps approval and run refresh failures', async ({ page, r
     }
   })
   expect(sequence.ok(), await sequence.text()).toBeTruthy()
-  const started = await request.post(`/api/control/sequences/${(await sequence.json()).id}/start`, { headers: session.headers, data: { confirmed: true } })
+  const sequenceId = (await sequence.json()).id
+  const grant = await request.post(`/api/control/sequences/${sequenceId}/check-start`, { headers: session.headers })
+  expect(grant.ok(), await grant.text()).toBeTruthy()
+  const started = await request.post(`/api/control/sequences/${sequenceId}/start`, { headers: session.headers, data: { confirmed: true, challenge: (await grant.json()).challenge } })
   expect(started.ok(), await started.text()).toBeTruthy()
   const runId = (await started.json()).runId as number
   expect(runId).toBeTruthy()

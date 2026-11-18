@@ -64,6 +64,7 @@ test('remote commands execute once on the real TCP link and reconcile lost autho
   async function stop(child: ChildProcess, signal: NodeJS.Signals = 'SIGTERM') { if (child.exitCode === null && child.signalCode === null) { const done = once(child, 'exit'); child.kill(signal); await done } }
   function status(): any { try { return JSON.parse(readFileSync(join(root, 'status.json'), 'utf8')) } catch { return {} } }
   async function write(tagId: number, target: number, id = randomUUID()) {
+    await request.post('/api/control/check', { headers, data: { tagId, value: target } })
     const response = await request.post('/api/commands', { headers, data: { tagId, value: target, requestId: id } }); expect(response.ok()).toBeTruthy(); return response.json()
   }
   try {

@@ -87,7 +87,7 @@ async function submit(): Promise<void> {
   try {
     const changed = await auth.login(form.userName, form.password)
     // 无显式回跳地址时回到该用户上次停留的页面；首次登录仍是角色默认首页。
-    const redirect = safeRedirect(route.query.redirect, startPath(auth.user))
+    const redirect = safeRedirect(route.query.redirect, await startPath(auth.user))
     // 出厂口令还没换过：先改密，改完由改密页回到 redirect。
     if (auth.mustChangePassword) {
       await router.replace({ name: 'change-password', query: { redirect } })

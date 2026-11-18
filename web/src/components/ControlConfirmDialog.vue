@@ -4,7 +4,7 @@
       <el-descriptions v-if="check" :column="1" size="small" border>
         <el-descriptions-item :label="$t('controlConfirmDialog.kf3ea6d')">{{ title }}</el-descriptions-item>
         <el-descriptions-item :label="$t('controlConfirmDialog.k8cff1c')">{{ check.tagName }}（#{{ check.tagId }}）</el-descriptions-item>
-        <el-descriptions-item :label="$t('controlConfirmDialog.kd49433')"><strong>{{ check.current ?? $t('controlConfirmDialog.kb20e33') }} → {{ value }}</strong></el-descriptions-item>
+        <el-descriptions-item :label="$t('controlConfirmDialog.kd49433')"><strong>{{ currentLabel }} → {{ value }}</strong></el-descriptions-item>
         <el-descriptions-item v-if="check.limitMin != null || check.limitMax != null" :label="$t('controlConfirmDialog.kb3bb3c')">[{{ check.limitMin ?? '-' }}, {{ check.limitMax ?? '-' }}]</el-descriptions-item>
         <el-descriptions-item v-if="check.maxStep != null" :label="$t('controlConfirmDialog.k2a415d')">{{ check.maxStep }}</el-descriptions-item>
         <el-descriptions-item v-if="check.feedback" :label="$t('controlConfirmDialog.k463dc4')">{{ check.feedback }}</el-descriptions-item>
@@ -26,26 +26,29 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { controlApi, type ControlCheck } from '../api/control'
+import { controlConfirmCurrentLabel, controlConfirmKind } from './controlConfirmDisplay'
 import { errorMessage } from '../api/http'
 import { tr } from '../i18n'
 
-const visible = ref(false), loading = ref(false), check = ref<ControlCheck | null>(null), checkError = ref(''), title = ref(''), value = ref(0)
+const visible = ref(false), loading = ref(false), check = ref<ControlCheck | null>(null), checkError = ref(''), title = ref(''), value = ref<number | string>(0)
+const currentLabel = computed(() => controlConfirmCurrentLabel(controlConfirmKind(value.value), check.value?.current, tr('controlConfirmDialog.kb20e33')))
 let resolver: ((ok: boolean) => void) | null = null
 let generation = 0
 
 function finish(ok: boolean): void { generation++; visible.value = false; const r = resolver; resolver = null; r?.(ok) }
 
 // 先做服务端预检查（限幅、变化率、许可、就地/远程、挂牌），通过后由操作人确认；返回是否确认。
-// 调用方已预检查时传入 loaded，避免同一目标重复请求。
-function open(tagId: number, target: number, label: string, loaded?: ControlCheck | null): Promise<boolean> {
+// 调用方已预检查时传入 loaded，避免同一目标重复请求。文本目标走 checkText，不把数值当前值当成文本。
+function open(tagId: number, target: number | string, label: string, loaded?: ControlCheck | null): Promise<boolean> {
   finish(false)
   const currentGeneration = generation
   title.value = label; value.value = target; check.value = loaded ?? null; checkError.value = ''; visible.value = true; loading.value = !loaded
   const decision = new Promise<boolean>(resolve => { resolver = resolve })
   if (loaded) return decision
-  void controlApi.check(tagId, target).then(result => {
+  const request = typeof target === 'string' ? controlApi.checkText(tagId, target) : controlApi.check(tagId, target)
+  void request.then(result => {
     if (currentGeneration === generation) check.value = result
   }).catch(e => {
     if (currentGeneration === generation) checkError.value = errorMessage(e, tr('controlConfirmDialog.k831e7c'))

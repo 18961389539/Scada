@@ -73,6 +73,7 @@
 | `OperationLogRetentionDays` | `365` | — | 操作/审计日志保留天数。到期删除不可恢复；0 表示不自动清理。 |
 | `ShiftTimeZone` | `（无）` | — | — |
 | `PushIntervalMs` | `500` | ✓ | — |
+| `TagImportMaxRows` | `50000` | — | 测点 Excel 导入的每张工作表最大数据行数，防止超大文件长时间占用内存与配置库写锁。 |
 | `CollectorWorkerStopGraceMs` | `5000` | — | 停止一台设备时等待在途采集 I/O 退出的时长。超时后任务进入"已放弃"名单， 仍不退出则由 CollectorStuckIoGraceSeconds 强制关链路兜底。 |
 | `CollectorStuckIoGraceSeconds` | `60` | — | 旧采集 I/O 被判定卡死的时长：超过后强制关闭驱动与共享链路、放弃该任务并允许重启采集。 0 表示永不放弃（保持旧行为，只提示不重启）。 |
 | `CollectorBusDisposeGraceMs` | `5000` | — | 共享总线释放的最长等待：驱动卡在读操作里会一直占着总线，超时后强制拆链，避免停机被拖死。 |
@@ -211,7 +212,7 @@
 | 配置键 | 默认值 | 配置文件 | 说明 |
 |---|---|---|---|
 | `CommandTimeoutMs` | `5000` | ✓ | — |
-| `ControlRequireConfirmByDefault` | `（无）` | ✓ | 未配置控制策略的测点是否也要求操作确认（接口须带 confirmed=true）。默认 false 兼容旧客户端；现场建议开启。 |
+| `ControlRequireConfirmByDefault` | `true` | ✓ | 未配置控制策略的测点是否也要求操作确认。默认要求；“确认”由服务端一次性凭据证明，不再信任客户端布尔。 |
 
 ### Log
 

@@ -81,6 +81,7 @@ test('field control loop: pre-check and confirm, interlock, lockout, dual approv
 
     // 3. 双人复核：管理员申请，另一位操作员在界面批准后执行。
     expect((await request.put(`/api/control/points/${setpoint}`, { headers, data: point({ limitMax: 100, dualApproval: true }) })).ok()).toBeTruthy()
+    await request.post('/api/control/check', { headers, data: { tagId: setpoint, value: 55 } })
     const pendingResult = await (await request.post('/api/commands', { headers, data: { tagId: setpoint, value: 55, requestId: randomUUID(), confirmed: true } })).json()
     expect(pendingResult.pending).toBe(true); expect(registers[0]).toBe(40)
     const reviewer = `review-${u}`

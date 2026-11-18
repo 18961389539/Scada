@@ -10,7 +10,21 @@
       </el-radio-group>
       <el-tag v-if="station" size="small" effect="plain" :class="{ 'station-quiet': station.allowControl }" :type="station.allowControl ? undefined : 'warning'" data-test="console-station">{{ $t('consoleView.k327883', [station.name, station.allowControl ? '' : $t('consoleView.k44b8e4')]) }}</el-tag>
       <span class="spacer" />
+      <ServiceStatusChips
+        :health-abnormal="healthAbnormal"
+        :health-error="healthError"
+        :health-hint="healthHint"
+        :hub-issue="hubIssue"
+        :is-standby="isStandby"
+        :primary-url="primaryUrl"
+        :allow-primary-link="!previewLayout"
+        test-id="console-header-status"
+      />
       <PageHelpButton v-if="!previewLayout" help-key="console" compact />
+      <el-button v-if="!previewLayout && !soundEnabled" type="warning" plain size="small" data-test="console-sound-muted" @click="soundEnabled = true">{{ $t('uxShell.soundMuted') }}</el-button>
+      <el-tooltip v-if="!previewLayout" :content="$t('appLayout.soundHint')" placement="bottom">
+        <el-switch v-model="soundEnabled" size="small" data-test="console-sound-switch" :aria-label="$t('appLayout.soundHint')" />
+      </el-tooltip>
       <el-button size="small" data-test="console-more" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen">{{ $t('consoleUx.more') }}</el-button>
     </header>
     <div v-show="moreOpen" class="console-more-panel" data-test="console-more-panel">
@@ -154,6 +168,7 @@
 <script setup lang="ts">
 import WorkbenchTooltip from '../components/console/WorkbenchTooltip.vue'
 import PageHelpButton from '../components/PageHelpButton.vue'
+import ServiceStatusChips from '../components/ServiceStatusChips.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
@@ -173,6 +188,8 @@ import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
 import { refreshActiveAlarms } from '../composables/useActiveAlarms'
 import { useAuthStore } from '../stores/auth'
+import { onCriticalAlarmRaise, useAlarmSession } from '../composables/useAlarmSession'
+import { useServiceStatus } from '../composables/useServiceStatus'
 import { alarmMessage, canAckAlarmEvent, formatTime, levelLabel } from '../utils'
 import type { AlarmEvent, AlarmSummary, AlarmTimeline, Area, Device } from '../types'
 import type { ScreenSummary } from '../screens/model'
@@ -185,6 +202,8 @@ import { modalOpen } from '../ui/overlay'
 
 const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
+const { soundEnabled } = useAlarmSession()
+const { healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
 const canConfigure = computed(() => !props.previewLayout && canGlobal(auth.user, 'Configure'))
 const quickCreate = ref<InstanceType<typeof QuickLayoutCreate>>()
 const layouts = ref<HmiLayout[]>([]), layout = ref<HmiLayout | null>(null), station = ref<HmiWorkstation | null>(null), loading = ref(true), layoutError = ref('')
@@ -550,6 +569,17 @@ async function focusTopAlarm(): Promise<void> {
   await openAlarmHere(alarm, true)
   focusAlarmRow(alarm)
 }
+function focusAlarmSurface(): void {
+  if (props.previewLayout) return
+  const banner = document.querySelector('[data-test="alarm-banner"]')
+  if (banner instanceof HTMLElement) {
+    banner.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    const jump = banner.querySelector('[data-test="alarm-banner-jump"]')
+    if (jump instanceof HTMLElement) jump.focus()
+    else banner.focus()
+  }
+  void focusTopAlarm()
+}
 function onBannerKey(event: KeyboardEvent): void {
   if (event.key !== 'ArrowDown' && event.key !== 'j' && event.key !== 'J') return
   const region = monitor.value?.regions.find(item => item.kind === 'alarmList')
@@ -731,11 +761,14 @@ function syncPreferences(event: StorageEvent): void {
 // 操作台报警条 3s 刷新；窗口被最小化/切走时暂停，回到前台补一次。
 usePolling(refreshAlarms, 3000)
 usePolling(checkVersion, 10000)
+usePolling(refreshHealth, 30000, { immediate: true })
 
 function onFullscreenChange(): void { fullscreen.value = document.fullscreenElement === document.documentElement }
 let unregisterShortcuts = () => {}
+let disposeCriticalRaise: (() => void) | undefined
 onMounted(async () => {
   window.addEventListener('storage', syncPreferences)
+  disposeCriticalRaise = onCriticalAlarmRaise(() => { focusAlarmSurface() })
   document.addEventListener('click', onMoreClick, true)
   document.addEventListener('fullscreenchange', onFullscreenChange)
   unregisterShortcuts = registerShortcuts({
@@ -750,7 +783,7 @@ onMounted(async () => {
   })
   await load(); await refreshAlarms()
 })
-onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregisterShortcuts(); window.removeEventListener('storage', syncPreferences); document.removeEventListener('click', onMoreClick, true); document.removeEventListener('fullscreenchange', onFullscreenChange) })
+onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregisterShortcuts(); disposeCriticalRaise?.(); window.removeEventListener('storage', syncPreferences); document.removeEventListener('click', onMoreClick, true); document.removeEventListener('fullscreenchange', onFullscreenChange) })
 </script>
 
 <style scoped>

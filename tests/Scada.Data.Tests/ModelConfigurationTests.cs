@@ -6,7 +6,7 @@ using Scada.Core.Entities;
 namespace Scada.Data.Tests;
 
 /// <summary>
-/// OnModelCreating 拆成 87 个 IEntityTypeConfiguration 之后的回归网：
+/// OnModelCreating 拆成 88 个 IEntityTypeConfiguration 之后的回归网：
 /// 模型必须和拆分前完全一致，且 Config / Runtime 两组配置不能互相串进对方的模型
 /// （ApplyConfigurationsFromAssembly 默认会扫整个程序集，漏了命名空间过滤会凭空多出几十张表）。
 /// 另有一道 EF 自己的验证：dotnet ef migrations add 生成的探针迁移 Up/Down 为空。
@@ -55,9 +55,9 @@ public sealed class ModelConfigurationTests
             .Where(t => t.IsClass && !t.IsAbstract && t.GetInterfaces().Any(i =>
                 i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEntityTypeConfiguration<>)))
             .ToArray();
-        Assert.Equal(87, types.Length);
+        Assert.Equal(88, types.Length);
         Assert.All(types, t => Assert.True(t.IsPublic));
         Assert.Equal(53, types.Count(t => t.Namespace == "Scada.Data.Configurations.Config"));
-        Assert.Equal(34, types.Count(t => t.Namespace == "Scada.Data.Configurations.Runtime"));
+        Assert.Equal(35, types.Count(t => t.Namespace == "Scada.Data.Configurations.Runtime"));
     }
 }

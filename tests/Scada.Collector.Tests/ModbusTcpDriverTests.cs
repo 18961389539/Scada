@@ -132,6 +132,47 @@ public class ModbusTcpDriverTests
         Assert.False(driver.IsConnected);
     }
 
+    [Fact]
+    public async Task NonFinitePointOnlyMarksThatPointBad()
+    {
+        await using var server = new FakeModbusServer(32);
+        server.WriteFloat(0, float.NaN);
+        server.WriteFloat(2, 1.75f);
+        var device = Device(server.Port);
+        var tags = new[] { Tag(1, 0), Tag(2, 2) };
+        var plan = new ReadPlanBuilder().Build(device, tags);
+        await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance);
+        await ConnectAsync(driver, device);
+
+        var values = (await driver.ReadAsync(device, plan)).ToDictionary(x => x.TagId);
+
+        Assert.Equal(TagQuality.Bad, values[1].Quality);
+        Assert.Contains("非有限值", values[1].Error);
+        Assert.Equal(TagQuality.Good, values[2].Quality);
+        Assert.Equal(1.75, values[2].Value, 3);
+        Assert.True(driver.IsConnected);
+    }
+
+    [Fact]
+    public async Task SlaveRejectedBlockDoesNotFailOtherBlocksOrDropConnection()
+    {
+        await using var server = new FakeModbusServer(600);
+        server.RejectReadAddresses.Add(0);
+        server.WriteFloat(500, 42.5f);
+        var device = Device(server.Port);
+        var plan = new ReadPlanBuilder().Build(device, [Tag(1, 0), Tag(2, 500)]);
+        await using var driver = new ModbusTcpDriver(NullLogger<ModbusTcpDriver>.Instance);
+        await ConnectAsync(driver, device);
+
+        var values = (await driver.ReadAsync(device, plan)).ToDictionary(x => x.TagId);
+
+        Assert.Equal(TagQuality.Bad, values[1].Quality);
+        Assert.NotNull(values[1].Error);
+        Assert.Equal(TagQuality.Good, values[2].Quality);
+        Assert.Equal(42.5, values[2].Value, 3);
+        Assert.True(driver.IsConnected);
+    }
+
     private static async Task ConnectAsync(ModbusTcpDriver driver, Device device)
     {
         for (var attempt = 0; ; attempt++)
@@ -204,6 +245,7 @@ public class ModbusTcpDriverTests
         public int Port { get; }
         public Func<byte[], byte[]>? Mutate;
         public bool DropWriteAck;
+        public readonly HashSet<int> RejectReadAddresses = [];
         private int _writes;
         public int Writes => Volatile.Read(ref _writes);
 
@@ -327,6 +369,7 @@ public class ModbusTcpDriverTests
 
             if (function == 3)
             {
+                if (RejectReadAddresses.Contains(address)) return [(byte)(function | 0x80), 0x02];
                 var response = new byte[2 + quantity * 2];
                 response[0] = 3;
                 response[1] = (byte)(quantity * 2);

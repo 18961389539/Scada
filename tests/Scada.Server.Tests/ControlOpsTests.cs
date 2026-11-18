@@ -85,7 +85,7 @@ public sealed class ControlOpsTests : IClassFixture<ControlTests.ControlSite>
             name, areaId = _site.AreaA, dualApproval = false,
             steps = new[] { new { name = "启泵并长等", tagId = tag, value = 1.0, confirmExpression = $"#{never} == 1", timeoutMs = 600000, delayMs = 0 } }
         }));
-        var runId = (await Ok(await admin.PostAsJsonAsync($"/api/control/sequences/{seq.GetProperty("id").GetInt32()}/start", new { confirmed = true }))).GetProperty("runId").GetInt32();
+        var runId = (await Ok(await admin.StartSequenceAsync(seq.GetProperty("id").GetInt32()))).GetProperty("runId").GetInt32();
         await Task.Delay(300);
 
         // 另插入一条“进程崩溃遗留”的 Running 记录（无对应执行任务）。

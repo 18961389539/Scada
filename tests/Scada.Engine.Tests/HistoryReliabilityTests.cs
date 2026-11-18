@@ -35,6 +35,28 @@ public sealed class HistoryReliabilityTests
         Assert.Equal(new[] { 1000L, 1101L, 1102L, 1103L }, written.Select(x => x.Ts));
     }
 
+    [Fact]
+    public async Task StringOnChangeArchivesOnlyRealTextChangesAfterFlush()
+    {
+        using var dir = new TempDir(); using var bus = new ObservedBus(); var store = new FlakyStore();
+        var tag = new Tag { Id = 1, DeviceId = 1, Name = "lot", DataType = TagDataType.String, TextLength = 32, ArchiveMode = ArchiveMode.OnChange };
+        using var writer = new HistoryWriterService(bus, new RealtimeCache(), new Snapshot(tag), store,
+            Options.Create(new ScadaSettings { ArchiveFlushIntervalMs = 100, ArchiveBatchSize = 1, HistoryRoot = dir.Path }), new HistorySpool(dir.Path), NullLogger<HistoryWriterService>.Instance);
+        await writer.StartAsync(default); await bus.Subscribed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            bus.Publish(new TagValue(1, 0, TagQuality.Good, 1000, Text: "LOT-A"));
+            await Until(() => store.Written.Count == 1);
+            bus.Publish(new TagValue(1, 0, TagQuality.Good, 1001, Text: "LOT-A"));
+            await Task.Delay(300);
+            Assert.Single(store.Written);
+            bus.Publish(new TagValue(1, 0, TagQuality.Good, 1002, Text: "LOT-B"));
+            await Until(() => store.Written.Count == 2);
+        }
+        finally { await writer.StopAsync(default); }
+        Assert.Equal(["LOT-A", "LOT-B"], store.Written.Select(x => x.Text));
+    }
+
     private static HistoryValue[] Batch(int tagId, long ts) => new[] { new HistoryValue(tagId, ts, tagId * 10, TagQuality.Good) };
 
     [Fact]

@@ -73,7 +73,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'realtime', path: '/realtime', titleKey: 'navMenu.k445294', keywordsKey: 'nav.kw.realtime', icon: DataLine, group: 'monitoring', quick: true },
   { id: 'screens', path: '/screens', titleKey: 'navMenu.k8a1840', keywordsKey: 'nav.kw.screens', icon: FullScreen, group: 'monitoring', quick: true },
   { id: 'workspace', path: '/workspace', titleKey: 'workspace.title', keywordsKey: 'workspace.keywords', icon: Collection, group: 'monitoring', policy: 'any-view' },
-  { id: 'console', path: '/console', titleKey: 'workbench.runtimeTitle', keywordsKey: 'nav.kw.console', icon: Grid, group: 'monitoring' },
+  { id: 'console', path: '/console', titleKey: 'workbench.navTitle', keywordsKey: 'nav.kw.console', icon: Grid, group: 'monitoring' },
   { id: 'control', path: '/control', titleKey: 'navMenu.k4eb87f', keywordsKey: 'nav.kw.control', icon: Operation, group: 'monitoring', policy: 'any-control', quick: true },
   { id: 'recipes', path: '/recipes', titleKey: 'navMenu.k4b435b', keywordsKey: 'nav.kw.recipes', icon: Tickets, group: 'production', policy: 'any-view' },
   { id: 'traceability', path: '/traceability', titleKey: 'traceability.title', keywordsKey: 'traceability.keywords', icon: Aim, group: 'production', policy: 'any-view' },

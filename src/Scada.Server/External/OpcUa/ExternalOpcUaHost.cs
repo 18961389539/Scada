@@ -293,7 +293,7 @@ public sealed class ExternalOpcUaHost(
 
                             var commands = scope.ServiceProvider.GetRequiredService<ControlCommandService>();
                             var result = await commands.SubmitAsync(new ControlSubmission(tagId, dbl,
-                                new ControlActor(null, "opcua:" + actorName), ControlOrigin.Operator, "外部 OPC UA", true, Text: text), ct);
+                                new ControlActor(null, "opcua:" + actorName), ControlOrigin.External, "外部 OPC UA", true, Text: text), ct);
                             return new AttributeWriteResult(result.Success
                                 ? ServiceResult.Good
                                 : new ServiceResult(UaStatus.Bad, new LocalizedText(result.Message)));

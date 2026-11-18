@@ -18,7 +18,7 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
-import { defaultLandingPath } from '../access/policies'
+import { resolveLandingPath } from '../access/landing'
 
 const route = useRoute()
 const router = useRouter()
@@ -26,8 +26,8 @@ const auth = useAuthStore()
 // 保留用户实际输入的地址，避免“打错字却不知道错在哪”
 const attempted = computed(() => route.fullPath)
 
-function goHome(): void {
-  void router.replace(defaultLandingPath(auth.user))
+async function goHome(): Promise<void> {
+  await router.replace(await resolveLandingPath(auth.user))
 }
 
 // 与 AppLayout 的全局快捷键复用同一个人口，不重复实现面板状态

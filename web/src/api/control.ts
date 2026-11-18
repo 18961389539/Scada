@@ -32,6 +32,7 @@ export type ControlSubmission = CommandSubmissionResult & { pending?: boolean; a
 
 export const controlApi = {
   check: async (tagId: number, value: number) => (await http.post<ControlCheck>('/control/check', { tagId, value })).data,
+  checkText: async (tagId: number, text: string) => (await http.post<ControlCheck>('/control/check-text', { tagId, text })).data,
   points: async () => (await http.get<ControlPoint[]>('/control/points')).data,
   savePoint: async (p: ControlPoint) => (await http.put<ControlPoint>(`/control/points/${p.tagId}`, p)).data,
   removePoint: async (tagId: number) => http.delete(`/control/points/${tagId}`),
@@ -49,7 +50,11 @@ export const controlApi = {
   validateSequence: async (s: { name: string; areaId: number; dualApproval: boolean; description: string | null; steps: ControlStep[] }) =>
     (await http.post<{ ok: boolean; message: string | null; stepIds: string[] }>('/control/sequences/validate', s)).data,
   removeSequence: async (id: number) => http.delete(`/control/sequences/${id}`),
-  start: async (id: number) => (await http.post<{ pending: boolean; approvalId: string | null; runId: number | null }>(`/control/sequences/${id}/start`, { confirmed: true })).data,
+  checkStart: async (id: number) => (await http.post<{ challenge: string; expiresTs: number; revision: number }>(`/control/sequences/${id}/check-start`, {})).data,
+  start: async (id: number) => {
+    const grant = await controlApi.checkStart(id)
+    return (await http.post<{ pending: boolean; approvalId: string | null; runId: number | null }>(`/control/sequences/${id}/start`, { confirmed: true, challenge: grant.challenge })).data
+  },
   runs: async (sequenceId?: number, before?: number) => readPage(await http.get<ControlRun[]>('/control/runs', { params: { sequenceId, before } })),
   run: async (id: number) => (await http.get<ControlRun>(`/control/runs/${id}`)).data,
   abort: async (id: number) => http.post(`/control/runs/${id}/abort`)

@@ -1,7 +1,10 @@
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Scada.Core.Entities;
 using Scada.Core.Models;
+using Scada.Data;
 
 namespace Scada.Engine.Control;
 
@@ -9,34 +12,60 @@ public sealed record MomentaryResult(ControlSubmissionResult Result, Guid? Lease
 
 // 点动与瞬时按钮的保持租约：按下成功后由看门狗按期释放，瞬时按钮在脉冲宽度后自动释放。
 // 释放跳过联锁以保证失电优先；同一测点同时只允许一个点动租约。
+// 租约写入运行库，进程崩溃或掉电后启动先补写释放值，避免现场输出停在“按下”状态。
 public sealed class MomentaryControlService : BackgroundService
 {
     private static readonly TimeSpan SweepInterval = TimeSpan.FromMilliseconds(50);
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(15);
+    private const long RecoveryRetryMs = 10_000;
+    private const long ReleaseRetryMs = 1_000;
     private readonly ControlCommandService _commands;
+    private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly ILogger<MomentaryControlService> _logger;
     private readonly ConcurrentDictionary<int, Lease> _leases = new();
+    private readonly List<Lease> _recoveryPending = [];
+    private bool _recoveryLoaded;
+    private long _nextRecoveryAttemptTs;
 
-    public MomentaryControlService(ControlCommandService commands, ILogger<MomentaryControlService> logger)
+    public MomentaryControlService(ControlCommandService commands, IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<MomentaryControlService> logger)
     {
         _commands = commands;
+        _runtimeFactory = runtimeFactory;
         _logger = logger;
     }
 
     public async Task<MomentaryResult> PressAsync(int tagId, double value, double releaseValue, int maxHoldMs, ControlActor actor,
         string source, Guid? requestId, bool confirmed, CancellationToken ct)
     {
-        var lease = NewLease(tagId, releaseValue, actor, source, LeaseKind.Press, requestId);
+        var lease = NewLease(tagId, releaseValue, actor, source, MomentaryLeaseKind.Press, requestId);
         if (!_leases.TryAdd(tagId, lease))
             return new(new(false, "该测点已由另一次点动保持，请先释放", Outcome: GatewayCommandOutcome.NotSent));
+        if (!await PersistNewAsync(lease, ct))
+        {
+            _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease));
+            return new(new(false, "该测点存在未释放的旧点动租约，请先确认现场并完成释放", Outcome: GatewayCommandOutcome.NotSent));
+        }
 
         ControlSubmissionResult result;
         try { result = await _commands.SubmitMomentaryPressAsync(tagId, value, actor, source, lease.Id, confirmed, "点动按下", ct); }
-        catch { _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease)); throw; }
+        catch
+        {
+            await ReleaseLeaseCoreAsync(lease, "按下结果未知", actor);
+            throw;
+        }
         if (!result.Success)
         {
-            _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease));
-            return new(result);
+            if (result.Outcome == GatewayCommandOutcome.NotSent)
+            {
+                _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease));
+                await DeleteLeaseRowAsync(lease.Id);
+                return new(result);
+            }
+            var released = await ReleaseLeaseCoreAsync(lease, "按下失败后释放", actor);
+            var message = released.Success
+                ? $"{result.Message}；已补写释放值"
+                : $"{result.Message}；释放未完成，将自动重试：{released.Message}";
+            return new(result with { Message = message }, lease.Id);
         }
 
         bool releaseNow;
@@ -45,29 +74,51 @@ public sealed class MomentaryControlService : BackgroundService
             releaseNow = lease.ReleaseRequested;
             if (!releaseNow) { lease.Starting = false; lease.ExpiresTs = ScadaTime.NowMs() + maxHoldMs; }
         }
-        if (!releaseNow) return new(result, lease.Id);
-        // 按下写入完成前已收到释放请求：再写一次释放值，覆盖两种写入顺序。
-        var released = await ReleaseLeaseCoreAsync(lease, "按下完成前已请求释放", actor);
-        return new(result with { Success = released.Success, Message = $"已按下；收到提前释放请求并已释放{(released.Success ? "" : $"失败：{released.Message}")}" }, lease.Id);
+        if (!releaseNow)
+        {
+            await MarkActiveAsync(lease);
+            return new(result, lease.Id);
+        }
+        var releasedNow = await ReleaseLeaseCoreAsync(lease, "按下完成前已请求释放", actor);
+        return new(result with { Success = releasedNow.Success, Message = $"已按下；收到提前释放请求并已释放{(releasedNow.Success ? "" : $"失败：{releasedNow.Message}")}" }, lease.Id);
     }
 
     public async Task<MomentaryResult> PulseAsync(int tagId, double value, double releaseValue, int pulseMs, ControlActor actor,
         string source, Guid? requestId, bool confirmed, CancellationToken ct)
     {
-        var lease = NewLease(tagId, releaseValue, actor, source, LeaseKind.Pulse, requestId);
+        var lease = NewLease(tagId, releaseValue, actor, source, MomentaryLeaseKind.Pulse, requestId);
         if (!_leases.TryAdd(tagId, lease))
             return new(new(false, "该测点已由另一次点动保持，请先释放", Outcome: GatewayCommandOutcome.NotSent));
+        if (!await PersistNewAsync(lease, ct))
+        {
+            _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease));
+            return new(new(false, "该测点存在未释放的旧点动租约，请先确认现场并完成释放", Outcome: GatewayCommandOutcome.NotSent));
+        }
 
         ControlSubmissionResult result;
         try { result = await _commands.SubmitMomentaryPressAsync(tagId, value, actor, source, lease.Id, confirmed, "瞬时按下", ct); }
-        catch { _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease)); throw; }
+        catch
+        {
+            await ReleaseLeaseCoreAsync(lease, "瞬时按下结果未知", actor);
+            throw;
+        }
         if (!result.Success)
         {
-            _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease));
-            return new(result);
+            if (result.Outcome == GatewayCommandOutcome.NotSent)
+            {
+                _leases.TryRemove(new KeyValuePair<int, Lease>(tagId, lease));
+                await DeleteLeaseRowAsync(lease.Id);
+                return new(result);
+            }
+            var released = await ReleaseLeaseCoreAsync(lease, "瞬时按下失败后释放", actor);
+            var message = released.Success
+                ? $"{result.Message}；已补写释放值"
+                : $"{result.Message}；释放未完成，将自动重试：{released.Message}";
+            return new(result with { Message = message }, lease.Id);
         }
 
         lock (lease) { lease.Starting = false; lease.ExpiresTs = ScadaTime.NowMs() + pulseMs; }
+        await MarkActiveAsync(lease);
         return new(result with { Message = $"{result.Message}，{pulseMs} 毫秒后自动释放" }, lease.Id);
     }
 
@@ -116,23 +167,105 @@ public sealed class MomentaryControlService : BackgroundService
         catch (TimeoutException) { _logger.LogError("点动释放未在服务停止前全部完成"); }
     }
 
-    private Lease NewLease(int tagId, double releaseValue, ControlActor actor, string source, LeaseKind kind, Guid? requestId) => new()
+    private Lease NewLease(int tagId, double releaseValue, ControlActor actor, string source, MomentaryLeaseKind kind, Guid? requestId) => new()
     {
         Id = requestId ?? Guid.NewGuid(), TagId = tagId, ReleaseValue = releaseValue, Actor = actor, Source = source, Kind = kind,
         StartDeadlineTs = ScadaTime.NowMs() + (long)StartTimeout.TotalMilliseconds
     };
 
+    private static Lease LeaseFrom(MomentaryLease row) => new()
+    {
+        Id = row.Id, TagId = row.TagId, ReleaseValue = row.ReleaseValue, Actor = new(row.UserId, row.UserName), Source = row.Source,
+        Kind = row.Kind, StartDeadlineTs = row.StartDeadlineTs, ExpiresTs = row.ExpiresTs, Starting = row.State == MomentaryLeaseState.Starting,
+        ReleaseId = row.ReleaseId
+    };
+
+    private async Task<bool> PersistNewAsync(Lease lease, CancellationToken ct)
+    {
+        try
+        {
+            await using var db = await _runtimeFactory.CreateDbContextAsync(ct);
+            var leftovers = await db.MomentaryLeases.Where(x => x.TagId == lease.TagId).ToListAsync(ct);
+            if (leftovers.Count > 0)
+            {
+                _logger.LogWarning("测点 #{TagId} 存在未释放的点动租约，拒绝新按下", lease.TagId);
+                return false;
+            }
+            db.MomentaryLeases.Add(new MomentaryLease
+            {
+                Id = lease.Id, TagId = lease.TagId, ReleaseValue = lease.ReleaseValue, UserId = lease.Actor.UserId, UserName = lease.Actor.UserName,
+                Source = lease.Source, Kind = lease.Kind, State = MomentaryLeaseState.Starting, ReleaseId = lease.ReleaseId,
+                CreatedTs = ScadaTime.NowMs(), StartDeadlineTs = lease.StartDeadlineTs, ExpiresTs = lease.ExpiresTs
+            });
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "持久化点动保持租约失败：测点 #{TagId}", lease.TagId);
+            return false;
+        }
+    }
+
+    private async Task MarkActiveAsync(Lease lease)
+    {
+        try
+        {
+            await using var db = await _runtimeFactory.CreateDbContextAsync(CancellationToken.None);
+            await db.MomentaryLeases.Where(x => x.Id == lease.Id).ExecuteUpdateAsync(set => set
+                .SetProperty(x => x.State, MomentaryLeaseState.Active)
+                .SetProperty(x => x.ExpiresTs, lease.ExpiresTs), CancellationToken.None);
+        }
+        catch (Exception ex) { _logger.LogError(ex, "更新点动保持租约失败：测点 #{TagId}", lease.TagId); }
+    }
+
+    private async Task DeleteLeaseRowAsync(Guid id)
+    {
+        try
+        {
+            await using var db = await _runtimeFactory.CreateDbContextAsync(CancellationToken.None);
+            await db.MomentaryLeases.Where(x => x.Id == id).ExecuteDeleteAsync(CancellationToken.None);
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "删除点动保持租约失败：{LeaseId}", id); }
+    }
+
+    private async Task RecoverAsync(CancellationToken ct)
+    {
+        List<MomentaryLease> rows;
+        await using (var db = await _runtimeFactory.CreateDbContextAsync(ct))
+            rows = await db.MomentaryLeases.AsNoTracking().ToListAsync(ct);
+        foreach (var row in rows)
+        {
+            var lease = LeaseFrom(row);
+            if (!_leases.TryAdd(lease.TagId, lease)) continue;
+            _logger.LogWarning("发现上次进程遗留的点动保持租约，补写释放值：测点 #{TagId}", lease.TagId);
+            var result = await ExecuteReleaseAsync(lease, "服务重启恢复", ct);
+            _leases.TryRemove(new KeyValuePair<int, Lease>(lease.TagId, lease));
+            if (result.Success)
+            {
+                await DeleteLeaseRowAsync(lease.Id);
+                continue;
+            }
+            lease.NextRetryTs = ScadaTime.NowMs() + RecoveryRetryMs;
+            if (!_recoveryPending.Any(x => x.Id == lease.Id)) _recoveryPending.Add(lease);
+            _logger.LogError("服务重启补写点动释放失败：测点 #{TagId} 写入 {Value}，{Message}", lease.TagId, lease.ReleaseValue, result.Message);
+        }
+    }
+
     private async Task SweepAsync()
     {
+        await RecoverIfNeededAsync();
+        await RetryRecoveryAsync();
         var now = ScadaTime.NowMs();
         foreach (var lease in _leases.Values.ToArray())
         {
             string reason;
             lock (lease)
             {
-                if (lease.Releasing) continue;
-                if (lease.Starting && now >= lease.StartDeadlineTs) { lease.ReleaseRequested = true; reason = "按下超时"; }
-                else if (!lease.Starting && now >= lease.ExpiresTs) reason = lease.Kind == LeaseKind.Pulse ? "脉冲结束" : "超过最长保持时间";
+                if (lease.Releasing || now < lease.NextRetryTs) continue;
+                if (lease.NextRetryTs > 0) reason = "释放重试";
+                else if (lease.Starting && now >= lease.StartDeadlineTs) { lease.ReleaseRequested = true; reason = "按下超时"; }
+                else if (!lease.Starting && now >= lease.ExpiresTs) reason = lease.Kind == MomentaryLeaseKind.Pulse ? "脉冲结束" : "超过最长保持时间";
                 else continue;
                 lease.Releasing = true;
             }
@@ -140,30 +273,84 @@ public sealed class MomentaryControlService : BackgroundService
         }
     }
 
+    private async Task RecoverIfNeededAsync()
+    {
+        if (!_commands.IsActive)
+        {
+            _recoveryLoaded = false;
+            return;
+        }
+        var now = ScadaTime.NowMs();
+        if (_recoveryLoaded || now < _nextRecoveryAttemptTs) return;
+        try
+        {
+            await RecoverAsync(CancellationToken.None);
+            _recoveryLoaded = true;
+            _nextRecoveryAttemptTs = 0;
+        }
+        catch (Exception ex)
+        {
+            _nextRecoveryAttemptTs = now + RecoveryRetryMs;
+            _logger.LogError(ex, "恢复点动保持租约失败");
+        }
+    }
+
+    private async Task RetryRecoveryAsync()
+    {
+        if (_recoveryPending.Count == 0 || !_commands.IsActive) return;
+        var now = ScadaTime.NowMs();
+        foreach (var lease in _recoveryPending.ToArray())
+        {
+            if (now < lease.NextRetryTs) continue;
+            var result = await ExecuteReleaseAsync(lease, "恢复释放重试", CancellationToken.None);
+            if (!result.Success)
+            {
+                lease.NextRetryTs = now + RecoveryRetryMs;
+                continue;
+            }
+            _recoveryPending.Remove(lease);
+            await DeleteLeaseRowAsync(lease.Id);
+        }
+    }
+
     private async Task<ControlSubmissionResult> ReleaseLeaseCoreAsync(Lease lease, string reason, ControlActor actor)
+    {
+        var result = await ExecuteReleaseAsync(lease, reason, CancellationToken.None);
+        if (!result.Success)
+        {
+            lock (lease)
+            {
+                lease.Releasing = false;
+                lease.NextRetryTs = ScadaTime.NowMs() + ReleaseRetryMs;
+            }
+            _logger.LogError("点动释放失败：测点 #{TagId} 写入 {Value}，原因 {Reason}，结果 {Message}；将自动重试", lease.TagId, lease.ReleaseValue, reason, result.Message);
+            return result with { Message = result.Message + "；将自动重试释放" };
+        }
+        _leases.TryRemove(new KeyValuePair<int, Lease>(lease.TagId, lease));
+        _recoveryPending.RemoveAll(x => x.Id == lease.Id);
+        await DeleteLeaseRowAsync(lease.Id);
+        return result;
+    }
+
+    private async Task<ControlSubmissionResult> ExecuteReleaseAsync(Lease lease, string reason, CancellationToken ct)
     {
         ControlSubmissionResult result = new(false, "未执行释放", Outcome: GatewayCommandOutcome.NotSent);
         for (var attempt = 1; attempt <= 3; attempt++)
         {
             try
             {
-                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                result = await _commands.SubmitMomentaryReleaseAsync(lease.TagId, lease.ReleaseValue, actor,
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(5));
+                result = await _commands.SubmitMomentaryReleaseAsync(lease.TagId, lease.ReleaseValue, lease.Actor,
                     $"{lease.Source}（{reason}）", lease.ReleaseId, timeout.Token);
             }
             catch (Exception ex) { result = new(false, ex.Message, Outcome: GatewayCommandOutcome.Unknown); }
             if (result.Success || result.Outcome is GatewayCommandOutcome.Unknown or GatewayCommandOutcome.Failed) break;
-            // 确认没下发才用同一个命令号再试。结果未知说明可能已经写进设备。
             if (result.Outcome != GatewayCommandOutcome.NotSent) break;
             await Task.Delay(200);
         }
-        _leases.TryRemove(new KeyValuePair<int, Lease>(lease.TagId, lease));
-        if (!result.Success)
-            _logger.LogError("点动释放失败：测点 #{TagId} 写入 {Value}，原因 {Reason}，结果 {Message}", lease.TagId, lease.ReleaseValue, reason, result.Message);
         return result;
     }
-
-    private enum LeaseKind { Press, Pulse }
 
     private sealed class Lease
     {
@@ -172,12 +359,13 @@ public sealed class MomentaryControlService : BackgroundService
         public required double ReleaseValue { get; init; }
         public required ControlActor Actor { get; init; }
         public required string Source { get; init; }
-        public required LeaseKind Kind { get; init; }
+        public required MomentaryLeaseKind Kind { get; init; }
         public required long StartDeadlineTs { get; init; }
         public bool Starting { get; set; } = true;
         public bool ReleaseRequested { get; set; }
         public bool Releasing { get; set; }
         public long ExpiresTs { get; set; }
-        public Guid ReleaseId { get; } = Guid.NewGuid();
+        public long NextRetryTs { get; set; }
+        public Guid ReleaseId { get; set; } = Guid.NewGuid();
     }
 }

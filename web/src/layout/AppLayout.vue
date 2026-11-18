@@ -20,7 +20,7 @@
       <el-header ref="headerRef" class="header" :class="{ mobile: isMobile }">
         <div class="header-left">
           <el-button v-if="isMobile" text class="nav-toggle" :aria-label="$t('appLayout.k708245')" :aria-expanded="drawer" aria-controls="primary-navigation" data-test="mobile-menu" @click="drawer = true"><el-icon :size="20"><Menu /></el-icon></el-button>
-          <el-button v-else text class="nav-toggle" :title="$t(isMini ? 'nav.expand' : 'nav.collapse')" :aria-label="$t(isMini ? 'nav.expand' : 'nav.collapse')" :aria-expanded="!isMini" aria-controls="primary-navigation" data-test="sidebar-toggle" @click="isMini = !isMini"><el-icon :size="20"><Expand v-if="isMini" /><Fold v-else /></el-icon></el-button>
+          <el-button v-else text class="nav-toggle" :title="$t(isMini ? 'nav.expand' : 'nav.collapse')" :aria-label="$t(isMini ? 'nav.expand' : 'nav.collapse')" :aria-expanded="!isMini" aria-controls="primary-navigation" data-test="sidebar-toggle" @click="toggleSidebar"><el-icon :size="20"><Expand v-if="isMini" /><Fold v-else /></el-icon></el-button>
           <div class="page-heading">
             <div class="site-context">
               <span v-if="siteInfo" class="site-name" :title="siteInfo.siteName" data-test="header-site-name">{{ siteInfo.siteName }}</span>
@@ -32,19 +32,22 @@
           </div>
         </div>
         <div v-if="showHeaderStatus" class="header-status" role="status" data-test="header-status">
-          <el-tooltip v-if="healthAbnormal && !isMobile" :content="healthError || healthHint" placement="bottom">
-            <el-tag :type="healthError ? 'info' : 'warning'" effect="light" size="small" data-test="health-tag">
-              {{ $t(healthError ? 'overviewStatus.serviceUnknown' : 'overviewStatus.serviceIssue') }}
+          <ServiceStatusChips
+            :health-abnormal="healthAbnormal"
+            :health-error="healthError"
+            :health-hint="healthHint"
+            :hub-issue="hubIssue"
+            :is-standby="isStandby"
+            :primary-url="primaryUrl"
+            :allow-primary-link="true"
+            :compact="isMobile"
+          />
+          <el-tooltip v-if="alarmFlood" :content="$t('overviewStatus.flood')" placement="bottom" :trigger="isMobile ? 'click' : 'hover'">
+            <el-tag type="danger" size="small" class="status-chip" data-test="header-alarm-flood" :aria-label="$t('overviewStatus.flood')">
+              <el-icon v-if="isMobile"><Bell /></el-icon>
+              <span>{{ $t('overviewStatus.flood') }}</span>
             </el-tag>
           </el-tooltip>
-          <el-tag v-if="alarmFlood && !isMobile" type="danger" size="small" data-test="header-alarm-flood">{{ $t('overviewStatus.flood') }}</el-tag>
-          <!-- 实时连接断开时必须让用户看见：否则页面看着正常、数据其实已经不再更新 -->
-          <el-tooltip v-if="hubIssue" :content="$t('appLayout.hubHint')" placement="bottom">
-            <el-tag type="danger" effect="dark" size="small" data-test="hub-state">{{ hubIssue }}</el-tag>
-          </el-tooltip>
-          <el-tag v-if="health?.ha?.role === 'Standby'" type="danger" effect="dark" size="small" data-test="standby-banner">
-            {{ $t('appLayout.k41b031') }}<template v-if="health.ha.primaryUrl">{{ $t('appLayout.k3d889a') }} <a :href="health.ha.primaryUrl" style="color: inherit">{{ health.ha.primaryUrl }}</a></template>
-          </el-tag>
           <el-button v-if="!soundEnabled" type="warning" plain size="small" data-test="sound-muted" @click="soundEnabled = true">{{ $t('uxShell.soundMuted') }}</el-button>
         </div>
         <div class="header-right">
@@ -138,14 +141,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElNotification } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { ArrowDown, Bell, Close, Expand, Fold, Menu, Search, Setting, UserFilled } from '@element-plus/icons-vue'
-import { alarmApi, healthApi } from '../api'
+import { alarmApi } from '../api'
 import { useAuthStore } from '../stores/auth'
-import type { AlarmEvent, Health } from '../types'
 import NavMenu from './NavMenu.vue'
 import CommandPalette from '../components/nav/CommandPalette.vue'
 import LicenseGuard from '../components/LicenseGuard.vue'
@@ -158,10 +160,11 @@ import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyDisplay, applyTheme, currentDensity, currentDisplay, currentTheme, type DensityMode, type DisplayMode, type ThemeMode } from '../theme'
-import { alarmMessage, levelLabel, notificationType } from '../utils'
-import { handleAlarmPush, primeAlarmAudio } from '../alarmAudio'
-import { useAlarmSound } from '../composables/useAlarmSound'
-import { hubState as realtimeHubState, onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
+import { onHubEvent } from '../realtime/hub'
+import { useAlarmSession } from '../composables/useAlarmSession'
+import { useServiceStatus } from '../composables/useServiceStatus'
+import ServiceStatusChips from '../components/ServiceStatusChips.vue'
+import { readSidebarMiniPreference, rememberSidebarMiniPreference, sidebarMiniFromMedia } from '../composables/sidebarMini'
 import { errorMessage } from '../api/http'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
@@ -178,8 +181,7 @@ const headerHeight = ref(0)
 const mainStyle = computed(() => headerHeight.value ? { '--scada-header-height': `${headerHeight.value}px` } : undefined)
 let headerObserver: ResizeObserver | undefined
 
-const health = ref<Health | null>(null), drawer = ref(false), locale = currentLocale()
-const healthError = ref('')
+const drawer = ref(false), locale = currentLocale()
 const alarmFlood = ref(false)
 const paletteOpen = ref(false)
 const accountOpen = ref(false)
@@ -221,31 +223,21 @@ watch(() => route.query.denied, notifyDenied)
 const modKey = /Mac|iPhone|iPod|iPad/i.test(navigator.platform) ? '⌘' : 'Ctrl+' 
 // 1120px 及以下的笔记本仍用侧栏，但只留图标，避免正文被 220px 侧栏挤窄；768px 以下走抽屉。
 const miniQuery = window.matchMedia('(min-width: 769px) and (max-width: 1120px)')
-const isMini = ref(miniQuery.matches)
-function onMiniChange(event: MediaQueryListEvent): void { isMini.value = event.matches }
+const isMini = ref(sidebarMiniFromMedia(readSidebarMiniPreference(), miniQuery.matches))
+function onMiniChange(event: MediaQueryListEvent): void {
+  // 手动展开/收起后不要被 769–1120px 的媒体查询立刻改回去。
+  isMini.value = sidebarMiniFromMedia(readSidebarMiniPreference(), event.matches)
+}
+function toggleSidebar(): void {
+  isMini.value = !isMini.value
+  rememberSidebarMiniPreference(isMini.value)
+}
 
-const hubState = realtimeHubState()
-// 只在异常状态下给文案；connected / connecting 不占位，避免正常时打扰
-const hubIssue = computed(() => {
-  if (hubState.value === 'reconnecting') return tr('appLayout.hubReconnecting')
-  if (hubState.value === 'disconnected') return tr('appLayout.hubDisconnected')
-  return ''
-})
-const { soundEnabled, schedule: scheduleAnnunciatorSound, start: startAlarmSound, dispose: disposeAlarmSound } = useAlarmSound()
-const healthAbnormal = computed(() => !!healthError.value || (!!health.value && health.value.status !== 'ok'))
+const { soundEnabled, schedule: scheduleAnnunciatorSound } = useAlarmSession()
+const { healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
 const showHeaderStatus = computed(() =>
-  (!isMobile.value && (healthAbnormal.value || alarmFlood.value)) ||
-  !!hubIssue.value || health.value?.ha?.role === 'Standby' || !soundEnabled.value)
-
-// 健康标签的补充信息：设备在线数、总线积压、磁盘余量，比只看「系统正常」有用
-const healthHint = computed(() => {
-  const h = health.value
-  if (!h) return ''
-  // 服务端降级或前后端版本错位时 disk 可能缺失：这里少一个兜底，整个头部渲染就会抛错，
-  // 于是每一页都在控制台报同一个 TypeError。缺了就显示 --，比整块崩掉有用。
-  const free = h.disk?.freeGb
-  return tr('appLayout.healthDetail', [h.onlineDevices, h.totalDevices, h.busBacklog, free == null ? '--' : free.toFixed(1)])
-})
+  healthAbnormal.value || alarmFlood.value ||
+  !!hubIssue.value || isStandby.value || !soundEnabled.value)
 // 语言偏好保存在服务端（按用户），本机同步后重载。
 async function switchLocale(value: AppLocale): Promise<void> {
   try { await auth.setLocale(value) } catch { /* 离线时仍允许本机切换 */ }
@@ -270,11 +262,9 @@ const alarmCountTooltip = computed(() => {
 const theme = ref<ThemeMode>(currentTheme())
 const density = ref<DensityMode>(currentDensity())
 const display = ref<DisplayMode>(currentDisplay())
-let disposeAlarmHandler: (() => void) | undefined
-let disposeHubClosed: (() => void) | undefined
-
 let badgeTimer: number | undefined
 let badgeBusy = false
+let disposeAlarmBadge: (() => void) | undefined
 let badgeQueued = false
 
 async function refreshBadges(): Promise<void> {
@@ -285,10 +275,7 @@ async function refreshBadges(): Promise<void> {
   badgeBusy = true
   try {
     const [, summary] = await Promise.all([
-      healthApi.get().then(value => {
-        health.value = value
-        healthError.value = ''
-      }, error => { healthError.value = errorMessage(error, tr('appLayout.healthFailed')) }),
+      refreshHealth(),
       alarmApi.summary().then(
         (value) => ({ ok: true as const, value }),
         (error: unknown) => ({ ok: false as const, error })
@@ -320,61 +307,6 @@ function scheduleBadges(): void {
     badgeTimer = undefined
     void refreshBadges()
   }, 600)
-}
-
-// Critical 弹窗不自动关闭，洪峰时几十条会铺满屏幕并挡住确认操作：只保留最新 3 条。
-type NotificationHandle = ReturnType<typeof ElNotification>
-const criticalToasts = new Set<NotificationHandle>()
-const CRITICAL_TOAST_LIMIT = 3
-
-// 点报警弹窗直接落到已过滤的报警页：现场看到 Critical 后的下一步通常就是确认它
-function openAlarmsFromToast(alarm: AlarmEvent): void {
-  const query: Record<string, string> = { state: 'unack' }
-  if (alarm.tagId) query.tagId = String(alarm.tagId)
-  void router.push({ path: '/alarms', query })
-}
-
-function notifyRaise(alarm: AlarmEvent): void {
-  const critical = alarm.level === 'Critical'
-  const handle: NotificationHandle = ElNotification({
-    title: tr('appLayout.k8e59ff', [levelLabel(alarm.level)]),
-    // Critical 弹窗不自动消失，补一行可见提示，让「可以点击」这件事能被发现
-    message: critical
-      ? h('div', [
-          h('div', alarmMessage(alarm)),
-          h('div', { style: 'margin-top: 4px; font-size: 12px; opacity: 0.72' }, tr('alarmToast.openHint'))
-        ])
-      : alarmMessage(alarm),
-    type: notificationType(alarm.level),
-    duration: critical ? 0 : 6000,
-    ...(critical ? {
-      customClass: 'scada-alarm-toast',
-      onClose: () => { criticalToasts.delete(handle) },
-      onClick: () => { openAlarmsFromToast(alarm); handle.close() }
-    } : {})
-  })
-  if (!critical) return
-  criticalToasts.add(handle)
-  while (criticalToasts.size > CRITICAL_TOAST_LIMIT) {
-    const oldest = criticalToasts.values().next().value
-    if (!oldest) break
-    criticalToasts.delete(oldest)
-    oldest.close()
-  }
-}
-
-function registerAlarmHandler(): void {
-  disposeAlarmHandler = onHubEvent<{ action: string; alarm: AlarmEvent }>('alarm', (payload) => {
-    if (payload.action === 'raise') notifyRaise(payload.alarm)
-    // 全应用唯一发声点：静音、暂挂/抑制/抖动过滤、循环音去重都在这里处理，
-    // 页面不再各自播放声音，避免共享连接后重复发声或绕过静音开关。
-    handleAlarmPush(payload)
-    scheduleAnnunciatorSound()
-    scheduleBadges()
-  })
-
-  // 授权被撤销时服务端会断开长连接；关闭后再确认一次登录态，401 由 http 拦截器统一登出。
-  disposeHubClosed = onHubClosed(() => { void auth.confirmSession().catch(() => undefined) })
 }
 
 function onCommand(command: string): void {
@@ -424,19 +356,10 @@ function onOpenPalette(): void {
   paletteOpen.value = true
 }
 
-// 浏览器要求用户手势后才能播放音频：首次点击/按键时解锁 AudioContext，
-// 否则页面加载后第一条报警推送没有手势、会被自动播放策略拦截（表现为首次不响）。
-function unlockAudio(): void {
-  primeAlarmAudio()
-  window.removeEventListener('pointerdown', unlockAudio, true)
-  window.removeEventListener('keydown', unlockAudio, true)
-}
-
 // 30s 兜底轮询：连接断开期间漏掉的徽标状态靠它纠正；隐藏页暂停，回到前台补一次。
 usePolling(refreshBadges, 30000)
 
 onMounted(async () => {
-  startAlarmSound()
   notifyDenied()
   const header: unknown = headerRef.value?.$el
   if (header instanceof HTMLElement) {
@@ -446,31 +369,20 @@ onMounted(async () => {
     headerObserver.observe(header)
   }
   miniQuery.addEventListener('change', onMiniChange)
-  window.addEventListener('pointerdown', unlockAudio, true)
-  window.addEventListener('keydown', unlockAudio, true)
-  // 尽早注册：注册即触发共享连接建立，避免 refreshBadges 期间漏掉启动瞬间的报警
-  registerAlarmHandler()
   void loadClientPolicy()
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('scada-open-palette', onOpenPalette)
+  disposeAlarmBadge = onHubEvent('alarm', () => scheduleBadges())
   await refreshBadges()
 })
 
 onBeforeUnmount(() => {
   headerObserver?.disconnect()
   miniQuery.removeEventListener('change', onMiniChange)
-  window.removeEventListener('pointerdown', unlockAudio, true)
-  window.removeEventListener('keydown', unlockAudio, true)
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('scada-open-palette', onOpenPalette)
-  disposeAlarmHandler?.()
-  disposeHubClosed?.()
-  disposeAlarmSound()
+  disposeAlarmBadge?.()
   if (badgeTimer !== undefined) window.clearTimeout(badgeTimer)
-  for (const toast of criticalToasts) toast.close()
-  criticalToasts.clear()
-  // 布局卸载即离开应用（登出）：断开共享连接，各页面的订阅已随组件卸载 dispose。
-  resetHub()
 })
 </script>
 
@@ -599,6 +511,8 @@ onBeforeUnmount(() => {
 }
 .header-status :deep(.el-tag) { max-width: 100%; height: auto; min-height: 20px; white-space: normal; }
 .header-status :deep(.el-tag__content) { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.header-status .status-chip { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+.header-status .status-chip :deep(.el-icon) { margin-right: 0; }
 
 .page-title {
   margin: 0;
@@ -771,10 +685,4 @@ onBeforeUnmount(() => {
   .nav-search-label, .nav-search-kbd, .user-id { display: none; }
   .user-name { max-width: 100px; }
 }
-</style>
-
-<style>
-/* 通知挂在组件作用域之外：可点击的 Critical 弹窗只能在这里给手型与悬停反馈 */
-.scada-alarm-toast { cursor: pointer; border-left: 4px solid var(--scada-alarm-critical); }
-.scada-alarm-toast:hover { box-shadow: var(--scada-shadow); }
 </style>

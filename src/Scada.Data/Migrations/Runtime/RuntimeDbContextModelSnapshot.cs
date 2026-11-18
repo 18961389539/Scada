@@ -652,6 +652,9 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<int>("Quality")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Text")
+                        .HasColumnType("TEXT");
+
                     b.Property<long>("Ts")
                         .HasColumnType("INTEGER");
 
@@ -955,6 +958,59 @@ namespace Scada.Data.Migrations.Runtime
                         .IsUnique();
 
                     b.ToTable("McpIdempotencyRecord", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.MomentaryLease", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ReleaseId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("ReleaseValue")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("StartDeadlineTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("State")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TagId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExpiresTs");
+
+                    b.HasIndex("TagId")
+                        .IsUnique();
+
+                    b.ToTable("MomentaryLeases", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.NotificationOutbox", b =>

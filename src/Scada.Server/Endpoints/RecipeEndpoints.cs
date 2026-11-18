@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
@@ -15,7 +16,7 @@ namespace Scada.Server.Endpoints;
 public sealed record RecipeTemplateRequest(string Name, int AreaId, string? Description, bool DualApproval, List<RecipeParameter> Parameters, long Revision = 0);
 public sealed record RecipeRequest(int TemplateId, string Name, string? Description, List<RecipeValue> Values, string? Note, int Version = 0);
 public sealed record RecipeUploadRequest(int TemplateId, int? RecipeId, string? Name, string? Note);
-public sealed record RecipeDownloadRequest(int Version, bool Confirmed);
+public sealed record RecipeDownloadRequest(int Version, bool Confirmed, string? Challenge = null);
 
 // 配方管理：模板（参数绑定测点）、配方与不可变版本、比较、上载、经现场控制闭环下发。按模板所在区域授权，写差分审计。
 public static class RecipeEndpoints
@@ -157,7 +158,7 @@ public static class RecipeEndpoints
         });
 
         // ---- 下发 ----
-        group.MapPost("/{id:int}/check", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/{id:int}/check", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, BatchConfirmationStore confirmations, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             try
@@ -165,11 +166,12 @@ public static class RecipeEndpoints
                 var (template, recipe, version) = await RecipeService.LoadAsync(db, id, request.Version, ct);
                 if (await CanDownloadAsync(http, template) is string denied) return await Audit.ForbidAsync(http, $"预检查配方 {recipe.Name}", denied, "Recipe", id);
                 var check = await recipes.CheckAsync(template, recipe, version, ControlEndpoints.Actor(http), ct);
-                return Results.Ok(new { check.RecipeId, check.Version, check.DualApproval, ok = check.Ok, refusals = check.Refusals.ToList(), check.Parameters });
+                var grant = confirmations.Grant(ControlEndpoints.Actor(http).UserId, "recipe", id, RecipeFingerprint(template, recipe, version));
+                return Results.Ok(new { check.RecipeId, check.Version, check.DualApproval, ok = check.Ok, refusals = check.Refusals.ToList(), check.Parameters, confirmationChallenge = grant.Challenge, confirmationExpiresTs = grant.ExpiresTs });
             }
             catch (ControlWorkflowException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapPost("/{id:int}/download", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, CancellationToken ct) =>
+        group.MapPost("/{id:int}/download", async (int id, RecipeDownloadRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, RecipeService recipes, BatchConfirmationStore confirmations, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             try
@@ -177,6 +179,8 @@ public static class RecipeEndpoints
                 var (template, recipe, version) = await RecipeService.LoadAsync(db, id, request.Version, ct);
                 if (await CanDownloadAsync(http, template) is string denied) return await Audit.ForbidAsync(http, $"下发配方 {recipe.Name}", denied, "Recipe", id);
                 if (!request.Confirmed) return EndpointHelpers.BadRequest("下发配方前须确认");
+                if (!confirmations.TryConsume(ControlEndpoints.Actor(http).UserId, "recipe", id, RecipeFingerprint(template, recipe, version), request.Challenge))
+                    return EndpointHelpers.BadRequest("下发配方前须先调用检查接口并在确认框中确认");
                 var download = await recipes.RequestAsync(id, version.Version, ControlEndpoints.Actor(http), ct);
                 return Results.Ok(DownloadView(download));
             }
@@ -222,6 +226,12 @@ public static class RecipeEndpoints
         var missing = RecipeService.Parameters(template).FirstOrDefault(p => !access.CanTag(Permission.Control, p.TagId));
         return missing is null ? null : $"无参数 {missing.Name}（测点 #{missing.TagId}）所在区域的控制权限";
     }
+
+    private static string RecipeFingerprint(RecipeTemplate template, Recipe recipe, RecipeVersion version) => BatchConfirmationStore.Fingerprint(
+        template.Id.ToString(CultureInfo.InvariantCulture), template.Revision.ToString(CultureInfo.InvariantCulture),
+        template.AreaId.ToString(CultureInfo.InvariantCulture), template.DualApproval ? "1" : "0", template.ParametersJson,
+        recipe.Id.ToString(CultureInfo.InvariantCulture), recipe.Name, version.Version.ToString(CultureInfo.InvariantCulture),
+        version.ValuesJson, version.Note);
 
     private static Task<bool> Busy(RuntimeDbContext runtime, int templateId, CancellationToken ct) =>
         runtime.RecipeDownloads.AnyAsync(x => x.TemplateId == templateId && (x.Status == RecipeDownloadStatus.Running || x.Status == RecipeDownloadStatus.Pending), ct);

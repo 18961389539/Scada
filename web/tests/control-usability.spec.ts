@@ -214,6 +214,7 @@ test('control usability: request expiry, approval summary and auto refresh', asy
   await expect.poll(async () => (await (await request.get(`/api/realtime?tagIds=${spA}`, { headers: h })).json())[0]?.quality, { timeout: 20000 }).toBe('Good')
 
   const submit = async (tagId: number) => {
+    await request.post('/api/control/check', { headers: h, data: { tagId, value: 55 } })
     const r = await request.post('/api/commands', { headers: h, data: { tagId, value: 55, requestId: randomUUID(), confirmed: true } })
     const body = await r.json()
     expect(body.pending, JSON.stringify(body)).toBe(true)

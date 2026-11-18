@@ -78,6 +78,12 @@ public sealed class ReportArchiveService(
                 // 并发生成撞上 (模板, 周期, 版本) 唯一约束：删掉本次文件，换下一个版本号重试。
                 db.ChangeTracker.Clear(); TryDelete(xlsx); TryDelete(pdf); continue;
             }
+            catch
+            {
+                // 非并发异常（磁盘、权限、运行时库）也必须清掉本次已写文件，避免留下无记录的孤儿归档。
+                TryDelete(xlsx); TryDelete(pdf);
+                throw;
+            }
             if (template.EmailChannelId is int channelId && ReportTemplates.NotificationRecipients(template.EmailRecipients).Count > 0)
             {
                 await dispatcher.EnqueueReportAsync(run.Id, channelId, template.EmailRecipients, ct);

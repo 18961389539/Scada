@@ -781,3 +781,7 @@ html[data-display='control-room'] .el-tag {
     -webkit-tap-highlight-color: rgba(99, 230, 190, 0.3);
   }
 }
+
+/* Critical 报警弹窗挂在布局之外：样式必须是全局的，运行工作台/Kiosk 才能看见可点击提示。 */
+.scada-alarm-toast { cursor: pointer; border-left: 4px solid var(--scada-alarm-critical); }
+.scada-alarm-toast:hover { box-shadow: var(--scada-shadow); }

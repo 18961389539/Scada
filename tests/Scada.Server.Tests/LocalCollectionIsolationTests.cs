@@ -22,6 +22,7 @@ public sealed class LocalCollectionIsolationTests : IClassFixture<LocalCollectio
         {
             base.ConfigureSettings(b);
             b.UseSetting("Scada:LocalCollectionEnabled", "false");
+            b.UseSetting("Scada:ControlRequireConfirmByDefault", "false");
         }
     }
 

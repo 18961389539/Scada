@@ -8,6 +8,8 @@ public static partial class EngineServiceCollectionExtensions
 {
     private static IServiceCollection AddScadaControl(this IServiceCollection services)
     {
+        services.AddSingleton<ControlConfirmationStore>();
+        services.AddSingleton<BatchConfirmationStore>();
         services.AddSingleton<ControlCommandService>();
         services.AddSingleton<MomentaryControlService>();
         services.AddSingleton<RecipeService>();

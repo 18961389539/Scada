@@ -33,6 +33,12 @@
           <el-option :label="$t('listFilters.enabled')" value="enabled" />
           <el-option :label="$t('listFilters.disabled')" value="disabled" />
         </el-select>
+        <el-select v-model="filterHealth" :aria-label="$t('devicesView.statusFilter')" class="catalog-select" data-test="device-filter-health">
+          <el-option :label="$t('devicesView.allHealth')" value="all" />
+          <el-option :label="$t('devicesView.statusOnline')" value="online" />
+          <el-option :label="$t('devicesView.statusOffline')" value="offline" />
+          <el-option :label="$t('devicesView.statusFault')" value="fault" />
+        </el-select>
         <el-button type="primary" :icon="Search" data-test="device-query" @click="applyQuery">{{ $t('configurationUx.query') }}</el-button>
         <el-button v-if="hasFilters" link type="primary" data-test="device-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
         <span v-if="!loading || deviceTotal > 0 || devices.length" class="catalog-count muted" role="status" data-test="device-result-count">{{ $t('listFilters.resultCount', [deviceTotal, scopeTotal]) }}</span>
@@ -81,6 +87,19 @@
         <el-table-column v-if="showEngineering" prop="timeoutMs" :label="$t('devicesView.kff06c2')" width="80" show-overflow-tooltip>
           <template #default="{ row }">{{ row.timeoutMs }} ms</template>
         </el-table-column>
+        <el-table-column :label="$t('devicesView.runtimeStatus')" width="110" data-test="device-health-column">
+          <template #default="{ row }">
+            <el-tooltip :content="healthTooltip(row)" placement="top">
+              <el-tag :class="{ 'tag-quiet': deviceHealthKind(row.id) === 'online' }" :type="healthTagType(row.id)" size="small" :data-test="`device-health-${row.id}`">{{ healthLabel(row.id) }}</el-tag>
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="showEngineering" :label="$t('devicesView.lastPoll')" width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ deviceHealth(row.id)?.lastPollTs ? formatTime(deviceHealth(row.id)!.lastPollTs) : '--' }}</template>
+        </el-table-column>
+        <el-table-column v-if="showEngineering" :label="$t('devicesView.commFailures')" width="100" show-overflow-tooltip>
+          <template #default="{ row }">{{ deviceHealth(row.id)?.commFailures ?? '--' }}</template>
+        </el-table-column>
         <el-table-column :label="$t('devicesView.kd4e9ca')" width="80" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag :class="{ 'tag-quiet': row.enabled }" :type="row.enabled ? undefined : 'warning'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
@@ -122,11 +141,11 @@ import { computed, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type TableInstance } from 'element-plus'
 import { ArrowDown, Plus, Refresh, Search } from '@element-plus/icons-vue'
-import { areaApi, deviceApi } from '../api'
+import { areaApi, deviceApi, healthApi } from '../api'
 import { channelApi, type ChannelInfo } from '../api/channels'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
-import type { Area, Device, DeviceInput } from '../types'
+import type { Area, Device, DeviceInput, DeviceStatus } from '../types'
 import { can, canGlobal } from '../access/policies'
 import { protocolLabel } from '../protocols'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
@@ -137,6 +156,9 @@ import SimulationDialog from '../components/SimulationDialog.vue'
 import DeviceFormDialog from '../components/devices/DeviceFormDialog.vue'
 import DeviceTestDialog from '../components/devices/DeviceTestDialog.vue'
 import { tr } from '../i18n'
+import { formatTime } from '../utils'
+import { usePolling } from '../composables/usePolling'
+import { deviceRuntimeKind, matchesDeviceRuntimeFilter, type DeviceRuntimeKind } from '../composables/deviceRuntimeStatus'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
 import { useCatalogQuery } from '../composables/useCatalogQuery'
 import { positiveQueryId } from '../nav/query'
@@ -161,6 +183,9 @@ function areaName(id?: number): string { return areas.value.find(a => a.id === i
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
 const catalog = useCatalogQuery({ search: '', protocol: 'all', enabled: 'all' })
 const { search, protocol: filterProtocol, enabled: filterEnabled } = toRefs(catalog.draft)
+const filterHealth = ref<'all' | DeviceRuntimeKind>('all')
+const healthById = ref(new Map<number, DeviceStatus>())
+const healthError = ref('')
 const showEngineering = ref(false)
 const protocols = computed(() => {
   const source = protocolNames.value.length ? protocolNames.value : devices.value.map(device => device.protocol)
@@ -170,11 +195,12 @@ const canOpenCertificates = computed(() => globalConfigure.value
   || (protocols.value.includes('OpcUa') && configurableAreas.value.length > 0)
   || devices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null && canConfigureDevice(d))
   || certificateDevices.value.some(d => d.protocol === 'OpcUa' && d.gatewayId != null))
-const hasFilters = computed(() => catalog.pending.value || !!catalog.applied.value.search || catalog.applied.value.protocol !== 'all' || catalog.applied.value.enabled !== 'all')
+const hasFilters = computed(() => catalog.pending.value || !!catalog.applied.value.search || catalog.applied.value.protocol !== 'all' || catalog.applied.value.enabled !== 'all' || filterHealth.value !== 'all')
 const queryScope = computed(() => [
   catalog.applied.value.search,
   catalog.applied.value.protocol !== 'all' ? protocolLabel(catalog.applied.value.protocol) : '',
   catalog.applied.value.enabled !== 'all' ? tr(catalog.applied.value.enabled === 'enabled' ? 'listFilters.enabled' : 'listFilters.disabled') : '',
+  filterHealth.value !== 'all' ? tr(`devicesView.status${filterHealth.value[0].toUpperCase()}${filterHealth.value.slice(1)}`) : '',
   gatewayFilter.value ? tr('devicesView.k38b4cc', [gatewayFilter.value]) : ''
 ].filter(Boolean).join(' · ') || tr('configurationUx.all'))
 const tableRef = ref<TableInstance>()
@@ -195,8 +221,8 @@ function onSearchKey(event: KeyboardEvent): void {
   event.preventDefault()
   if (!event.isComposing && event.keyCode !== 229) void applyQuery()
 }
-async function resetFilters(): Promise<void> { await catalog.apply(true); onPageChange() }
-watch([() => JSON.stringify(catalog.applied.value), () => catalog.page.value, sortKey, sortOrder, gatewayFilter], () => { onPageChange(); void loadDevices() })
+async function resetFilters(): Promise<void> { filterHealth.value = 'all'; await catalog.apply(true); onPageChange() }
+watch([() => JSON.stringify(catalog.applied.value), () => catalog.page.value, sortKey, sortOrder, gatewayFilter, filterHealth], () => { onPageChange(); void loadDevices() })
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>()
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
@@ -208,11 +234,13 @@ const pageIssues = computed<PageIssue[]>(() => {
   const issues: PageIssue[] = []
   if (loadError.value) issues.push({ id: 'load', test: 'devices-load-error', level: 'error', message: loadError.value, detail: tr('configurationUx.loadHelp'), action: tr('common.retry'), actionTest: 'devices-load-retry' })
   if (areasError.value) issues.push({ id: 'areas', test: 'devices-areas-error', level: 'warning', message: areasError.value, action: tr('common.retry'), actionTest: 'devices-areas-retry' })
+  if (healthError.value) issues.push({ id: 'health', test: 'devices-health-error', level: 'warning', message: healthError.value, action: tr('common.retry'), actionTest: 'devices-health-retry' })
   if (actionError.value) issues.push({ id: 'action', test: 'devices-action-error', level: 'error', message: actionError.value })
   return issues
 })
 function onStatusAction(id: string): void {
   if (id === 'load' || id === 'areas') void load()
+  if (id === 'health') void loadHealth()
 }
 function onMoreCommand(command: string): void {
   if (command === 'certificates') certificatesVisible.value = true
@@ -246,6 +274,56 @@ function channelName(id: number | null): string {
   return id == null ? '' : channels.value.find(c => c.id === id)?.name ?? `#${id}`
 }
 
+function deviceHealth(id: number): DeviceStatus | undefined { return healthById.value.get(id) }
+function deviceHealthKind(id: number): DeviceRuntimeKind { return deviceRuntimeKind(deviceHealth(id)) }
+function healthLabel(id: number): string {
+  const kind = deviceHealthKind(id)
+  const key = `devicesView.status${kind[0].toUpperCase()}${kind.slice(1)}`
+  return tr(key)
+}
+function healthTagType(id: number): 'success' | 'danger' | 'info' | 'warning' | undefined {
+  const kind = deviceHealthKind(id)
+  if (kind === 'online') return undefined
+  if (kind === 'unknown') return 'info'
+  return 'danger'
+}
+function healthTooltip(device: Device): string {
+  const status = deviceHealth(device.id)
+  const poll = status?.lastPollTs ? formatTime(status.lastPollTs) : '--'
+  return tr('devicesView.healthTooltip', [healthLabel(device.id), poll, status?.commFailures ?? '--'])
+}
+async function loadHealth(): Promise<void> {
+  try {
+    const health = await healthApi.get()
+    healthById.value = new Map(health.devices.map(item => [item.deviceId, item]))
+    healthError.value = ''
+  } catch (error) {
+    healthError.value = errorMessage(error, tr('devicesView.healthFailed'))
+  }
+}
+function matchesCatalogFilters(device: Device): boolean {
+  const applied = catalog.applied.value
+  if (gatewayFilter.value != null && device.gatewayId !== gatewayFilter.value) return false
+  if (applied.protocol !== 'all' && device.protocol !== applied.protocol) return false
+  if (applied.enabled === 'enabled' && !device.enabled) return false
+  if (applied.enabled === 'disabled' && device.enabled) return false
+  const query = applied.search.trim().toLowerCase()
+  if (query && !`${device.name} ${device.host} ${device.protocol} ${device.serialPort}`.toLowerCase().includes(query)) return false
+  return true
+}
+function sortDevices(items: Device[]): Device[] {
+  const key = sortKey.value
+  const order = sortOrder.value
+  if (!key || !order) return items
+  const sign = order === 'ascending' ? 1 : -1
+  return [...items].sort((left, right) => {
+    const av = left[key as keyof Device]
+    const bv = right[key as keyof Device]
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sign
+    return String(av ?? '').localeCompare(String(bv ?? ''), undefined, { numeric: true }) * sign
+  })
+}
+
 let loadVersion = 0
 let catalogVersion = 0
 async function loadDevices(): Promise<void> {
@@ -253,7 +331,28 @@ async function loadDevices(): Promise<void> {
   loading.value = true
   try {
     const applied = catalog.applied.value
-    const filtered = !!applied.search.trim() || applied.protocol !== 'all' || applied.enabled !== 'all'
+    const filtered = !!applied.search.trim() || applied.protocol !== 'all' || applied.enabled !== 'all' || filterHealth.value !== 'all'
+    if (filterHealth.value !== 'all') {
+      if (!healthById.value.size) await loadHealth()
+      const items = sortDevices((await deviceApi.list()).filter(device =>
+        matchesCatalogFilters(device) && matchesDeviceRuntimeFilter(deviceHealth(device.id), filterHealth.value)))
+      if (version !== loadVersion) return
+      const maxPage = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
+      if (catalog.page.value > maxPage) {
+        catalog.page.value = maxPage
+        return
+      }
+      const scope = await deviceApi.page({ gatewayId: gatewayFilter.value, skip: 0, take: 1 })
+      if (version !== loadVersion) return
+      const skip = Math.max(0, (catalog.page.value - 1) * PAGE_SIZE)
+      devices.value = items.slice(skip, skip + PAGE_SIZE)
+      deviceTotal.value = items.length
+      scopeTotal.value = scope.total
+      protocolNames.value = scope.protocols.length ? scope.protocols : [...new Set(items.map(device => device.protocol))]
+      selected.value = []
+      loadError.value = ''
+      return
+    }
     const pageRequest = deviceApi.page({
       search: applied.search,
       protocol: applied.protocol,
@@ -300,8 +399,12 @@ async function loadAreasAndChannels(): Promise<void> {
   areas.value = areaList
 }
 async function load(): Promise<void> {
-  await Promise.all([loadDevices(), loadAreasAndChannels()])
+  const healthTask = loadHealth()
+  const catalogTask = loadAreasAndChannels()
+  if (filterHealth.value !== 'all') await healthTask
+  await Promise.all([loadDevices(), catalogTask, healthTask])
 }
+usePolling(loadHealth, 15000)
 
 const formDialog = ref<InstanceType<typeof DeviceFormDialog>>()
 const testDialog = ref<InstanceType<typeof DeviceTestDialog>>()

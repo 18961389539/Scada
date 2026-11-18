@@ -53,7 +53,13 @@ async function confirm(): Promise<void> {
   if (!recipe || !canConfirm.value) return
   submitting.value = true; error.value = ''
   try {
-    const download = await recipeApi.download(recipe.id, recipe.version)
+    const fresh = await recipeApi.check(recipe.id, recipe.version)
+    if (!fresh.ok || !fresh.confirmationChallenge) {
+      check.value = fresh
+      error.value = fresh.refusals.join('；') || tr('hmi.recipeFailed')
+      return
+    }
+    const download = await recipeApi.download(recipe.id, recipe.version, fresh.confirmationChallenge)
     result.value = download
     emit('completed', download)
     if (download.status === 'Pending') ElMessage.warning(tr('hmi.recipePending'))

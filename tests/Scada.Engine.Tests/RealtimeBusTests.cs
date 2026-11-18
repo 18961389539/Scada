@@ -36,6 +36,7 @@ public sealed class RealtimeBusTests
     {
         var bus = new RealtimeBus();
         var reader = bus.SubscribeHistory();
+        var gaps = bus.SubscribeHistoryGaps();
         for (var i = 0; i < RealtimeBus.HistoryCapacity; i++) bus.Publish(new TagValue(1, i, TagQuality.Good, ScadaTime.NowMs(), 0));
         Assert.Equal(0, bus.HistoryRejected);
         Assert.Equal(0, bus.DroppedTotal);
@@ -44,7 +45,12 @@ public sealed class RealtimeBusTests
 
         Assert.Equal(1, bus.HistoryRejected);
         Assert.Equal(0, bus.DroppedTotal);
+        Assert.Equal(0, bus.HistoryGapRejected);
         Assert.True(reader.TryRead(out var head));
         Assert.Equal(0, head.Value);
+        Assert.True(gaps.TryRead(out var gap));
+        Assert.Equal(1, gap.TagId);
+        Assert.Equal(TagQuality.Uncertain, gap.Quality);
+        Assert.Contains("历史写入队列已满", gap.Error);
     }
 }

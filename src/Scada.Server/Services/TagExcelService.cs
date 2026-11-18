@@ -14,6 +14,12 @@ public sealed record ImportResult(int Created, int Updated, int Skipped, IReadOn
 
 public sealed class TagExcelService
 {
+    private readonly Scada.Core.Options.ScadaSettings _settings;
+
+    public TagExcelService(Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> options) => _settings = options.Value;
+
+    public TagExcelService() : this(Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())) { }
+
     private static readonly System.Text.Json.JsonSerializerOptions AuditJson = new()
     {
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -117,6 +123,10 @@ public sealed class TagExcelService
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         var hasCalculations = workbook.Worksheets.TryGetWorksheet("计算测点", out var calculationSheet);
+        var maxRows = Math.Clamp(_settings.TagImportMaxRows, 1, 1_000_000);
+        if (lastRow - 1 > maxRows) return new ImportResult(0, 0, 0, [$"测点导入超过每表 {maxRows} 行上限"]);
+        if (hasCalculations && (calculationSheet!.LastRowUsed()?.RowNumber() ?? 1) - 1 > maxRows)
+            return new ImportResult(0, 0, 0, [$"计算测点导入超过每表 {maxRows} 行上限"]);
         var idMap = new Dictionary<int, Tag>();
         var physicalNames = new HashSet<(int DeviceId, string Name)>();
         var devices = await db.Devices.ToDictionaryAsync(x => x.Name, cancellationToken);

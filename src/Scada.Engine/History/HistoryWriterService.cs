@@ -51,6 +51,7 @@ public sealed class HistoryWriterService : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var subscription = _bus.SubscribeHistory(out var reader);
+        using var gapSubscription = _bus.SubscribeHistoryGaps(out var gapReader);
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(Math.Max(_settings.ArchiveFlushIntervalMs, 200)));
         var tickTask = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
 
@@ -63,11 +64,20 @@ public sealed class HistoryWriterService : BackgroundService
                 _liveness?.Beat("history-writer");
                 ReloadConfigIfNeeded();
                 var dataTask = reader.WaitToReadAsync(stoppingToken).AsTask();
-                var completed = await Task.WhenAny(tickTask, dataTask);
+                var gapTask = gapReader.WaitToReadAsync(stoppingToken).AsTask();
+                var completed = await Task.WhenAny(tickTask, dataTask, gapTask);
 
                 while (reader.TryRead(out var value))
                 {
                     Evaluate(value);
+                    if (_buffer.Count >= _settings.ArchiveBatchSize)
+                    {
+                        await FlushAsync(stoppingToken);
+                    }
+                }
+                while (gapReader.TryRead(out var gap))
+                {
+                    Evaluate(gap);
                     if (_buffer.Count >= _settings.ArchiveBatchSize)
                     {
                         await FlushAsync(stoppingToken);
@@ -227,7 +237,7 @@ public sealed class HistoryWriterService : BackgroundService
                 continue;
             }
 
-            _lastStored[item.TagId] = new ArchiveState(item.Ts, item.Value, item.Quality);
+            _lastStored[item.TagId] = new ArchiveState(item.Ts, item.Value, item.Quality, item.Text);
         }
     }
 

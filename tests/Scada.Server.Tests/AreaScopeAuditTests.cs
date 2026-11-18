@@ -86,7 +86,8 @@ public sealed class AreaScopeAuditTests : IClassFixture<AuthorizationTests.Site>
             name = "B-顺控" + suffix, areaId = _site.AreaB, dualApproval = false,
             steps = new[] { new { name = "开阀", tagId = hornId!.Value, value = 1.0, confirmExpression = $"#{hornId} == 1", timeoutMs = 60000, delayMs = 0 } }
         }, "id");
-        var controlRunId = sequenceId is null ? null : await CreateAsync(admin, $"/api/control/sequences/{sequenceId}/start", new { confirmed = true }, "runId");
+        var sequenceChallenge = sequenceId is null ? null : await admin.SequenceChallengeAsync(sequenceId.Value);
+        var controlRunId = sequenceId is null ? null : await CreateAsync(admin, $"/api/control/sequences/{sequenceId}/start", new { confirmed = true, challenge = sequenceChallenge }, "runId");
         var recipeId = await CreateAsync(admin, "/api/recipes/templates", new
         {
             name = "B-配方" + suffix, areaId = _site.AreaB, description = "", dualApproval = false,

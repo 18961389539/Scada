@@ -301,7 +301,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         finally { _mutations.Release(); }
     }
 
-    private sealed record PlannedCursor(int TagId, long Ts, double Value, TagQuality Quality);
+    private sealed record PlannedCursor(int TagId, long Ts, double Value, TagQuality Quality, string? Text);
     private sealed record PreparedIngest(GatewayInboxBatch Batch, string Claim, List<HistoryValue> History, List<PlannedCursor> Cursors, GatewayTelemetry Packet);
 
     public async Task<bool> ProcessOneAsync(CancellationToken ct)
@@ -365,7 +365,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         var metadata = JsonSerializer.Deserialize<GatewayConfiguration>(revision.SnapshotJson, GatewayProtocol.Json)!;
         var tags = metadata.Tags.ToDictionary(x => x.Id);
         var stored = await runtime.GatewayArchiveCursors.Where(x => x.GatewayId == batch.GatewayId && x.StreamId == batch.StreamId).ToDictionaryAsync(x => x.TagId, ct);
-        var working = stored.ToDictionary(x => x.Key, x => new ArchiveState(x.Value.Ts, x.Value.Value, x.Value.Quality));
+        var working = stored.ToDictionary(x => x.Key, x => new ArchiveState(x.Value.Ts, x.Value.Value, x.Value.Quality, x.Value.Text));
         var history = new List<HistoryValue>();
         var planned = new Dictionary<int, PlannedCursor>();
         foreach (var value in packet.Values)
@@ -375,11 +375,11 @@ public sealed partial class GatewayCenterService : BackgroundService
             // 未来时标不进历史。更早的补数仍要留下，实时缓存继续用新鲜度窗口丢掉它。
             if (tag.ArchiveMode == ArchiveMode.None || value.Ts > Now + 1000 || cursor is not null && value.Ts == cursor.Ts
                 || cursor is not null && value.Ts > cursor.Ts && !ArchivePolicy.ShouldStore(tag, value, cursor, value.Ts)) continue;
-            history.Add(new(value.TagId, value.Ts, value.Value, value.Quality));
+            history.Add(new(value.TagId, value.Ts, value.Value, value.Quality, value.Text));
             if (cursor is null || value.Ts >= cursor.Ts)
             {
-                working[value.TagId] = new ArchiveState(value.Ts, value.Value, value.Quality);
-                planned[value.TagId] = new PlannedCursor(value.TagId, value.Ts, value.Value, value.Quality);
+                working[value.TagId] = new ArchiveState(value.Ts, value.Value, value.Quality, value.Text);
+                planned[value.TagId] = new PlannedCursor(value.TagId, value.Ts, value.Value, value.Quality, value.Text);
             }
         }
         var claim = "claim:" + Guid.NewGuid().ToString("N");
@@ -402,8 +402,8 @@ public sealed partial class GatewayCenterService : BackgroundService
         {
             var row = await runtime.GatewayArchiveCursors.FindAsync([batch.GatewayId, batch.StreamId, cursor.TagId], ct);
             if (row is null)
-                runtime.GatewayArchiveCursors.Add(new GatewayArchiveCursor { GatewayId = batch.GatewayId, StreamId = batch.StreamId, TagId = cursor.TagId, Ts = cursor.Ts, Value = cursor.Value, Quality = cursor.Quality });
-            else if (cursor.Ts >= row.Ts) { row.Ts = cursor.Ts; row.Value = cursor.Value; row.Quality = cursor.Quality; }
+                runtime.GatewayArchiveCursors.Add(new GatewayArchiveCursor { GatewayId = batch.GatewayId, StreamId = batch.StreamId, TagId = cursor.TagId, Ts = cursor.Ts, Value = cursor.Value, Quality = cursor.Quality, Text = cursor.Text });
+            else if (cursor.Ts >= row.Ts) { row.Ts = cursor.Ts; row.Value = cursor.Value; row.Quality = cursor.Quality; row.Text = cursor.Text; }
         }
         var gateway = await db.Gateways.SingleAsync(x => x.Id == batch.GatewayId, ct);
         var current = await BuildConfigurationAsync(db, batch.GatewayId, ct, recordRevision: false);

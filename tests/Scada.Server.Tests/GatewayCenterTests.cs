@@ -107,6 +107,20 @@ public partial class GatewayCenterTests
     }
 
     [Fact]
+    public async Task GatewayStringHistoryPreservesTextAndSuppressesUnchangedPoints()
+    {
+        await using var rig = await Rig.CreateAsync(includeText: true);
+        rig.Clock.Now += 10; await rig.AcceptAsync(rig.TextPacket(1, "LOT-A")); Assert.True(await rig.Service.ProcessOneAsync(default));
+        rig.Clock.Now += 10; await rig.AcceptAsync(rig.TextPacket(2, "LOT-A")); Assert.True(await rig.Service.ProcessOneAsync(default));
+        rig.Clock.Now += 10; await rig.AcceptAsync(rig.TextPacket(3, "LOT-B")); Assert.True(await rig.Service.ProcessOneAsync(default));
+
+        var points = await rig.ReadTextHistoryAsync();
+        Assert.Equal(["LOT-A", "LOT-B"], points.Select(x => x.Text));
+        await using var db = await rig.Runtime.CreateDbContextAsync();
+        Assert.Equal("LOT-B", (await db.GatewayArchiveCursors.SingleAsync(x => x.TagId == rig.TextTagId)).Text);
+    }
+
+    [Fact]
     public async Task FailureAfterHistoryCommitKeepsInboxAndRetryDoesNotDuplicateHistory()
     {
         await using var rig = await Rig.CreateAsync(); await rig.AcceptAsync(rig.Packet(1, 22));
@@ -295,7 +309,7 @@ public partial class GatewayCenterTests
         public HistoryStore History { get; private set; } = null!; public GatewayCenterService Service { get; private set; } = null!;
         public GatewayCaller Caller { get; private set; } = null!; public GatewaySession Session { get; private set; } = null!;
         public Guid Instance { get; } = Guid.NewGuid(); public Guid Stream { get; } = Guid.NewGuid(); public string Revision { get; private set; } = "";
-        public int DeviceId, TagId; private CollectorEngine _local = null!; private IDeviceCredentials _credentials = null!; private GatewaySettings _settings = null!;
+        public int DeviceId, TagId; public int TextTagId; private CollectorEngine _local = null!; private IDeviceCredentials _credentials = null!; private GatewaySettings _settings = null!;
         public int OperatorId;
         public readonly AlarmNotifications Notifications = new();
         public async Task EnableCommandsAsync()
@@ -308,7 +322,7 @@ public partial class GatewayCenterTests
             await Config.ReloadAsync(); Revision = (await Service.ConfigurationAsync(Caller, Session.SessionId, default)).Revision;
             await Service.HeartbeatAsync(Caller, Session.SessionId, new(Revision, 0, 0, null, null, [new(DeviceId, "remote", true, null, Clock.Now, 1, 1, 0, 0)]), default);
         }
-        public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024, int maxAttempts = 10, int retryBaseMs = 1000, int retryMaxMs = 60000)
+        public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024, int maxAttempts = 10, int retryBaseMs = 1000, int retryMaxMs = 60000, bool includeText = false)
         {
             var rig = new Rig(); Directory.CreateDirectory(rig._root);
             var configPath = Path.Combine(rig._root, "config.db");
@@ -331,6 +345,11 @@ public partial class GatewayCenterTests
             {
                 var device = new Device { Name = "remote", GatewayId = identity.Id, Enabled = true }; db.Devices.Add(device); await db.SaveChangesAsync(); rig.DeviceId = device.Id;
                 var tag = new Tag { DeviceId = device.Id, Name = "value", DataType = TagDataType.Float, ArchiveMode = ArchiveMode.Periodic, Deadband = .1 }; db.Tags.Add(tag); await db.SaveChangesAsync(); rig.TagId = tag.Id;
+                if (includeText)
+                {
+                    var textTag = new Tag { DeviceId = device.Id, Name = "text", DataType = TagDataType.String, TextLength = 32, ArchiveMode = ArchiveMode.OnChange };
+                    db.Tags.Add(textTag); await db.SaveChangesAsync(); rig.TextTagId = textTag.Id;
+                }
             }
             await rig.Config.ReloadAsync(); rig.Session = await rig.Service.HelloAsync(rig.Caller, new(1, rig.Instance, rig.Stream, "test"), default);
             var configuration = await rig.Service.ConfigurationAsync(rig.Caller, rig.Session.SessionId, default); rig.Revision = configuration.Revision;
@@ -338,9 +357,11 @@ public partial class GatewayCenterTests
         }
         public GatewayCenterService MakeService(IGatewayHistoryWriter history, INodeRole? role = null) => new(Factory, Runtime, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock, Notifications, role);
         public GatewayTelemetry Packet(long sequence, double value, long? timestamp = null) => new(1, Stream, sequence, DeviceId, Revision, Clock.Now, [new(TagId, value, TagQuality.Good, timestamp ?? Clock.Now)]);
+        public GatewayTelemetry TextPacket(long sequence, string text, long? timestamp = null) => new(1, Stream, sequence, DeviceId, Revision, Clock.Now, [new(TextTagId, 0, TagQuality.Good, timestamp ?? Clock.Now, Text: text)]);
         public Task<GatewayAcknowledgement> AcceptAsync(GatewayTelemetry packet)
         { var payload = JsonSerializer.Serialize(packet, GatewayProtocol.Json); return Service.AcceptAsync(Caller, Session.SessionId, payload, GatewayCenterService.TokenHash(payload), default); }
         public async Task<IReadOnlyList<HistoryPoint>> ReadHistoryAsync() => (await History.QueryRawAsync([TagId], Clock.Now - 7200000, Clock.Now + 10000, default)).SelectMany(x => x.Points).ToList();
+        public async Task<IReadOnlyList<HistoryPoint>> ReadTextHistoryAsync() => (await History.QueryRawAsync([TextTagId], Clock.Now - 7200000, Clock.Now + 10000, default)).SelectMany(x => x.Points).ToList();
         public async ValueTask DisposeAsync()
         {
             Service.Dispose(); _local.Dispose(); Bus.Dispose();

@@ -461,7 +461,13 @@ async function confirmDownload(): Promise<void> {
   const { id } = downloadRecipe.value, version = checkResult.value.version
   submitting.value = true; downloadError.value = ''
   try {
-    const d = await recipeApi.download(id, version)
+    const fresh = await recipeApi.check(id, version)
+    if (!fresh.ok || !fresh.confirmationChallenge) {
+      checkResult.value = fresh
+      downloadError.value = fresh.refusals.join('；') || tr('recipesView.k5bf97e')
+      return
+    }
+    const d = await recipeApi.download(id, version, fresh.confirmationChallenge)
     if (disposed) return
     lastSubmitted.value = d; downloads.value = [d, ...downloads.value.filter(row => row.id !== d.id)]
     if (d.status === 'Rejected') { downloadError.value = d.message || tr('recipesView.k5bf97e'); checkResult.value = null; return }

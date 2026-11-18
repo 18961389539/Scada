@@ -11,7 +11,7 @@ export interface RecipeDownload {
   approvalId: string | null; createdTs: number; startedTs: number | null; endedTs: number | null; written: number; message: string | null; results: RecipeParamResult[]
 }
 export interface RecipeParamCheck { key: string; name: string; tagId: number; tagName: string; unit: string | null; target: number; current: number | null; refusals: string[]; dualApproval: boolean }
-export interface RecipeCheck { recipeId: number; version: number; dualApproval: boolean; ok: boolean; refusals: string[]; parameters: RecipeParamCheck[] }
+export interface RecipeCheck { recipeId: number; version: number; dualApproval: boolean; ok: boolean; refusals: string[]; parameters: RecipeParamCheck[]; confirmationChallenge: string; confirmationExpiresTs: number }
 export interface RecipeCompare { leftLabel: string; rightLabel: string; differences: number; rows: { key: string; name: string; unit: string | null; tagId: number; left: number | null; right: number | null; different: boolean }[] }
 
 export const recipeApi = {
@@ -29,7 +29,10 @@ export const recipeApi = {
   upload: async (templateId: number, recipeId: number | null, name: string | null, note: string | null) =>
     (await http.post<{ recipe: Recipe; warnings: string[] }>('/recipes/upload', { templateId, recipeId, name, note })).data,
   check: async (id: number, version: number) => (await http.post<RecipeCheck>(`/recipes/${id}/check`, { version })).data,
-  download: async (id: number, version: number) => (await http.post<RecipeDownload>(`/recipes/${id}/download`, { version, confirmed: true })).data,
+  download: async (id: number, version: number, challenge: string) => {
+    if (!challenge) throw new Error('recipe confirmation challenge is required')
+    return (await http.post<RecipeDownload>(`/recipes/${id}/download`, { version, confirmed: true, challenge })).data
+  },
   downloads: async (recipeId?: number, before?: number) => readPage(await http.get<RecipeDownload[]>('/recipes/downloads', { params: { recipeId, before } })),
   downloadStatus: async (id: number) => (await http.get<RecipeDownload>(`/recipes/downloads/${id}`)).data,
   abort: async (id: number) => http.post(`/recipes/downloads/${id}/abort`)

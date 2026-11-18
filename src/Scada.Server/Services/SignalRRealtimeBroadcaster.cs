@@ -90,6 +90,11 @@ public sealed class SignalRRealtimeBroadcaster : BackgroundService
         {
             // normal shutdown
         }
+        catch (Exception ex)
+        {
+            // 推送失败不能让后台服务异常冒泡停掉整个宿主。
+            _logger.LogError(ex, "实时数据推送循环异常退出");
+        }
     }
 
     // 推送前按连接所属用户的当前授权逐条过滤：订阅后被降权、设备换区域，都会立即停止推送。

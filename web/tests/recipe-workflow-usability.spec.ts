@@ -17,7 +17,7 @@ function record(recipe: Recipe, id: number, status: string): RecipeDownload {
 }
 function check(recipe: Recipe): RecipeCheck {
   const template = templates.find(t => t.id === recipe.templateId)!
-  return { recipeId: recipe.id, version: recipe.version, dualApproval: template.dualApproval, ok: true, refusals: [], parameters: template.parameters.map(p => ({
+  return { recipeId: recipe.id, version: recipe.version, dualApproval: template.dualApproval, ok: true, refusals: [], confirmationChallenge: `e2e-${recipe.id}`, confirmationExpiresTs: Date.now() + 60_000, parameters: template.parameters.map(p => ({
     key: p.key, name: p.name, tagId: p.tagId, tagName: p.name, unit: p.unit, target: recipe.values.find(v => v.key === p.key)!.value, current: 0, refusals: [], dualApproval: template.dualApproval
   })) }
 }
@@ -250,7 +250,7 @@ for (const outcome of ['http-error', 'rejected'] as const) {
     expect(writes).toBe(1)
     await page.locator('[data-test="recipe-check-retry"]').click()
     await expect(confirm(page)).toBeEnabled()
-    expect(checks).toBe(2); expect(writes).toBe(1)
+    expect(checks).toBe(3); expect(writes).toBe(1)
   })
 }
 

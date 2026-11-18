@@ -131,7 +131,11 @@ export default {
     runAdviceAborted: 'Aborting does not revert the steps that already ran. Verify the field state before running again.',
     kbdRequests: '↑↓ select · Enter approve or withdraw · R reject',
     kbdLockouts: '↑↓ select · Enter remove lockout',
-    kbdRuns: '↑↓ select · Enter open the flow'
+    kbdRuns: '↑↓ select · Enter open the flow',
+    writeHint: 'Setpoint writes are issued from Realtime or a running process screen. This page is for lockouts, approvals, control authority and sequences.',
+    openRealtime: 'Open Realtime',
+    openScreens: 'Open the screen catalog',
+    openConsole: 'Open the control room layout'
   },
   commandUx: {
     outcomeUnknown: 'Outcome unknown: the request was sent but no receipt came back. Check the device state or the tag value (gateway operations also show a command receipt) before sending again.',
@@ -143,7 +147,7 @@ export default {
     openHint: 'Click to open the alarm'
   },
   workbench: {
-    runtimeTitle: 'Runtime workbench', configurationTitle: 'Workbench setup', configure: 'Configure workbench', create: 'Quick-create workbench', createFromScreen: 'Create workbench from this screen',
+    navTitle: 'Control room layout', runtimeTitle: 'Runtime workbench', configurationTitle: 'Workbench setup', configure: 'Configure workbench', create: 'Quick-create workbench', createFromScreen: 'Create workbench from this screen',
     emptyTitle: 'No published workbench is available', emptyHelp: 'Publishing a screen does not configure a workbench. Select a published screen, preview and publish a workbench, or run a single screen directly.',
     contactAdmin: 'This account cannot configure workbenches. Ask an administrator to create and publish one.', openScreens: 'Run a single screen',
     quickTitle: 'Quick-create workbench', quickHelp: 'Start with a published screen. No grid settings or workstation registration are required. Screens and workbenches are published independently.',
@@ -410,7 +414,9 @@ export default {
     silenceMinutes: 'Silence minutes', silenceHint: 'Silences every visible enabled annunciator panel until the timer expires.',
     silenceConfirm: 'Silence the visible annunciator panels for {0} minutes?', silenceDone: 'Silenced {0} of {1} panels', silenceFailed: 'Could not silence annunciators', silenceNote: 'Screen silence button',
     releaseValue: 'Release value', maxHoldMs: 'Max hold (ms)', pulseMs: 'Pulse width (ms)',
-    momentaryHint: 'Press runs the full control checks; release writes the release value while skipping interlocks, and the server watchdog releases on timeout.',
+    momentaryHint: 'Press runs the full control checks; release writes the release value while skipping interlocks, and the server watchdog releases on timeout. Do not enable operator confirmation on a jog tag: press must be held, and a confirm dialog would break the press-and-hold action.',
+    momentaryConfirmBlocked: 'Jog cannot use operator confirmation. Press must be held, and a confirm dialog would interrupt the hold and turn it into a tap. Disable confirmation on this tag before jogging.',
+    momentaryConfirmWarning: 'This tag requires operator confirmation. Jog needs a press-and-hold, so runtime will reject the command instead of opening a confirm dialog. Use a regular button, or disable confirmation on this tag.',
     jogReleaseFailed: 'Jog release failed; the server will release it after the max hold time',
     positionsHint: 'Each position maps to one control value; the runtime highlights the nearest feedback value. Supports 2 to 8 positions.',
     recipe: 'Recipe selector', recipeTemplate: 'Recipe template', recipePickTemplate: 'Select a recipe template', recipeControlHint: 'Operators pick a recipe from this template and download it; requires Control permission for the template area and every parameter tag.',
@@ -949,6 +955,9 @@ export default {
     loadFailed: 'Image failed to load'
   },
   kioskUx: {
-    alarmPaused: 'Rotation paused by alarm'
+    alarmPaused: 'Rotation paused by alarm',
+    soundMuted: 'Muted',
+    soundOn: 'Sound on',
+    criticalTitle: 'Critical alarm'
   }
 }

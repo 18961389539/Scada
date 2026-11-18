@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -15,7 +16,7 @@ public sealed class UnhandledExceptionHandler(ILogger<UnhandledExceptionHandler>
             await httpContext.Response.WriteAsJsonAsync(new { message = quota.Message }, cancellationToken);
             return true;
         }
-        var traceId = httpContext.TraceIdentifier;
+        var traceId = Activity.Current?.TraceId.ToHexString() ?? httpContext.TraceIdentifier;
         if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
         {
             logger.LogDebug("请求已被客户端取消 {Method} {Path}，追踪号 {TraceId}", httpContext.Request.Method, httpContext.Request.Path, traceId);

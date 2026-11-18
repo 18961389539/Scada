@@ -393,6 +393,15 @@
               </el-form-item>
             </div>
             <p class="field-hint">{{ $t('hmi.momentaryHint') }}</p>
+            <el-alert
+              v-if="jogConfirmWarning"
+              type="warning"
+              :closable="false"
+              show-icon
+              class="field-hint"
+              data-test="jog-confirm-warning"
+              :title="$t('hmi.momentaryConfirmWarning')"
+            />
           </template>
           <template v-if="controlRangeTypes.includes(selected.type)">
             <div class="field-pair" data-field="range">
@@ -494,7 +503,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import type { ScreenAction, ScreenAnimation, ScreenChartOptions, ScreenNode } from '../screens/model'
 import type { DesignerPanelApi } from '../screens/designerPanelApi'
 import { hasFeature, typesWith } from '../screens/nodeSpecs'
@@ -503,6 +512,9 @@ import FieldLabel from './FieldLabel.vue'
 import TagSelect from './TagSelect.vue'
 import { Close, Delete, Plus, QuestionFilled, Upload } from '@element-plus/icons-vue'
 import { tr } from '../i18n'
+
+import { controlApi } from '../api/control'
+import { shouldWarnMomentaryConfirm } from '../screens/momentaryConfirm'
 
 const props = defineProps<{ api: DesignerPanelApi }>()
 const {
@@ -523,6 +535,14 @@ const {
   multiTagTypes, animationSummary, setAnimType, setAnimField,
   controlRangeTypes, fieldLabel, setControlTag, syncControlTag, bindingChanged, resizeCanvas
 } = props.api
+
+const confirmTagIds = ref(new Set<number>())
+const jogConfirmWarning = computed(() => shouldWarnMomentaryConfirm(selected.value?.type, selected.value?.action.tagId, confirmTagIds.value))
+onMounted(() => {
+  void controlApi.points().then(points => {
+    confirmTagIds.value = new Set(points.filter(point => point.requireConfirm).map(point => point.tagId))
+  }).catch(() => { /* 警告是尽力而为，加载失败时不误报 */ })
+})
 
 const imageInput = ref<HTMLInputElement>()
 const imageUploading = ref(false)

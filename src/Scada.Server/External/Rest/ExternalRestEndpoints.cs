@@ -110,7 +110,8 @@ public static class ExternalRestEndpoints
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId))
                 return await Audit.ForbidAsync(http, request.Text is null ? $"外部控制：测点 #{request.TagId} = {request.Value}" : $"外部控制：测点 #{request.TagId} 写入文本", "无权控制该区域的测点", "Tag", request.TagId);
             var actor = new ControlActor(http.User.GetUserId(), http.User.GetUserName());
-            var result = await commands.SubmitAsync(new ControlSubmission(request.TagId, request.Value, actor, ControlOrigin.Operator,
+            var origin = actor.UserId is null ? ControlOrigin.External : ControlOrigin.Operator;
+            var result = await commands.SubmitAsync(new ControlSubmission(request.TagId, request.Value, actor, origin,
                 "外部 REST API", request.Confirmed, requestId, Text: request.Text), ct);
             return Results.Ok(new ExternalCommandView(result.Success, result.Message, result.ReadBack, result.CommandId,
                 result.Outcome, result.Pending, result.ApprovalId, result.Refusals));

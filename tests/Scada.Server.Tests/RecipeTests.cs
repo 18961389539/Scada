@@ -125,7 +125,7 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         var lockout = await Ok(await admin.PostAsJsonAsync("/api/control/lockouts", new { tagId = tags[1], kind = "NoOperate", reason = "检修" }));
         var check = await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/check", new { version = 0 }));
         Assert.False(check.GetProperty("ok").GetBoolean());
-        var rejected = await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true }));
+        var rejected = await Ok(await op.DownloadRecipeAsync(rid, 0));
         Assert.Equal("Rejected", rejected.GetProperty("status").GetString());
         Assert.Contains("未下发任何参数", rejected.GetProperty("message").GetString());
         Assert.All(tags, t => Assert.Equal(0, Collector.Count(t)));
@@ -133,11 +133,11 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
 
         // 控制策略限幅比配方范围更严：同样在预检查拦下
         await Ok(await admin.PutAsJsonAsync($"/api/control/points/{tags[0]}", new { requireConfirm = true, dualApproval = false, approvalTimeoutSec = 300, limitMin = 0, limitMax = 100, feedbackTimeoutMs = 10000 }));
-        Assert.Equal("Rejected", (await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true }))).GetProperty("status").GetString());
+        Assert.Equal("Rejected", (await Ok(await op.DownloadRecipeAsync(rid, 0))).GetProperty("status").GetString());
         await Ok(await admin.DeleteAsync($"/api/control/points/{tags[0]}"));
         foreach (var t in tags) Set(t, 1);
 
-        var started = await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true }));
+        var started = await Ok(await op.DownloadRecipeAsync(rid, 0));
         Assert.NotEqual("Pending", started.GetProperty("status").GetString());
         var done = await WaitDownloadAsync(op, started.GetProperty("id").GetInt32());
         Assert.Equal("Completed", done.GetProperty("status").GetString());
@@ -160,7 +160,7 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         lock (Collector.Writes) Collector.Fail.Add(tags[1]);
         try
         {
-            var started = await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true }));
+            var started = await Ok(await op.DownloadRecipeAsync(rid, 0));
             var d = await WaitDownloadAsync(op, started.GetProperty("id").GetInt32());
             Assert.Equal("PartiallyApplied", d.GetProperty("status").GetString());
             var results = d.GetProperty("results");
@@ -179,7 +179,7 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
     {
         var admin = await _site.ClientAsync("admin"); var op = await _site.ClientAsync("opA"); var other = await _site.ClientAsync("watchA");
         var (_, rid, tags, _) = await SetupAsync(admin, dual: true);
-        var pending = await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true }));
+        var pending = await Ok(await op.DownloadRecipeAsync(rid, 0));
         Assert.Equal("Pending", pending.GetProperty("status").GetString());
         Assert.All(tags, t => Assert.Equal(0, Collector.Count(t)));
         var approval = pending.GetProperty("approvalId").GetString();
@@ -192,7 +192,7 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal("watchA", d.GetProperty("approvedBy").GetString());
 
         // 驳回：不写任何参数
-        var again = await Ok(await op.PostAsJsonAsync($"/api/recipes/{rid}/download", new { version = 0, confirmed = true }));
+        var again = await Ok(await op.DownloadRecipeAsync(rid, 0));
         var before = Collector.Count(tags[0]);
         await Ok(await other.PostAsJsonAsync($"/api/control/requests/{again.GetProperty("approvalId").GetString()}/reject", new { comment = "不对" }));
         var rejected = await Ok(await op.GetAsync($"/api/recipes/downloads/{again.GetProperty("id").GetInt32()}"));

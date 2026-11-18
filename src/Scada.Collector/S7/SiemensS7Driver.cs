@@ -43,25 +43,37 @@ public sealed class SiemensS7Driver : IDeviceDriver
         {
             foreach (var block in plan.Blocks)
             {
-                address = $"{block.Area} DB {block.DbNumber} 字节 {block.StartAddress} 长度 {block.Length}";
-                using var deadline = Deadline(device, cancellationToken);
-                using var registration = deadline.Token.Register(client.Close);
-                var bytes = await client.ReadBytesAsync(Area(block.Area), block.Area == TagArea.DataBlock ? block.DbNumber : 0,
-                    block.StartAddress, block.Length, deadline.Token);
-                foreach (var item in block.Tags)
+                try
                 {
-                    if (item.DataType == TagDataType.String)
+                    address = $"{block.Area} DB {block.DbNumber} 字节 {block.StartAddress} 长度 {block.Length}";
+                    using var deadline = Deadline(device, cancellationToken);
+                    using var registration = deadline.Token.Register(client.Close);
+                    var bytes = await client.ReadBytesAsync(Area(block.Area), block.Area == TagArea.DataBlock ? block.DbNumber : 0,
+                        block.StartAddress, block.Length, deadline.Token);
+                    foreach (var item in block.Tags)
                     {
-                        values.Add(new RawTagValue(item.TagId, 0, Text: S7StringCodec.Decode(bytes.AsSpan(item.Offset), item.TextLength)));
-                        continue;
+                        if (item.DataType == TagDataType.String)
+                        {
+                            values.Add(new RawTagValue(item.TagId, 0, Text: S7StringCodec.Decode(bytes.AsSpan(item.Offset), item.TextLength)));
+                            continue;
+                        }
+                        var value = item.DataType == TagDataType.Bool ? ((bytes[item.Offset] >> item.BitOffset) & 1)
+                            : RegisterValueCodec.DecodeRegister(bytes.AsSpan(item.Offset), 0, item.DataType, ByteOrder.ABCD);
+                        if (!double.IsFinite(value))
+                        {
+                            values.Add(new RawTagValue(item.TagId, 0, TagQuality.Bad, null, $"测点 #{item.TagId} 返回非有限值"));
+                            continue;
+                        }
+                        values.Add(new RawTagValue(item.TagId, value));
                     }
-                    var value = item.DataType == TagDataType.Bool ? ((bytes[item.Offset] >> item.BitOffset) & 1)
-                        : RegisterValueCodec.DecodeRegister(bytes.AsSpan(item.Offset), 0, item.DataType, ByteOrder.ABCD);
-                    if (!double.IsFinite(value)) throw new IOException($"测点 #{item.TagId} 返回非有限值");
-                    values.Add(new RawTagValue(item.TagId, value));
+                }
+                catch (PlcException ex)
+                {
+                    LastError = $"{address}：{ex.Message}";
+                    foreach (var item in block.Tags) values.Add(new RawTagValue(item.TagId, 0, TagQuality.Bad, null, LastError));
                 }
             }
-            LastError = null;
+            LastError = values.Any(x => x.Quality != TagQuality.Good) ? values.FirstOrDefault(x => x.Error is not null)?.Error : null;
             return values;
         }
         catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested) { LastError = "S7 操作超时"; Disconnect(); throw new TimeoutException(LastError, ex); }

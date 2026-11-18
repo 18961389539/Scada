@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using OpenTelemetry;
+using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Scada.Core.Options;
@@ -266,7 +267,13 @@ internal static class ScadaResilience
                 // 不给生产依赖图引入预发布包；要更细的标签时再评估升级。
                 if (telemetry.EntityFrameworkCore)
                     tracing.AddSource("Microsoft.EntityFrameworkCore");
+                tracing.AddSource("Scada.Collector");
                 tracing.AddOtlpExporter(exporter => exporter.Endpoint = otlp);
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics.AddMeter("Scada.Collector");
+                metrics.AddOtlpExporter(exporter => exporter.Endpoint = otlp);
             });
     }
 }

@@ -492,6 +492,19 @@ async function submitWrite(): Promise<void> {
     writing.value = true
     writeError.value = ''
     try {
+      let check: ControlCheck
+      try {
+        check = await controlApi.checkText(tag.id, text)
+      } catch (error) {
+        if (!disposed) writeError.value = tr('commandUx.checkFailed', [errorMessage(error, tr('controlConfirmDialog.k831e7c'))])
+        return
+      }
+      if (check.refusals.length) { writeError.value = check.refusals.join('；'); return }
+      if (check.requireConfirm) {
+        const confirmed = await confirmDialog.value?.open(tag.id, text, tr('realtimeView.k71fb1d', [tag.name]), check) ?? false
+        if (!confirmed) return
+        if (disposed || frozen.value) return
+      }
       const requestId = createCommandId()
       const result = await commandApi.write(tag.id, 0, requestId, true, text)
       receiptId.value = result.commandId ?? null

@@ -25,7 +25,7 @@ public sealed class ExportWriteRouter(IServiceScopeFactory scopes, ILogger<Expor
             // 从站写入属于自动化指令，不弹确认框；需要双人复核的点仍会被控制层拒绝。
             var result = await commands.SubmitAsync(new ControlSubmission(
                 tagId, value, new ControlActor(null, $"external:{source}:{remote}"),
-                ControlOrigin.Operator, source, Confirmed: true), ct);
+                ControlOrigin.External, source, Confirmed: true), ct);
             // 拒绝原因必须落日志：Modbus 只能回一个异常码，104 只能回否定确认，
             // 现场排查"为什么写不进去"全靠这一行。
             if (!result.Success)

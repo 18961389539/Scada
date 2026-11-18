@@ -1,16 +1,24 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Scada.Server.Tests;
 
 // 运行布局：多显示器区域校验、工作站分配与解析、只读工作站拒绝控制、画面删除保护、工程包。
-public sealed class HmiLayoutTests : IClassFixture<ControlTests.ControlSite>
+public sealed class HmiLayoutTests : IClassFixture<HmiLayoutTests.LayoutSite>
 {
-    private readonly ControlTests.ControlSite _site;
-    public HmiLayoutTests(ControlTests.ControlSite site) => _site = site;
+    public sealed class LayoutSite : ControlTests.ControlSite
+    {
+        protected override void ConfigureSettings(IWebHostBuilder b) => b.UseSetting("Scada:ControlRequireConfirmByDefault", "false");
+    }
+
+    private readonly LayoutSite _site;
+    public HmiLayoutTests(LayoutSite site) => _site = site;
     private static string U() => Guid.NewGuid().ToString("N")[..5];
+    private static async Task GrantAsync(HttpClient client, int tag, double value = 1) =>
+        await Ok(await client.PostAsJsonAsync("/api/control/check", new { tagId = tag, value }));
     private static async Task<JsonElement> Ok(HttpResponseMessage r)
     {
         Assert.True(r.IsSuccessStatusCode, $"{r.StatusCode}: {await r.Content.ReadAsStringAsync()}");

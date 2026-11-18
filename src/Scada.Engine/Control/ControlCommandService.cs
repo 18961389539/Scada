@@ -14,14 +14,16 @@ using Scada.Data;
 
 namespace Scada.Engine.Control;
 
-public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe, Annunciator }
+public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe, Annunciator, External }
 
 public sealed record ControlActor(int? UserId, string UserName);
 
-// 一次控制提交。Confirmed：操作人已在界面确认；PreApproved：已通过双人复核（复核批准或顺控启动已复核）。
+// 一次控制提交。ConfirmationGrantTs：服务端确认凭据的签发时间，由 CheckAndGrant 产生并被一次性消费；
+// 客户端传来的 Confirmed 只是界面声明，不能单独放行。PreApproved：已通过双人复核（复核批准或顺控启动已复核）。
 // Text 非空表示字符串测点写入，此时 Value 不参与判断。
 public sealed record ControlSubmission(int TagId, double Value, ControlActor Actor, ControlOrigin Origin, string Source,
-    bool Confirmed = false, Guid? RequestId = null, bool PreApproved = false, string? ApprovedBy = null, string? Text = null);
+    bool Confirmed = false, Guid? RequestId = null, bool PreApproved = false, string? ApprovedBy = null, string? Text = null,
+    long? ConfirmationGrantTs = null);
 
 public sealed record ControlSubmissionResult(bool Success, string Message, double? ReadBack = null, GatewayCommandOutcome? Outcome = null, Guid? CommandId = null,
     bool Pending = false, Guid? ApprovalId = null, IReadOnlyList<string>? Refusals = null, string? ReadBackText = null)
@@ -50,14 +52,19 @@ public sealed class ControlCommandService
     private readonly bool _confirmByDefault;
     private readonly INodeRole _role;
     private readonly ILicenseEnforcement _license;
+    private readonly ControlConfirmationStore _confirmations;
 
-    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null, ILicenseEnforcement? license = null)
+    public ControlCommandService(IConfigSnapshot config, ICollectorControl collector, IRealtimeCache cache, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ILogger<ControlCommandService> logger, IOptions<ScadaSettings>? options = null, INodeRole? role = null, ILicenseEnforcement? license = null, ControlConfirmationStore? confirmations = null)
     {
         _role = role ?? new StandaloneNodeRole();
         _license = license ?? AllowAllLicense.Instance;
-        _confirmByDefault = options?.Value.ControlRequireConfirmByDefault ?? false;
+        _confirmations = confirmations ?? new ControlConfirmationStore();
+        _confirmByDefault = options?.Value.ControlRequireConfirmByDefault ?? true;
         _config = config; _collector = collector; _cache = cache; _contextFactory = contextFactory; _runtimeFactory = runtimeFactory; _logger = logger;
     }
+
+    public bool IsActive => _role.IsActive;
+    public string StandbyMessage => _role.StandbyMessage;
 
     // 计算脚本等自动化写入：不需要界面确认，但同样受就地/远程、挂牌、限幅、互锁约束；需双人复核的测点拒绝自动写入。
     public async Task<CommandExecutionResult> ExecuteAsync(int tagId, double value, int? userId, string userName, CancellationToken cancellationToken = default, Guid? requestId = null) =>
@@ -104,8 +111,14 @@ public sealed class ControlCommandService
         if (check is null) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         var refusals = check.Refusals.ToList();
         if (check.DualApproval) refusals.Add("点动和瞬时按钮不支持需要双人复核的测点");
-        if (check.RequireConfirm && !confirmed) refusals.Add("该测点要求操作确认，请在确认框中确认后再下发");
-        var submission = new ControlSubmission(tagId, value, actor, ControlOrigin.Screen, source, confirmed, requestId);
+        long? grantTs = null;
+        if (check.RequireConfirm && refusals.Count == 0)
+        {
+            if (!confirmed) refusals.Add("该测点要求操作确认，请先在确认框中确认后再下发");
+            else if (_confirmations.TryConsume(actor.UserId, tagId, value, null, out var issuedTs)) grantTs = issuedTs;
+            else refusals.Add("该测点要求操作确认，请先调用检查接口后再下发");
+        }
+        var submission = new ControlSubmission(tagId, value, actor, ControlOrigin.Screen, source, confirmed, requestId, ConfirmationGrantTs: grantTs);
         if (refusals.Count > 0)
         {
             var message = string.Join("；", refusals);
@@ -187,42 +200,109 @@ public sealed class ControlCommandService
             point?.LimitMin, point?.LimitMax, point?.MaxStep, point?.FeedbackExpression, mode, lockoutTexts);
     }
 
+    public async Task<ControlCheck?> CheckAndGrantAsync(int tagId, double value, ControlActor actor, CancellationToken ct)
+    {
+        var check = await CheckAsync(tagId, value, actor, ct);
+        if (check is not null && check.Refusals.Count == 0 && check.RequireConfirm) _confirmations.Grant(actor.UserId, tagId, value, null);
+        return check;
+    }
+
+    public async Task<ControlCheck?> CheckTextAsync(int tagId, string text, ControlActor actor, CancellationToken ct)
+    {
+        if (!_config.TryGetTag(tagId, out var tag)) return null;
+        await using var db = await _contextFactory.CreateDbContextAsync(ct);
+        await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
+        var point = await db.ControlPoints.AsNoTracking().SingleOrDefaultAsync(x => x.TagId == tagId, ct);
+        var refusals = new List<string>();
+        var lockoutTexts = new List<string>();
+        if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
+        var mode = DeviceControlMode.Remote;
+        if (tag.DataType != TagDataType.String) refusals.Add("测点不是字符串类型");
+        if (tag.Kind != TagKind.Physical) refusals.Add("计算测点只读，不能下发现场控制");
+        else if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled) refusals.Add("设备不存在或未启用");
+        else
+        {
+            if (!tag.Writable) refusals.Add("测点不可写");
+            mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
+            if (mode == DeviceControlMode.Local) refusals.Add($"设备 {device.Name} 处于就地控制，中心不能下发");
+            var lockouts = await runtime.ControlLockouts.AsNoTracking().Where(x => x.RemovedTs == null && (x.DeviceId == deviceId || x.TagId == tag.Id)).ToListAsync(ct);
+            foreach (var l in lockouts)
+            {
+                var label = $"{(l.Kind == ControlLockoutKind.NoOperate ? "禁止操作" : "检修中")}（{l.PlacedBy}：{l.Reason}）";
+                lockoutTexts.Add(label);
+                if (l.Kind == ControlLockoutKind.NoOperate) refusals.Add($"已挂牌{label}");
+                else if (actor.UserId is null || l.PlacedByUserId != actor.UserId) refusals.Add($"已挂牌{label}，仅挂牌人可操作");
+            }
+        }
+        if (string.IsNullOrEmpty(text)) refusals.Add("文本不能为空");
+        else
+        {
+            var bytes = System.Text.Encoding.UTF8.GetByteCount(text);
+            if (bytes > tag.TextLength) refusals.Add($"文本为 {bytes} 字节，超过测点长度 {tag.TextLength} 字节");
+        }
+        if (point is not null && !string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression) is var (ok, why) && !ok)
+            refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
+        return new ControlCheck(tag.Id, tag.Name, null, refusals, point?.RequireConfirm ?? _confirmByDefault, false,
+            null, null, null, point?.FeedbackExpression, mode, lockoutTexts);
+    }
+
+    public async Task<ControlCheck?> CheckTextAndGrantAsync(int tagId, string text, ControlActor actor, CancellationToken ct)
+    {
+        var check = await CheckTextAsync(tagId, text, actor, ct);
+        if (check is not null && check.Refusals.Count == 0 && check.RequireConfirm) _confirmations.Grant(actor.UserId, tagId, 0, text);
+        return check;
+    }
+
     private ControlSubmissionResult? OutputBlocked() =>
         _license.OutputsAllowed ? null : new(false, _license.BlockMessage, Outcome: GatewayCommandOutcome.NotSent);
 
-    // 字符串测点写入：不走数值限幅/变化率/联锁表达式，但仍检查就地/远程、挂牌、确认与可写，并写审计。
+    // 字符串测点写入：与数值路径共用就地/远程、挂牌、许可与确认凭据；仍不做数值限幅与变化率。
     public async Task<ControlSubmissionResult> SubmitTextAsync(ControlSubmission s, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(s.Text)) return new(false, "文本不能为空", Outcome: GatewayCommandOutcome.NotSent);
         if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(s.TagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
-        if (tag.DataType != TagDataType.String) return new(false, "测点不是字符串类型", Outcome: GatewayCommandOutcome.NotSent);
-        if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发现场控制", Outcome: GatewayCommandOutcome.NotSent);
-        if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
-            return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
-        if (!tag.Writable) return new(false, "测点不可写", Outcome: GatewayCommandOutcome.NotSent);
-        var bytes = System.Text.Encoding.UTF8.GetByteCount(s.Text);
-        if (bytes > tag.TextLength) return new(false, $"文本为 {bytes} 字节，超过测点长度 {tag.TextLength} 字节", Outcome: GatewayCommandOutcome.NotSent);
-        if (!_role.IsActive) return new(false, _role.StandbyMessage, Outcome: GatewayCommandOutcome.NotSent);
-
-        await using var db = await _contextFactory.CreateDbContextAsync(ct);
-        await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
-        var point = await db.ControlPoints.AsNoTracking().SingleOrDefaultAsync(x => x.TagId == tag.Id, ct);
-        var mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
-        if (mode == DeviceControlMode.Local) return new(false, $"设备 {device.Name} 处于就地控制，中心不能下发", Outcome: GatewayCommandOutcome.NotSent);
-        var lockouts = await runtime.ControlLockouts.AsNoTracking().Where(x => x.RemovedTs == null && (x.DeviceId == deviceId || x.TagId == tag.Id)).ToListAsync(ct);
-        foreach (var l in lockouts)
-        {
-            if (l.Kind == ControlLockoutKind.NoOperate) return new(false, "测点或设备已挂禁止操作牌", Outcome: GatewayCommandOutcome.NotSent);
-            if (l.PlacedByUserId != s.Actor.UserId) return new(false, $"已挂牌检修中（{l.PlacedBy}：{l.Reason}），仅挂牌人可操作", Outcome: GatewayCommandOutcome.NotSent);
-        }
+        var check = await CheckTextAsync(s.TagId, s.Text ?? "", s.Actor, ct);
+        if (check is null) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         var interactive = s.Origin is ControlOrigin.Operator or ControlOrigin.Screen;
-        if (point?.DualApproval == true) return new(false, "字符串测点暂不支持双人复核", Outcome: GatewayCommandOutcome.NotSent);
-        if ((point?.RequireConfirm ?? _confirmByDefault) && interactive && !s.Confirmed)
-            return new(false, "该测点要求操作确认，请在确认框中确认后再下发", Outcome: GatewayCommandOutcome.NotSent);
+        var refusals = check.Refusals.ToList();
+        long? grantTs = null;
+        if (refusals.Count == 0 && check.RequireConfirm && interactive && !s.PreApproved)
+        {
+            if (!s.Confirmed) refusals.Add("该测点要求操作确认，请先在确认框中确认后再下发");
+            else if (_confirmations.TryConsume(s.Actor.UserId, tag.Id, 0, s.Text, out var issuedTs)) grantTs = issuedTs;
+            else refusals.Add("该测点要求操作确认，请先调用检查接口后再下发");
+        }
+        s = s with { ConfirmationGrantTs = grantTs };
+        if (refusals.Count > 0)
+        {
+            var message = string.Join("；", refusals);
+            await AuditAsync(tag, s, "控制被拒绝", "拒绝：" + message, null, ct);
+            return new(false, message, Outcome: GatewayCommandOutcome.NotSent, Refusals: refusals);
+        }
+        var deviceId = tag.DeviceId!.Value;
+        if (!_config.TryGetDevice(deviceId, out var device)) return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
 
         var oldText = _cache.Get(tag.Id)?.Text;
-        var result = ControlSubmissionResult.From(await _collector.WriteTextIdentifiedAsync(deviceId, tag, s.Text, new(s.RequestId, s.Actor.UserId, s.Actor.UserName), ct));
+        var result = ControlSubmissionResult.From(await _collector.WriteTextIdentifiedAsync(device.Id, tag, s.Text!, new(s.RequestId, s.Actor.UserId, s.Actor.UserName), ct));
+        if (result.Success && !string.IsNullOrWhiteSpace(check.Feedback))
+        {
+            try
+            {
+                var timeoutMs = await FeedbackTimeoutAsync(tag.Id, ct);
+                var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(timeoutMs), ct);
+                if (!ok) result = result with { Success = false, Outcome = GatewayCommandOutcome.Unknown, Message = $"写入及回读成功，但独立反馈超时未到位：{why}" };
+                else result = result with { Message = result.Message + "，反馈到位" };
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                result = result with
+                {
+                    Success = false,
+                    Outcome = GatewayCommandOutcome.Unknown,
+                    Message = "写入及回读成功，但请求已取消，独立反馈未确认；请检查现场反馈，勿自动重发"
+                };
+            }
+        }
         var display = (result.ReadBackText ?? "").Length > 64 ? (result.ReadBackText ?? "")[..64] + "…" : result.ReadBackText;
         var resultText = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
             : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
@@ -240,7 +320,14 @@ public sealed class ControlCommandService
         var check = (await CheckAsync(s.TagId, s.Value, s.Actor, ct))!;
         var refusals = check.Refusals.ToList();
         var interactive = s.Origin is ControlOrigin.Operator or ControlOrigin.Screen;
-        if (refusals.Count == 0 && check.RequireConfirm && interactive && !s.Confirmed) refusals.Add("该测点要求操作确认，请在确认框中确认后再下发");
+        long? grantTs = null;
+        if (refusals.Count == 0 && check.RequireConfirm && interactive && !s.PreApproved)
+        {
+            if (!s.Confirmed) refusals.Add("该测点要求操作确认，请先在确认框中确认后再下发");
+            else if (_confirmations.TryConsume(s.Actor.UserId, s.TagId, s.Value, null, out var issuedTs)) grantTs = issuedTs;
+            else refusals.Add("该测点要求操作确认，请先调用检查接口后再下发");
+        }
+        s = s with { ConfirmationGrantTs = grantTs };
         if (refusals.Count == 0 && check.DualApproval && !s.PreApproved && !interactive) refusals.Add("该测点要求双人复核，不能由自动化或未复核的顺控直接写入");
         if (refusals.Count > 0)
         {
@@ -374,7 +461,7 @@ public sealed class ControlCommandService
         OldValue = oldText is null ? oldValue?.ToString("0.###", CultureInfo.InvariantCulture) : Clip(oldText),
         NewValue = newText is null ? s.Value.ToString("0.###", CultureInfo.InvariantCulture) : Clip(newText),
         Result = result.Length > 1000 ? result[..1000] : result, TargetType = "Control", TargetId = tag.Id.ToString(CultureInfo.InvariantCulture),
-        Details = JsonSerializer.Serialize(new { origin = s.Origin.ToString(), source = s.Source, confirmed = s.Confirmed, approvedBy = s.ApprovedBy, commandId = s.RequestId }, AuditJson)
+        Details = JsonSerializer.Serialize(new { origin = s.Origin.ToString(), source = s.Source, confirmed = s.Confirmed, confirmGrantTs = s.ConfirmationGrantTs, approvedBy = s.ApprovedBy, commandId = s.RequestId }, AuditJson)
     };
 
     private async Task AuditAsync(Tag tag, ControlSubmission s, string action, string result, double? oldValue, CancellationToken ct)

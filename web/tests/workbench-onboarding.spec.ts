@@ -270,7 +270,7 @@ test('workbench onboarding: runtime load errors remain explicit and English entr
   await expect(page.locator('.console-title')).toHaveText('Runtime workbench')
   await page.locator('[data-test="console-empty-configure"]').click()
   await expect(page.locator('[data-test="nav-item-layouts"]')).toContainText('Workbench setup')
-  await expect(page.locator('[data-test="nav-item-console"]')).toContainText('Runtime workbench')
+  await expect(page.locator('[data-test="nav-item-console"]')).toContainText('Control room layout')
 })
 
 for (const locale of ['zh-CN', 'en-US']) {

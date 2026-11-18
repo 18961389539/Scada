@@ -189,6 +189,8 @@ public sealed class ScadaSettings
     public int NotificationRetryMaxSec { get; set; } = 1800;
     public int PushIntervalMs { get; set; } = 500;
     public int CommandTimeoutMs { get; set; } = 5000;
+    // 测点 Excel 导入的每张工作表最大数据行数，防止超大文件长时间占用内存与配置库写锁。
+    public int TagImportMaxRows { get; set; } = 50000;
     // 停止一台设备时等待在途采集 I/O 退出的时长。超时后任务进入"已放弃"名单，
     // 仍不退出则由 CollectorStuckIoGraceSeconds 强制关链路兜底。
     public int CollectorWorkerStopGraceMs { get; set; } = 5000;
@@ -200,8 +202,8 @@ public sealed class ScadaSettings
     // 采集线程池最小线程数下限（0 不调整）。阻塞式驱动事务按线程计价，
     // 设备数量大时抬高该值可避免线程注入延迟造成的采集抖动。
     public int CollectorMinWorkerThreads { get; set; }
-    // 未配置控制策略的测点是否也要求操作确认（接口须带 confirmed=true）。默认 false 兼容旧客户端；现场建议开启。
-    public bool ControlRequireConfirmByDefault { get; set; }
+    // 未配置控制策略的测点是否也要求操作确认。默认要求；“确认”由服务端一次性凭据证明，不再信任客户端布尔。
+    public bool ControlRequireConfirmByDefault { get; set; } = true;
     public int ConfigRefreshSeconds { get; set; } = 10;
     // 采集侧出站目标策略：默认只允许环回与内网地址，避免把公网 IP 误配成设备后对外发起连接。
     // 白名单支持精确 IP、CIDR（如 10.20.0.0/16）与 *.域 后缀；配置白名单后主机名也必须命中。

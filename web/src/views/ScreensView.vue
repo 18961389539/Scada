@@ -6,7 +6,10 @@
         <el-icon class="info-icon"><InfoFilled /></el-icon>
       </el-tooltip>
       <span class="spacer" />
+      <router-link v-if="canViewWorkspace" to="/workspace" class="screens-path-link" data-test="screens-open-workspace">{{ $t('screensView.openWorkspace') }}</router-link>
+      <router-link to="/console" class="screens-path-link" data-test="screens-open-console">{{ $t('screensView.openConsole') }}</router-link>
       <el-button v-if="admin" type="primary" :icon="Plus" data-test="screen-create" @click="create">{{ $t('screensView.newScreen') }}</el-button><el-button :icon="Refresh" :loading="loading" @click="load">{{ $t('screensView.refresh') }}</el-button></div>
+    <p class="tiny muted screens-path-hint" data-test="screens-path-hint">{{ $t('screensView.pathHint') }}</p>
     <div class="screen-filters">
       <el-input v-model="search" clearable :prefix-icon="Search" :placeholder="$t('screensView.searchPlaceholder')" :aria-label="$t('screensView.searchPlaceholder')" class="screen-search" data-test="screens-search" />
       <el-select v-if="admin" v-model="status" :aria-label="$t('screensView.statusLabel')" class="screen-select" data-test="screens-status">
@@ -53,13 +56,14 @@
         </div>
         <div class="card-actions">
           <el-button v-if="admin || screen.publishedRevision" :icon="View" :aria-label="$t('screensView.preview')" :data-test="`screen-preview-${screen.id}`" @click="preview(screen)">{{ $t('screensView.preview') }}</el-button>
-          <el-button v-if="screen.publishedRevision" type="primary" :icon="VideoPlay" :aria-label="$t('screenMonitor.runVersion', [screen.publishedRevision])" :data-test="`screen-run-${screen.id}`" @click="router.push({ path: `/screens/${screen.id}`, query: route.query })">{{ $t('screensView.run') }}</el-button>
-          <WorkbenchTooltip v-if="screen.publishedRevision" :content="$t('workspace.openInWorkspace')"><el-button :icon="Collection" :aria-label="$t('workspace.openInWorkspace')" :data-test="`screen-workspace-${screen.id}`" @click="openInWorkspace(screen)" /></WorkbenchTooltip>
+          <el-button v-if="screen.publishedRevision" :type="screenCardPrimaryAction(screen, canEdit(screen)) === 'run' ? 'primary' : undefined" :icon="VideoPlay" :aria-label="$t('screenMonitor.runVersion', [screen.publishedRevision])" :data-test="`screen-run-${screen.id}`" @click="router.push({ path: `/screens/${screen.id}`, query: route.query })">{{ $t('screensView.run') }}</el-button>
+          <el-button v-if="canEdit(screen) && screenCardPrimaryAction(screen, true) === 'edit'" type="primary" :icon="Edit" :data-test="`screen-edit-${screen.id}`" @click="router.push(`/config/screens/${screen.id}`)">{{ $t('screensView.edit') }}</el-button>
+          <WorkbenchTooltip v-if="screen.publishedRevision" :content="$t('workspace.openInWorkspace')"><el-button :icon="Collection" :aria-label="$t('screensView.openWorkspace')" :data-test="`screen-workspace-${screen.id}`" @click="openInWorkspace(screen)">{{ $t('screensView.openWorkspace') }}</el-button></WorkbenchTooltip>
           <WorkbenchTooltip v-if="admin && screen.publishedRevision" :content="$t('workbenchTips.quickCreate')"><el-button :data-test="`screen-create-workbench-${screen.id}`" @click="quickCreate?.open(screen.id)">{{ $t('workbench.createFromScreen') }}</el-button></WorkbenchTooltip>
           <el-dropdown v-if="canEdit(screen)" trigger="click" @command="screenAction($event, screen)">
             <el-button :icon="MoreFilled" :title="$t('screenMonitor.more')" :aria-label="$t('screenMonitor.moreFor', [screen.name])" :data-test="`screen-more-${screen.id}`" circle />
             <template #dropdown><el-dropdown-menu>
-              <el-dropdown-item command="edit" :icon="Edit">{{ $t('screensView.edit') }}</el-dropdown-item>
+              <el-dropdown-item v-if="screenCardPrimaryAction(screen, canEdit(screen)) !== 'edit'" command="edit" :icon="Edit">{{ $t('screensView.edit') }}</el-dropdown-item>
               <el-dropdown-item command="duplicate" :icon="CopyDocument">{{ $t('screensView.duplicate') }}</el-dropdown-item>
               <el-dropdown-item command="delete" :icon="Delete" divided>{{ $t('screensView.delete') }}</el-dropdown-item>
             </el-dropdown-menu></template>
@@ -109,6 +113,7 @@ import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
 import { can, canGlobal } from '../access/policies'
+import { screenCardPrimaryAction } from '../screens/screenCardActions'
 import type { ScreenDocument, ScreenSummary } from '../screens/model'
 import { readCatalogMemory, toggleScreenFavorite } from '../screens/screenMemory'
 import { tr } from '../i18n'
@@ -117,6 +122,7 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 const auth = useAuthStore(), route = useRoute(), router = useRouter()
 const admin = computed(() => can(auth.user, 'Configure'))
 const isGlobal = computed(() => canGlobal(auth.user, 'Configure'))
+const canViewWorkspace = computed(() => can(auth.user, 'View'))
 const configurableAreas = ref<{ id: number; name: string }[]>([])
 const createVisible = ref(false), createName = ref(''), createAreaId = ref<number | null>(null)
 function canEdit(screen: ScreenSummary): boolean {
@@ -364,6 +370,8 @@ onBeforeUnmount(() => thumbObserver?.disconnect())
 .card-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .screen-card h3, .screen-card p { overflow-wrap: anywhere; }
 .toolbar h3 { margin: 0; }
+.screens-path-link { font-size: 13px; margin-right: 8px; }
+.screens-path-hint { margin: 0 0 12px; }
 .info-icon { color: var(--scada-text-muted); cursor: help; }
 @media (max-width: 760px) {
   .screen-search { width: 100%; }

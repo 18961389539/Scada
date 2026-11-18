@@ -41,7 +41,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
             {
                 await CompleteApplyAsync();
                 if (_commandTask?.IsCompleted == true) { var completed = _commandTask; _commandTask = null; await completed; }
-                if (commands.TakeIdentityRejection()) { await BlockAsync("命令通道拒绝网关身份或会话，采集已停止"); _retryDue = Tick + options.RetryDelayMs; }
+                if (commands.TakeIdentityRejection()) { await BlockAsync("命令通道拒绝网关身份或会话，采集已停止"); _retryDue = Tick + Backoff.Jitter(options.RetryDelayMs); }
                 if (_session is not null && Tick >= _leaseDeadline) ResetSession();
                 if (Tick >= _retryDue)
                 {
@@ -50,7 +50,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
                         || ex.StatusCode == HttpStatusCode.Conflict)
                     {
                         await BlockAsync("中心拒绝网关身份或会话，采集已停止");
-                        _retryDue = Tick + options.RetryDelayMs;
+                        _retryDue = Tick + Backoff.Jitter(options.RetryDelayMs);
                     }
                     catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException or JsonException)
                     {
@@ -64,7 +64,7 @@ public sealed class GatewayAgentService(GatewayAgentOptions options, GatewayAgen
                             ResetSession();
                             logger.LogWarning("中心 {Server} 不可用或为备机，切换到 {Next}", options.CurrentServer, options.Rotate());
                         }
-                        _retryDue = Tick + options.RetryDelayMs;
+                        _retryDue = Tick + Backoff.Jitter(options.RetryDelayMs);
                     }
                 }
                 // Offline restart is allowed only after a previously acknowledged installation, with the same key.

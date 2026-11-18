@@ -244,7 +244,7 @@ public sealed class ExternalTcpHost(
         await using var scope = scopes.CreateAsyncScope();
         var commands = scope.ServiceProvider.GetRequiredService<ControlCommandService>();
         var result = await commands.SubmitAsync(new ControlSubmission(tagId, value,
-            new ControlActor(null, "apikey:" + session.Key!.Name), ControlOrigin.Operator, "外部 TCP",
+            new ControlActor(null, "apikey:" + session.Key!.Name), ControlOrigin.External, "外部 TCP",
             msg.Confirmed ?? true, requestId), ct);
         await SendAsync(session, new TcpMessage
         {

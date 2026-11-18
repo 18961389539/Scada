@@ -85,16 +85,15 @@ if (!skipInstanceLock && instanceLock is null)
 builder.Host.UseWindowsService();
 builder.Host.UseSystemd();
 // 日志轮转：按天滚动，单文件超过上限也滚动；保留最近 N 个文件（含按大小拆出的文件）。目录可改到数据盘。
-builder.Host.UseSerilog((_, _, configuration) =>
+builder.Host.UseSerilog((context, _, configuration) =>
 {
     // 路径按进程工作目录解析：相对路径交给 Path.GetFullPath，避免落进可能只读的程序目录。
     var logRoot = string.IsNullOrWhiteSpace(scadaOptions.LogRoot)
         ? Path.Combine(AppContext.BaseDirectory, "logs")
         : Path.GetFullPath(scadaOptions.LogRoot);
     configuration
-        .MinimumLevel.Information()
-        .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
-        .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Warning)
+        // 级别与覆盖项来自 appsettings 的 Serilog 节；代码只保留兜底默认。
+        .ReadFrom.Configuration(context.Configuration)
         .Enrich.FromLogContext()
         // TraceId/SpanId 与 OTel 的 trace 对应：慢请求可以在日志里按 TraceId 反查全部业务日志。
         .Enrich.With<Scada.Server.Logging.ActivityLogEnricher>()

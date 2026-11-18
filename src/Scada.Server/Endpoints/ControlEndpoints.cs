@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
@@ -13,6 +14,7 @@ using Scada.Server.Services;
 namespace Scada.Server.Endpoints;
 
 public sealed record ControlCheckRequest(int TagId, double Value);
+public sealed record ControlTextCheckRequest(int TagId, string? Text);
 public sealed record ControlPointRequest(bool RequireConfirm, bool DualApproval, int ApprovalTimeoutSec, string? PermitExpression, string? PermitMessage,
     double? LimitMin, double? LimitMax, double? MaxStep, string? FeedbackExpression, int FeedbackTimeoutMs);
 public sealed record DeviceModeRequest(DeviceControlMode Mode, string? Reason);
@@ -20,7 +22,7 @@ public sealed record LockoutRequest(int? DeviceId, int? TagId, ControlLockoutKin
 public sealed record ReasonRequest(string? Reason);
 public sealed record DecisionRequest(string? Comment);
 public sealed record SequenceRequest(string Name, int AreaId, string? Description, bool DualApproval, List<ControlSequenceStep> Steps, long Revision = 0);
-public sealed record SequenceStartRequest(bool Confirmed);
+public sealed record SequenceStartRequest(bool Confirmed, string? Challenge = null);
 
 // 现场操作控制：控制点策略、就地/远程、挂牌、双人复核、顺控。除 /sequences/validate（只校验不保存）外按区域授权并写审计。
 public static class ControlEndpoints
@@ -32,7 +34,13 @@ public static class ControlEndpoints
         group.MapPost("/check", async (ControlCheckRequest request, HttpContext http, ControlCommandService commands, CancellationToken ct) =>
         {
             if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId)) return Results.Forbid();
-            var check = await commands.CheckAsync(request.TagId, request.Value, Actor(http), ct);
+            var check = await commands.CheckAndGrantAsync(request.TagId, request.Value, Actor(http), ct);
+            return check is null ? Results.NotFound() : Results.Ok(check);
+        }).RequireAuthorization(AccessPolicies.Control);
+        group.MapPost("/check-text", async (ControlTextCheckRequest request, HttpContext http, ControlCommandService commands, CancellationToken ct) =>
+        {
+            if (!(await http.GetAccessAsync()).CanTag(Permission.Control, request.TagId)) return Results.Forbid();
+            var check = await commands.CheckTextAndGrantAsync(request.TagId, request.Text ?? "", Actor(http), ct);
             return check is null ? Results.NotFound() : Results.Ok(check);
         }).RequireAuthorization(AccessPolicies.Control);
 
@@ -52,9 +60,10 @@ public static class ControlEndpoints
             var tag = await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tagId, ct);
             if (tag is null) return Results.NotFound();
             if (tag.Kind != TagKind.Physical || !tag.Writable) return EndpointHelpers.BadRequest("只有可写的采集测点可以配置控制策略");
-            if (tag.DataType == TagDataType.String && (request.LimitMin is not null || request.LimitMax is not null || request.MaxStep is not null
-                || !string.IsNullOrWhiteSpace(request.PermitExpression) || !string.IsNullOrWhiteSpace(request.FeedbackExpression)))
-                return EndpointHelpers.BadRequest("字符串测点不支持限幅、变化率或许可/反馈条件");
+            if (tag.DataType == TagDataType.String && (request.LimitMin is not null || request.LimitMax is not null || request.MaxStep is not null))
+                return EndpointHelpers.BadRequest("字符串测点不支持数值限幅与变化率");
+            if (tag.DataType == TagDataType.String && request.DualApproval)
+                return EndpointHelpers.BadRequest("字符串测点暂不支持双人复核");
             if (request.LimitMin is double a && request.LimitMax is double b && a > b) return EndpointHelpers.BadRequest("限幅下限不能大于上限");
             if (request.MaxStep is double step && (!double.IsFinite(step) || step <= 0)) return EndpointHelpers.BadRequest("单次变化限制须为正数");
             if (request.ApprovalTimeoutSec is < 30 or > 3600) return EndpointHelpers.BadRequest("复核有效期须为 30～3600 秒");
@@ -290,13 +299,24 @@ public static class ControlEndpoints
             await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
-        group.MapPost("/sequences/{id:int}/start", async (int id, SequenceStartRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlWorkflowService workflow, CancellationToken ct) =>
+        group.MapPost("/sequences/{id:int}/check-start", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, BatchConfirmationStore confirmations, CancellationToken ct) =>
+        {
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (sequence is null) return Results.NotFound();
+            if (await CanRunAsync(http, sequence) is string denied) return await Audit.ForbidAsync(http, $"检查顺控 {sequence.Name}", denied, "ControlSequence", id);
+            var grant = confirmations.Grant(Actor(http).UserId, "sequence", id, SequenceFingerprint(sequence));
+            return Results.Ok(new { challenge = grant.Challenge, expiresTs = grant.ExpiresTs, revision = sequence.Revision });
+        }).RequireAuthorization(AccessPolicies.Control);
+        group.MapPost("/sequences/{id:int}/start", async (int id, SequenceStartRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlWorkflowService workflow, BatchConfirmationStore confirmations, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (sequence is null) return Results.NotFound();
             if (await CanRunAsync(http, sequence) is string denied) return await Audit.ForbidAsync(http, $"执行顺控 {sequence.Name}", denied, "ControlSequence", id);
             if (!request.Confirmed) return EndpointHelpers.BadRequest("执行顺控前须确认");
+            if (!confirmations.TryConsume(Actor(http).UserId, "sequence", id, SequenceFingerprint(sequence), request.Challenge))
+                return EndpointHelpers.BadRequest("执行顺控前须先调用检查接口并在确认框中确认");
             try
             {
                 if (sequence.DualApproval)
@@ -343,6 +363,11 @@ public static class ControlEndpoints
     }
 
     public static ControlActor Actor(HttpContext http) => new(http.User.GetUserId(), http.User.GetUserName());
+
+    private static string SequenceFingerprint(ControlSequence sequence) => BatchConfirmationStore.Fingerprint(
+        sequence.Id.ToString(CultureInfo.InvariantCulture), sequence.Revision.ToString(CultureInfo.InvariantCulture),
+        sequence.AreaId.ToString(CultureInfo.InvariantCulture), sequence.DualApproval ? "1" : "0",
+        sequence.Name, sequence.Description, sequence.StepsJson);
 
     private static async Task<string?> CanRunAsync(HttpContext http, ControlSequence sequence)
     {

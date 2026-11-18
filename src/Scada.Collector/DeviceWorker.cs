@@ -169,7 +169,7 @@ internal sealed class DeviceWorker
                 catch (Exception) { /* 驱动已损坏时断开也会抛，重启路径必须继续 */ }
                 try { await Task.Delay(backoffMs, cancellationToken); }
                 catch (OperationCanceledException) { break; }
-                backoffMs = Math.Min(backoffMs * 2, 60_000);
+                backoffMs = Backoff.Next(backoffMs, 1000, 60_000);
             }
         }
         _diagnostics.Stopped();
@@ -298,7 +298,7 @@ internal sealed class DeviceWorker
                 {
                     _lastError = ex.Message;
                     _commFailures++;
-                    backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
+                    backoffMs = Backoff.Next(backoffMs, 1000, 30000);
                     ResetLanes();
                     _diagnostics.ConnectionFailed(ex.Message, CollectorErrorClassifier.Classify(ex), backoffMs);
                     await MarkOfflineAsync(ex.Message, cancellationToken);
@@ -407,7 +407,7 @@ internal sealed class DeviceWorker
             {
                 _lastError = ex.Message;
                 _commFailures++;
-                backoffMs = backoffMs == 0 ? 1000 : Math.Min(backoffMs * 2, 30000);
+                backoffMs = Backoff.Next(backoffMs, 1000, 30000);
                 ResetLanes();
                 var kind = CollectorErrorClassifier.Classify(ex);
                 _diagnostics.PollFailed(Stopwatch.GetElapsedTime(readStart).TotalMilliseconds, ex.Message, kind, Math.Max(lane.IntervalMs, backoffMs));

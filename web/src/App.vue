@@ -11,13 +11,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import en from 'element-plus/es/locale/lang/en'
 import { currentLocale } from './i18n'
 import { ensureProtocolCatalog, protocolCatalogError, protocolCatalogLoading } from './protocols'
+import { useAuthStore } from './stores/auth'
+import { shouldRunAlarmSession, useAlarmSession } from './composables/useAlarmSession'
 const route = useRoute()
+const auth = useAuthStore()
+const alarmSession = useAlarmSession()
+watch(
+  () => shouldRunAlarmSession({ token: auth.token, mustChangePassword: auth.mustChangePassword, isPublic: !!route.meta.public, suppressAlarmSession: !!route.meta.suppressAlarmSession }),
+  (on) => { on ? alarmSession.start() : alarmSession.stop() },
+  { immediate: true }
+)
 const showProtocolError = computed(() => protocolCatalogError.value && !route.meta.public && route.name !== 'change-password')
 async function retryProtocols(): Promise<void> {
   try { await ensureProtocolCatalog() } catch { /* Keep the recovery screen; never expose an incomplete form. */ }

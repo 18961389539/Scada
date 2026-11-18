@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -25,18 +26,46 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         public void RequestReload() { }
         // 测试用：写入这些测点时模拟设备拒绝（未写入）。
         public readonly HashSet<int> Fail = [];
+        private readonly Dictionary<int, Queue<GatewayCommandOutcome>> _scripted = [];
+        public void Script(int tagId, params GatewayCommandOutcome[] outcomes)
+        {
+            lock (Writes) _scripted[tagId] = new Queue<GatewayCommandOutcome>(outcomes);
+        }
         public Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default)
         {
-            lock (Writes) { if (Fail.Contains(tag.Id)) return Task.FromResult(new CommandExecutionResult(false, "模拟设备拒绝写入", null)); }
+            lock (Writes)
+            {
+                if (_scripted.TryGetValue(tag.Id, out var scripted) && scripted.Count > 0)
+                {
+                    var outcome = scripted.Dequeue();
+                    if (scripted.Count == 0) _scripted.Remove(tag.Id);
+                    if (outcome == GatewayCommandOutcome.Confirmed)
+                    {
+                        Writes.Add((tag.Id, value));
+                        cache.Set(new TagValue(tag.Id, value, TagQuality.Good, ScadaTime.NowMs()));
+                        return Task.FromResult(new CommandExecutionResult(true, "写入成功", value, outcome));
+                    }
+                    var message = outcome switch
+                    {
+                        GatewayCommandOutcome.NotSent => "模拟未下发",
+                        GatewayCommandOutcome.Unknown => "模拟结果未知",
+                        _ => "模拟写入失败"
+                    };
+                    return Task.FromResult(new CommandExecutionResult(false, message, null, outcome));
+                }
+                if (Fail.Contains(tag.Id)) return Task.FromResult(new CommandExecutionResult(false, "模拟设备拒绝写入", null, GatewayCommandOutcome.Failed));
+            }
             lock (Writes) Writes.Add((tag.Id, value));
             cache.Set(new TagValue(tag.Id, value, TagQuality.Good, ScadaTime.NowMs()));
-            return Task.FromResult(new CommandExecutionResult(true, "写入成功", value));
+            return Task.FromResult(new CommandExecutionResult(true, "写入成功", value, GatewayCommandOutcome.Confirmed));
         }
         public int Count(int tagId) { lock (Writes) return Writes.Count(x => x.TagId == tagId); }
     }
 
     public class ControlSite : AuthorizationTests.Site
     {
+        protected override void ConfigureSettings(IWebHostBuilder b) => b.UseSetting("Scada:ControlRequireConfirmByDefault", "false");
+
         protected override void ConfigureServices(IServiceCollection services)
         {
             services.RemoveAll<ICollectorControl>();
@@ -72,8 +101,11 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
     private static object Point(bool confirm = false, bool dual = false, string? permit = null, string? permitMessage = null, double? min = null, double? max = null, double? step = null,
         string? feedback = null, int feedbackMs = 10000) =>
         new { requireConfirm = confirm, dualApproval = dual, approvalTimeoutSec = 300, permitExpression = permit, permitMessage, limitMin = min, limitMax = max, maxStep = step, feedbackExpression = feedback, feedbackTimeoutMs = feedbackMs };
-    private static async Task<JsonElement> WriteAsync(HttpClient c, int tag, double value, bool confirmed = true) =>
-        await Ok(await c.PostAsJsonAsync("/api/commands", new { tagId = tag, value, requestId = Guid.NewGuid(), confirmed }));
+    private static async Task<JsonElement> WriteAsync(HttpClient c, int tag, double value, bool confirmed = true)
+    {
+        if (confirmed) await Ok(await c.PostAsJsonAsync("/api/control/check", new { tagId = tag, value }));
+        return await Ok(await c.PostAsJsonAsync("/api/commands", new { tagId = tag, value, requestId = Guid.NewGuid(), confirmed }));
+    }
 
     [Fact]
     public async Task ConfirmLimitsRateAndPermitAreEnforcedAndAudited()
@@ -235,7 +267,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         }));
         var id = sequence.GetProperty("id").GetInt32();
         Assert.Equal(HttpStatusCode.BadRequest, (await op.PostAsJsonAsync($"/api/control/sequences/{id}/start", new { confirmed = false })).StatusCode);
-        var started = await Ok(await op.PostAsJsonAsync($"/api/control/sequences/{id}/start", new { confirmed = true }));
+        var started = await Ok(await op.StartSequenceAsync(id));
         var runId = started.GetProperty("runId").GetInt32();
         await _site.Services.GetRequiredService<ControlWorkflowService>().WaitAsync(runId);
         var run = await Ok(await op.GetAsync($"/api/control/runs/{runId}"));
@@ -252,7 +284,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         await Ok(await admin.PutAsJsonAsync($"/api/control/sequences/{id}", new { name, areaId = _site.AreaA, dualApproval = true, revision,
             steps = new[] { Step("启泵", pump, 1, $"#{position} >= 90"), Step("末步", last, 1) } }));
         await Ok(await admin.PutAsJsonAsync($"/api/control/points/{last}", Point(dual: true))); // 步骤测点需复核：只有已复核的顺控可写
-        var pending = await Ok(await op.PostAsJsonAsync($"/api/control/sequences/{id}/start", new { confirmed = true }));
+        var pending = await Ok(await op.StartSequenceAsync(id));
         Assert.True(pending.GetProperty("pending").GetBoolean());
         var approval = await Ok(await (await _site.ClientAsync("watchA")).PostAsJsonAsync($"/api/control/requests/{pending.GetProperty("approvalId").GetGuid()}/approve", new { comment = "同意" }));
         var second = approval.GetProperty("runId").GetInt32();
@@ -279,6 +311,7 @@ public sealed class ControlTests : IClassFixture<ControlTests.ControlSite>
         async Task<JsonElement> Act(string node, bool confirmed) => await Ok(await op.PostAsJsonAsync($"/api/screens/{screen}/actions/{node}", new { publishedRevision = rev, requestId = Guid.NewGuid(), confirmed }));
         Assert.Contains("确认", (await Act("open", false)).GetProperty("message").GetString());
         Assert.Contains("超出操作限幅", (await Act("over", true)).GetProperty("message").GetString());
+        await Ok(await op.PostAsJsonAsync("/api/control/check", new { tagId = tag, value = 30 }));
         Assert.True((await Act("open", true)).GetProperty("success").GetBoolean());
         var log = await _site.LastLogAsync(x => x.TagId == tag && x.Action.StartsWith("控制写入"));
         Assert.Contains("Screen", log!.Details); Assert.Contains("控制画面", log.Details);

@@ -52,6 +52,7 @@ public class RuntimeDbContext : DbContext
     public DbSet<ControlRequest> ControlRequests => Set<ControlRequest>();
     public DbSet<ControlLockout> ControlLockouts => Set<ControlLockout>();
     public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();
+    public DbSet<MomentaryLease> MomentaryLeases => Set<MomentaryLease>();
     public DbSet<AnnunciatorSilence> AnnunciatorSilences => Set<AnnunciatorSilence>();
     public DbSet<GatewayDataStream> GatewayStreams => Set<GatewayDataStream>();
     public DbSet<GatewayArchiveCursor> GatewayArchiveCursors => Set<GatewayArchiveCursor>();

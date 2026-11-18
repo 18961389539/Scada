@@ -268,6 +268,7 @@ public sealed class AuthorizationTests : IClassFixture<AuthorizationTests.Site>
         public virtual async Task InitializeAsync()
         {
             Directory.CreateDirectory(_root);
+            await TestDatabaseTemplate.CopyToAsync(_root);
             _factory = CreateFactory();
             _ = _factory.Server;
             var admin = await ClientAsync("admin", "admin123");
