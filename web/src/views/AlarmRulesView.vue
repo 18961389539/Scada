@@ -43,12 +43,11 @@
 
       <el-table ref="tableRef" v-loading="loading" :data="rules" size="small" height="100%" row-key="id" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
-          <span v-if="loadError">{{ loadError }}</span>
-          <template v-else-if="hasFilters">
-            <span>{{ $t('listFilters.noMatches') }}</span>
+          <PageState v-if="loadError" state="error" :description="loadError" :retry-text="$t('common.retry')" compact @retry="load()" />
+          <PageState v-else-if="hasFilters" state="empty" :description="$t('listFilters.noMatches')" compact>
             <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-          </template>
-          <span v-else>{{ $t('alarmRulesView.ka0230f') }}</span>
+          </PageState>
+          <PageState v-else state="empty" :description="$t('alarmRulesView.ka0230f')" compact />
         </template>
         <el-table-column type="selection" width="42" :selectable="canSelectRule" />
         <el-table-column prop="tagName" :label="$t('alarmRulesView.k8cff1c')" width="125" sortable="custom" show-overflow-tooltip>
@@ -121,6 +120,7 @@ import type { AlarmRule, Tag } from '../types'
 import { activeWhenLabels, alarmCategoryLabels, alarmTypeLabels, downloadBlob, expressionTagIds, levelLabel, levelType, localizedText } from '../utils'
 import { alarmRuleTagLabel, isLevelRule, showsTiming, toAlarmRuleInput } from './alarmRuleModel'
 import AlarmRuleEditDialog from '../components/AlarmRuleEditDialog.vue'
+import PageState from '../components/PageState.vue'
 import AlarmRuleQuadDialog from '../components/AlarmRuleQuadDialog.vue'
 import AlarmRuleRowActions from '../components/AlarmRuleRowActions.vue'
 import AlarmRuleSimulateDialog from '../components/AlarmRuleSimulateDialog.vue'

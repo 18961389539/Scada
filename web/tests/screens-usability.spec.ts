@@ -117,8 +117,8 @@ test('screen catalog compact rows fit desktop and narrow mobile widths', async (
     await page.reload()
     await expect(page.locator('.screen-card')).toHaveCount(3)
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    // 窄屏下预览/运行/创建工作台按钮会换行到第二行，行高上限放宽。
-    const maxRowHeight = width >= 760 ? 170 : 190
+    // 窄屏下预览/运行/创建工作台/加入多标签监视按钮会换行到第二行，行高上限放宽。
+    const maxRowHeight = width >= 760 ? 190 : 260
     expect(await page.locator('.screen-card').evaluateAll(rows => Math.max(...rows.map(row => row.getBoundingClientRect().height)))).toBeLessThan(maxRowHeight)
     await page.screenshot({ path: test.info().outputPath(`screen-list-${width}.png`), animations: 'disabled' })
   }

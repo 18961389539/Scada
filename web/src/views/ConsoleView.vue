@@ -3,7 +3,7 @@
     <div class="console-chrome">
     <div class="console-controls">
     <header class="console-bar">
-      <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('workbench.runtimeTitle') }}</h1>
+      <h1 class="console-title" :title="layout?.name">{{ layout?.name ?? $t('workbench.navTitle') }}</h1>
       <el-tag v-if="layout" :disable-transitions="true" size="small" :class="{ 'version-quiet': !previewLayout }" :type="previewLayout ? 'warning' : undefined" data-test="console-version">{{ previewLayout ? $t('screenRuntime.draftPreviewControlActionsDisabled') : `V${layout.revision}` }}</el-tag>
       <el-radio-group v-if="layout && layout.document.monitors.length > 1" :model-value="monitorIndex" size="small" data-test="console-monitor" @change="router.replace({ query: { monitor: $event } })">
         <el-radio-button v-for="(m, i) in layout.document.monitors" :key="i" :value="i" :title="m.name">{{ m.name || $t('consoleView.k47eff4', [i + 1]) }}</el-radio-button>
@@ -20,6 +20,21 @@
         :allow-primary-link="!previewLayout"
         test-id="console-header-status"
       />
+      <el-button
+        v-if="!previewLayout && pendingCount > 0"
+        size="small"
+        type="warning"
+        plain
+        class="console-pending"
+        data-test="console-pending-count"
+        :title="$t('pendingApprovals.countTitle', [pendingCount])"
+        @click="router.push(pendingApprovalsPath)"
+      >{{ $t('pendingApprovals.count', [pendingCount > 99 ? '99+' : pendingCount]) }}</el-button>
+      <span
+        v-else-if="previewLayout && pendingCount > 0"
+        class="console-pending"
+        data-test="console-pending-count"
+      >{{ $t('pendingApprovals.count', [pendingCount > 99 ? '99+' : pendingCount]) }}</span>
       <PageHelpButton v-if="!previewLayout" help-key="console" compact />
       <el-button v-if="!previewLayout && !soundEnabled" type="warning" plain size="small" data-test="console-sound-muted" @click="soundEnabled = true">{{ $t('uxShell.soundMuted') }}</el-button>
       <el-tooltip v-if="!previewLayout" :content="$t('appLayout.soundHint')" placement="bottom">
@@ -28,7 +43,7 @@
       <el-button size="small" data-test="console-more" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen">{{ $t('consoleUx.more') }}</el-button>
     </header>
     <div v-show="moreOpen" class="console-more-panel" data-test="console-more-panel">
-      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.runtimeTitle')" size="small" class="layout-select" data-test="console-layout" @change="selectLayout">
+      <WorkbenchTooltip v-if="layouts.length" :content="$t('workbenchTips.runtimeLayout')"><el-select :model-value="layout?.id" :aria-label="$t('workbench.navTitle')" size="small" class="layout-select" data-test="console-layout" @change="selectLayout">
         <el-option v-for="l in layouts" :key="l.id" :value="l.id" :label="l.name" />
       </el-select></WorkbenchTooltip>
       <label v-if="screenRegions.length" class="target-region"><span>{{ $t('consoleImprovements.openInto') }}</span>
@@ -190,6 +205,7 @@ import { refreshActiveAlarms } from '../composables/useActiveAlarms'
 import { useAuthStore } from '../stores/auth'
 import { onCriticalAlarmRaise, useAlarmSession } from '../composables/useAlarmSession'
 import { useServiceStatus } from '../composables/useServiceStatus'
+import { pendingApprovalsPath, usePendingApprovals } from '../composables/pendingApprovals'
 import { alarmMessage, canAckAlarmEvent, formatTime, levelLabel } from '../utils'
 import type { AlarmEvent, AlarmSummary, AlarmTimeline, Area, Device } from '../types'
 import type { ScreenSummary } from '../screens/model'
@@ -203,6 +219,7 @@ import { modalOpen } from '../ui/overlay'
 const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const { soundEnabled } = useAlarmSession()
+const { pendingCount } = usePendingApprovals()
 const { healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
 const canConfigure = computed(() => !props.previewLayout && canGlobal(auth.user, 'Configure'))
 const quickCreate = ref<InstanceType<typeof QuickLayoutCreate>>()

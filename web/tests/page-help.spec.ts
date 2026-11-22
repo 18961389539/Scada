@@ -14,7 +14,7 @@ test('page help button opens page-specific guidance on main pages', async ({ pag
     ['/overview', '总览', '总览就像工厂的仪表盘'],
     ['/config/tags', '测点配置', '测点是采集系统认识设备的最小单位'],
     ['/alarms', '报警', '报警就像设备发出的'],
-    ['/console', '运行工作台', '运行工作台是把多个工艺画面拼在一起']
+    ['/console', '控制室布局', '控制室布局是把多个工艺画面拼在一起']
   ]
 
   for (const [path, title, bodyText] of cases) {

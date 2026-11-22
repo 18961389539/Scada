@@ -119,9 +119,57 @@ public sealed class CatalogPageTests(AuthorizationTests.Site site) : IClassFixtu
         Assert.Contains(listed, item => item.GetProperty("message").GetString() == secondMessage);
     }
 
+    [Fact]
+    public async Task TagPageSortsByNameBeforePaging()
+    {
+        using var admin = await site.ClientAsync("admin");
+        var prefix = "sort-" + Guid.NewGuid().ToString("N")[..8];
+        // 建点顺序 z → m → a，让 id 升序与名称升序相反：若实现先分页后排序，升序首页会拿到 z 而不是 a。
+        await CreateTag(admin, site.DeviceA, prefix + "-z");
+        await CreateTag(admin, site.DeviceA, prefix + "-m");
+        await CreateTag(admin, site.DeviceA, prefix + "-a");
+
+        using var asc = await admin.GetAsync($"/api/tags?take=1&skip=0&sort=name&order=asc&search={Uri.EscapeDataString(prefix)}");
+        asc.EnsureSuccessStatusCode();
+        Assert.Equal(3, Count(asc));
+        Assert.Equal(prefix + "-a", Assert.Single(await asc.Content.ReadFromJsonAsync<JsonElement[]>() ?? []).GetProperty("name").GetString());
+
+        using var second = await admin.GetAsync($"/api/tags?take=1&skip=1&sort=name&order=asc&search={Uri.EscapeDataString(prefix)}");
+        second.EnsureSuccessStatusCode();
+        Assert.Equal(prefix + "-m", Assert.Single(await second.Content.ReadFromJsonAsync<JsonElement[]>() ?? []).GetProperty("name").GetString());
+
+        using var desc = await admin.GetAsync($"/api/tags?take=1&skip=0&sort=name&order=desc&search={Uri.EscapeDataString(prefix)}");
+        desc.EnsureSuccessStatusCode();
+        Assert.Equal(prefix + "-z", Assert.Single(await desc.Content.ReadFromJsonAsync<JsonElement[]>() ?? []).GetProperty("name").GetString());
+
+        // 不传 sort/order 时仍保留原有的全量返回，供导出与引用检查等不翻页的调用方使用。
+        using var all = await admin.GetAsync("/api/tags?search=" + Uri.EscapeDataString(prefix));
+        all.EnsureSuccessStatusCode();
+        Assert.Equal(3, (await all.Content.ReadFromJsonAsync<JsonElement[]>() ?? []).Length);
+    }
+
     private static async Task CreateDevice(HttpClient admin, string name, int area)
     {
         using var response = await admin.PostAsJsonAsync("/api/devices", AuthorizationTests.Site.DeviceRequest(name, area));
+        Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    private static async Task CreateTag(HttpClient admin, int deviceId, string name)
+    {
+        using var response = await admin.PostAsJsonAsync("/api/tags", new
+        {
+            deviceId,
+            name,
+            area = "HoldingRegister",
+            address = 0,
+            dataType = "Float",
+            scale = 1.0,
+            offset = 0.0,
+            writable = false,
+            archiveMode = "None",
+            deadband = 0.0,
+            archivePeriodSec = 600
+        });
         Assert.True(response.IsSuccessStatusCode, await response.Content.ReadAsStringAsync());
     }
 

@@ -26,6 +26,37 @@ async function prepareReview(page: Page, request: APIRequestContext) {
   await expect(page.locator('[data-test="aa-export-xlsx"]')).toBeEnabled()
 }
 
+test('fleeting and chattering KPI cards are keyboard reachable and activate on Enter/Space', async ({ page, request }) => {
+  await prepareReview(page, request)
+  await page.route(url => url.pathname === '/api/alarm-analytics/events', route => route.fulfill({ json: { total: 0, items: [] } }))
+
+  const fleeting = page.locator('[data-test="kpi-fleeting"]')
+  const chattering = page.locator('[data-test="kpi-chattering"]')
+  for (const card of [fleeting, chattering]) {
+    await expect(card).toHaveAttribute('role', 'button')
+    await expect(card).toHaveAttribute('tabindex', '0')
+  }
+
+  // 从工具栏末尾的“查询”按钮按 Tab 走过去，而不是直接 focus()：
+  // 证明它确实在页面的 Tab 序列里（el-date-picker 不透传 data-test，不能拿它当起点）。
+  await page.locator('[data-test="aa-query"]').focus()
+  let reached = false
+  for (let i = 0; i < 60; i++) {
+    await page.keyboard.press('Tab')
+    if (await fleeting.evaluate(el => el === document.activeElement)) { reached = true; break }
+  }
+  expect(reached, 'Tab 序列必须能到达快速报警卡片').toBe(true)
+
+  await page.keyboard.press('Enter')
+  await expect(page.locator('[data-test="aa-drill"]')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('[data-test="aa-drill"]')).toBeHidden()
+
+  await chattering.focus()
+  await page.keyboard.press('Space')
+  await expect(page.locator('[data-test="aa-drill"]')).toBeVisible()
+})
+
 for (const outcome of ['success', 'failure'] as const) {
   test(`other pages review ignores a late analytics ${outcome} after a new range wins`, async ({ page, request }) => {
     await prepareReview(page, request)

@@ -4,8 +4,9 @@ import { alarmSessionActive, alarmToastSurface, onCriticalAlarmRaise, resetAlarm
 import { resetAlarmSoundForTests } from './useAlarmSound'
 
 const { onHubEvent, onHubClosed, resetHubMock } = vi.hoisted(() => ({
-  onHubEvent: vi.fn(() => vi.fn()),
-  onHubClosed: vi.fn(() => vi.fn()),
+  // 显式声明可变参数：onHubEvent 的真实签名是 (type, handler)，无参 mock 会让 calls[0][1] 过不了类型检查。
+  onHubEvent: vi.fn((..._args: unknown[]) => vi.fn()),
+  onHubClosed: vi.fn((..._args: unknown[]) => vi.fn()),
   resetHubMock: vi.fn()
 }))
 

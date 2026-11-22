@@ -6,6 +6,7 @@ import { resolveLandingPath } from '../access/landing'
 import { tr } from '../i18n'
 import { ensureProtocolCatalog } from '../protocols'
 import { readLastText, rememberText } from '../composables/lastChoice'
+import { shouldRememberRoute } from './lastVisit'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -13,7 +14,7 @@ const router = createRouter({
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue'), meta: { public: true } },
     // 强制改密是登录后的第一站：不挂在 AppLayout 下，避免未授权的导航与轮询先跑起来。
     { path: '/change-password', name: 'change-password', component: () => import('../views/ChangePasswordView.vue'), meta: { title: tr('passwordChange.title') } },
-    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('workbench.runtimeTitle') } },
+    { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('workbench.navTitle') } },
     { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure', suppressAlarmSession: true } },
     { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
     {
@@ -29,7 +30,7 @@ const router = createRouter({
         { path: 'config/calculations', component: () => import('../views/CalculationsView.vue'), meta: { title: tr('index.k4e0387'), policy: 'any-configure' } },
         { path: 'config/oee', component: () => import('../views/OeeConfigView.vue'), meta: { title: tr('navMenu.oeeConfig'), policy: 'any-configure' } },
         { path: 'config/object-templates/:id', component: () => import('../views/ObjectTemplateEditorView.vue'), meta: { title: tr('index.ka1ab09'), policy: 'global-configure' } },
-        { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: tr('index.k8a1840') } },
+        { path: 'screens', component: () => import('../views/ScreensView.vue'), meta: { title: tr('navMenu.k8a1840') } },
         { path: 'workspace', component: () => import('../views/ScreenWorkspaceView.vue'), meta: { title: tr('workspace.title'), policy: 'any-view' } },
         { path: 'screens/:id', component: () => import('../views/ScreenRunView.vue'), meta: { title: tr('common.screenRun') } },
         { path: 'config/screens/:id', component: () => import('../views/ScreenDesignerView.vue'), meta: { title: tr('index.k684331'), policy: 'any-configure' } },
@@ -130,10 +131,8 @@ export async function startPath(user: AccessHolder): Promise<string> {
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : ''
   document.title = title ? `${title} · SCADA` : 'SCADA'
-  // 仅记忆主框架内的有效页面；登录页、改密页、全屏运行页与未知地址不参与。
-  const inAppLayout = to.matched.some(record => record.path === '/')
-  const notFound = to.matched.some(record => record.path === '/:pathMatch(.*)*')
-  if (inAppLayout && !notFound && !to.meta.public) rememberText(LAST_ROUTE_KEY, to.path)
+  // 主框架页面和控制室布局记入上次访问；Kiosk、布局预览、登录/改密和未知地址不记。
+  if (shouldRememberRoute(to) && !to.meta.public) rememberText(LAST_ROUTE_KEY, to.path)
 })
 
 router.beforeEach(async (to) => {

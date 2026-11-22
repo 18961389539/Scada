@@ -109,7 +109,12 @@
       <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
 
       <div v-if="tab === 'shelved'" class="alarm-table-wrap" role="region" :aria-label="$t('alarmWorkbench.table')" :aria-busy="loading" data-test="alarm-table-region">
-      <el-table v-loading="loading" :data="shelves" size="small" height="100%" scrollbar-always-on :scrollbar-tabindex="0" :empty-text="loading ? $t('alarmsView.loadingResults') : loadError && !shelves.length ? loadError : $t('alarmsView.k0d51d2')">
+      <el-table v-loading="loading" :data="shelves" size="small" height="100%" scrollbar-always-on :scrollbar-tabindex="0">
+        <template #empty>
+          <PageState v-if="loading" state="loading" compact />
+          <PageState v-else-if="loadError && !shelves.length" state="error" :description="loadError" :retry-text="$t('common.retry')" compact @retry="reload()" />
+          <PageState v-else state="empty" :description="$t('alarmsView.k0d51d2')" compact />
+        </template>
         <el-table-column :label="$t('alarmListReview.source')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ shelfSource(row) }}</template></el-table-column>
         <el-table-column prop="reason" :label="$t('alarmsView.k1ff9c3')" min-width="200" show-overflow-tooltip />
         <el-table-column prop="user" :label="$t('alarmsView.k06858d')" width="100" show-overflow-tooltip />
@@ -139,15 +144,13 @@
         scrollbar-always-on
         :scrollbar-tabindex="0"
         :row-class-name="rowClass"
-        :empty-text="emptyText"
         @selection-change="onSelectionChange"
       >
         <template #empty>
-          <span v-if="loadError">{{ loadError }}</span>
-          <template v-else>
-            <span>{{ emptyText }}</span>
+          <PageState v-if="loadError" state="error" :description="loadError" :retry-text="$t('common.retry')" compact @retry="reload()" />
+          <PageState v-else state="empty" :description="emptyText" compact>
             <el-button v-if="hasFilters" link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-          </template>
+          </PageState>
         </template>
         <el-table-column v-if="tab === 'live' && canAck" type="selection" width="42" :reserve-selection="true" :selectable="canSelectAlarm" />
         <el-table-column :label="`${$t('alarmsView.k62e951')} / ${$t('alarmsView.k254849')}`" width="150">
@@ -185,7 +188,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="$t('alarmsView.k521523')" width="112" show-overflow-tooltip><template #default="{ row }">{{ alarmValueText(row) }}</template></el-table-column>
+        <el-table-column :label="$t('alarmsView.k521523')" width="112" align="right" show-overflow-tooltip><template #default="{ row }">{{ alarmValueText(row) }}</template></el-table-column>
         <el-table-column :label="`${$t('alarmsView.k79cc87')} / ${$t('alarmsView.k25722a')}`" width="165" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ formatTime(row.startTs) }}</span>
@@ -377,6 +380,7 @@
 <script setup lang="ts">
 import { Refresh, Search } from '@element-plus/icons-vue'
 import AlarmFloodBanner from '../components/AlarmFloodBanner.vue'
+import PageState from '../components/PageState.vue'
 import PageStatusBar from '../components/PageStatusBar.vue'
 import { useAlarmsView } from '../composables/useAlarmsView'
 const { auth, canAck, alarmSource, trendQuery, alarmValueText, canAckAlarm, tab, alarms, livePageSize, livePage, liveTotal, historyPage, historyPageSize, historyTotal, shelves, summary, loading, loadError, ackError, keyword, stateFilter, liveSort, route, clearTagFilter, pageIssues, onStatusAction, historyRange, ackDialog, shelveDialog, timeline, timelineAlarm, timelineVisible, timelineLoading, timelineError, shelveError, batchRunning, batchProgress, tableRef, keywordInputRef, levelOptions, levelFilter, categoryFilter, rangePreset, loadedHistoryRange, historyRangeDirty, batchOutcome, batchCancel, stateLabel, hasFilters, emptyText, canSelectAlarm, selectableAlarms, visibleAckable, filtersOpen, rowMenuId, pendingNotice, silenceUntil, screenPicker, screenMatches, selectedAckable, retryRows, clearSelection, resetFilters, onSelectionChange, batchAck, confirmAndAck, applyRangePreset, rowClass, chooseRowAction, shelfSource, shelfRemaining, openAlarmScreen, goScreen, locateFirstOut, duration, applyPendingPush, searchHistory, onLivePageChange, onLiveSizeChange, onHistoryPageChange, onHistorySizeChange, onTabChange, ackVisible, silenceAnnunciators, reload, openAck, openNote, submitAck, openShelve, submitShelve, unshelve, openTimeline, retryTimeline, ref, alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, formatTime, levelLabel, levelType, localizedText, can, openShortcutHelp } = useAlarmsView()

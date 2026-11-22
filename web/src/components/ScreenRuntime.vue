@@ -7,6 +7,7 @@
       <el-tag v-if="monitorMode" type="info" size="small" data-test="runtime-monitor-mode">{{ $t('runtimeImprovements.monitorReadOnly') }}</el-tag>
       <el-tag v-if="mobileReadOnly" type="info" size="small" data-test="mobile-readonly">{{ $t('screenRuntime.mobileReadOnly') }}</el-tag>
       <el-tag v-if="replayMode" type="warning" size="small" data-test="runtime-replay-mode">{{ $t('screenReplay.active', [formatTime(replayAt ?? 0)]) }}</el-tag>
+      <el-tag v-else-if="resuming" type="info" size="small" data-test="runtime-resuming">{{ $t('screenRuntime.resuming') }}</el-tag>
       <span v-else-if="connected" class="runtime-live">{{ $t('screenRuntime.live') }}</span>
       <el-tag v-else type="warning" size="small">{{ $t('screenRuntime.reconnectingSnapshotRefresh') }}</el-tag>
       <span class="spacer" />
@@ -46,12 +47,19 @@
         <el-button size="small" data-test="runtime-reload-version" @click="load()">{{ $t('screenRuntime.reloadVersion') }}</el-button>
       </p>
     </div>
+    <div v-if="sequenceWatches.length" class="runtime-sequence-runs" data-test="runtime-sequence-runs">
+      <div v-for="item in sequenceWatches" :key="item.runId" class="runtime-sequence-run" :data-test="`runtime-sequence-run-${item.runId}`">
+        <span>{{ item.text }}</span>
+        <el-button size="small" link data-test="runtime-sequence-view" @click="viewSequenceRun(item.runId)">{{ $t('hmi.sequenceViewFlow') }}</el-button>
+        <el-button v-if="item.abortable" size="small" link type="danger" data-test="runtime-sequence-abort" @click="abortSequenceRun(item)">{{ $t('hmi.sequenceAbort') }}</el-button>
+      </div>
+    </div>
     <CommandReceipt v-if="receiptId" :id="receiptId" />
     <ControlConfirmDialog ref="confirmDialog" />
     <ScreenTrendDialog v-model="trendVisible" :title="trendTitle" :series="trendSeries" :unavailable="historyUnavailable" />
     <RecipeDownloadDialog v-model="recipeDialogVisible" :recipe="recipeTarget" @completed="onRecipeDownloaded" />
     <div v-if="document" ref="stage" v-loading="loading" class="runtime-stage" :class="{ fill: fill, touch: isMobile }" :data-zoom="zoom" data-test="runtime-stage">
-      <ScreenCanvas :document="document" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :viewport="viewport" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canCommandTag" :control-busy="readOnly" :replay-at="replayMode ? replayAt : null" :busy-node-ids="busyNodeIds" :command-feedback="commandFeedback" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
+      <ScreenCanvas :document="document" :highlight-tag-ids="highlightTagIds" :values="values" :sample-max-age="sampleMaxAge" :history="history" :alarm-events="alarmEvents" :alarm-unavailable="alarmUnavailable" :alarm-limited="alarmLimited" :history-unavailable="historyUnavailable" :oee-unavailable="oeeUnavailable" :tag-meta="tagMeta" :oee="oeeByLine" :zoom="zoom" :viewport="viewport" :library="runtimeLibrary" :library-failed="usesLibrary && !!library.error" :can-command="canCommandTag" :control-busy="readOnly" :replay-at="replayMode ? replayAt : null" :busy-node-ids="busyNodeIds" :command-feedback="commandFeedback" :recipe-templates="recipeTemplates" :recipes="recipes" :can-recipe="canControlRecipeTemplate" @activate="activate" @command="activateCommand" @momentary="activateMomentary" @trend="openTrend" @trend-tag="openTagTrend" @recipe="openRecipeDownload" />
     </div>
     <el-empty v-else-if="!loading && !error" :description="$t('screenRuntime.noScreenToRun')" />
     <Teleport to="body">
@@ -87,7 +95,9 @@ import { recipeApi, type Recipe, type RecipeDownload } from '../api/recipes'
 import CommandReceipt from './CommandReceipt.vue'
 import { createCommandId } from '../api/commandTypes'
 import { commandErrorMessage, errorMessage } from '../api/http'
-import { controlApi, type ControlCheck } from '../api/control'
+import { controlApi, type ControlCheck, type ControlRun } from '../api/control'
+import { notifySubmittedForApproval } from '../composables/pendingApprovalToast'
+import { describeSequenceRun } from '../composables/sequenceRunFeedback'
 import { calcJobApi } from '../api/calcJobs'
 import type { ScreenDetail, ScreenDocument, ScreenNode } from '../screens/model'
 import { expandNodes } from '../screens/model'
@@ -127,14 +137,17 @@ const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: Sc
   navigateMode?: 'router' | 'emit' | 'tabs'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
   toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null; autoRefresh?: boolean
   // 多页面宿主切换到其他标签时置为 true，关闭当前实例的浮动弹窗，避免残留到其他页面。
-  suspended?: boolean }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false, suspended: false })
-const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string } | null] }>()
+  suspended?: boolean; highlightTagIds?: number[] }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false, suspended: false, highlightTagIds: () => [] })
+const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string; tagIds: number[] } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
+const highlightTagIds = computed(() => props.highlightTagIds ?? [])
 const commandError = ref('')
 const detail = ref<ScreenDetail | null>(null), loading = ref(false), error = ref(''), valueError = ref('')
+// 从后台标签切回时画面仍显示暂停前的快照；首个快照到达前用这个标记，避免把旧值当成当前值。
+const resuming = ref(false)
 const newerRevision = ref<number | null>(null)
 let revisionTimer: ReturnType<typeof setInterval> | undefined
-watch(detail, screen => emit('screen-loaded', screen ? { id: screen.id, name: screen.name } : null))
+
 // 缩放：固定比例或“适应”（按区域大小等比缩放，窗口/区域尺寸变化时自动重算）。
 const zoomChoice = ref<number | 'fit'>(props.initialZoom), stage = ref<HTMLDivElement>(), stageSize = reactive({ w: 0, h: 0 })
 const zoom = computed(() => {
@@ -224,6 +237,11 @@ const catalogs = useScreenCatalogs({ isDisposed: () => disposed, monitorMode: ()
 const { deviceError, tagsById, tagError, canControlBoundTag, needsDeviceCatalog, tagMeta, sampleMaxAge, loadTags, loadDevices, deviceCatalogBlocks } = catalogs
 const usesAlarms = computed(() => runtimeNodes.value.some(node => ['alarm-banner', 'alarm-list', 'alarm-stats'].includes(node.type)))
 const boundIds = computed(() => [...new Set(runtimeNodes.value.flatMap(n => [n.tagId, n.alarmTagId, n.animation?.tagId, n.action.type === 'command' ? n.action.tagId : null, ...(n.commands ?? []).map(command => command.tagId), ...(n.tags ?? [])].filter((x): x is number => !!x)))])
+// 画面与绑定测点一起上抛：多页面宿主用 tagIds 把全局未确认报警归到对应标签；
+// 必须在 boundIds 之后注册，且 detail 或绑定变化都要重新告知（切画面/改绑定）。
+watch([detail, boundIds], ([screen, ids]) => {
+  emit('screen-loaded', screen ? { id: screen.id, name: screen.name, tagIds: [...ids] } : null)
+}, { immediate: true })
 const unverifiedCount = computed(() => {
   const ids = boundIds.value
   if (!ids.length) return 0
@@ -399,14 +417,80 @@ async function startSequence(node: ScreenNode): Promise<void> {
   setNodeBusy(node.id, true); commandError.value = ''; setFeedback(node.id, 'pending', tr('screenUx.pending'))
   try {
     const result = await controlApi.start(sequence.id)
-    if (result.pending) { setFeedback(node.id, 'pending', tr('hmi.sequencePending')); ElMessage.warning(tr('hmi.sequencePending')) }
-    else { setFeedback(node.id, 'ok', tr('screenUx.done')); ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-'])) }
+    if (result.pending) {
+      setFeedback(node.id, 'pending', tr('hmi.sequencePending'))
+      notifySubmittedForApproval(tr('hmi.sequencePending'), router)
+    } else if (result.runId) {
+      setFeedback(node.id, 'pending', tr('hmi.sequenceStepProgress', [1, sequence.steps.length]))
+      ElMessage.success(tr('hmi.sequenceStarted', [result.runId]))
+      watchSequenceRun(node.id, result.runId, sequence.name, sequence.steps.length)
+    } else {
+      setFeedback(node.id, 'pending', tr('screenUx.pending'))
+      ElMessage.success(tr('hmi.sequenceStarted', [result.runId ?? '-']))
+    }
   } catch (e) {
     commandError.value = commandErrorMessage(e, tr('hmi.sequenceFailed'))
     setFeedback(node.id, 'rejected', tr('screenUx.rejected'))
     ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
   } finally { setNodeBusy(node.id, false) }
 }
+
+type SequenceWatch = { nodeId: string; runId: number; name: string; totalSteps: number; text: string; abortable: boolean }
+const sequenceWatches = ref<SequenceWatch[]>([])
+function upsertSequenceWatch(entry: SequenceWatch): void {
+  const list = sequenceWatches.value.filter(item => item.runId !== entry.runId)
+  sequenceWatches.value = [...list, entry]
+}
+function applySequenceFeedback(nodeId: string, run: ControlRun, fallbackTotal: number): void {
+  const feedback = describeSequenceRun(run)
+  const total = feedback.totalSteps || fallbackTotal
+  const current = feedback.currentStep?.name ?? String(Math.min(feedback.doneSteps + (feedback.running ? 1 : 0), total) || 1)
+  if (feedback.failed) setFeedback(nodeId, 'rejected', tr('hmi.sequenceRunFailed', [run.message || feedback.currentStep?.message || '-']))
+  else if (feedback.aborted) setFeedback(nodeId, 'rejected', tr('hmi.sequenceAborted'))
+  else if (feedback.terminal) setFeedback(nodeId, 'ok', tr('screenUx.done'))
+  else setFeedback(nodeId, 'pending', tr('hmi.sequenceStepProgress', [current, total]))
+  upsertSequenceWatch({
+    nodeId,
+    runId: run.id,
+    name: run.sequenceName,
+    totalSteps: total,
+    text: feedback.failed ? tr('hmi.sequenceRunFailed', [run.message || '-']) : feedback.aborted ? tr('hmi.sequenceAborted') : feedback.terminal ? tr('screenUx.done') : tr('hmi.sequenceStepProgress', [current, total]),
+    abortable: feedback.running
+  })
+}
+function watchSequenceRun(nodeId: string, runId: number, name: string, totalSteps: number): void {
+  upsertSequenceWatch({ nodeId, runId, name, totalSteps, text: tr('hmi.sequenceStepProgress', [1, totalSteps]), abortable: true })
+  void refreshSequenceRun(runId)
+}
+async function refreshSequenceRun(runId: number): Promise<void> {
+  const watch = sequenceWatches.value.find(item => item.runId === runId)
+  if (!watch) return
+  try {
+    const run = await controlApi.run(runId)
+    applySequenceFeedback(watch.nodeId, run, watch.totalSteps)
+  } catch {
+    /* 下一次轮询再试，避免把启动成功误报成失败 */
+  }
+}
+async function refreshSequenceRuns(): Promise<void> {
+  const running = sequenceWatches.value.filter(item => item.abortable)
+  await Promise.all(running.map(item => refreshSequenceRun(item.runId)))
+}
+function viewSequenceRun(runId: number): void {
+  void router.push({ path: '/control', query: { tab: 'sequences', run: String(runId) } })
+}
+async function abortSequenceRun(item: SequenceWatch): Promise<void> {
+  try { await ElMessageBox.confirm(tr('controlView.k689787'), tr('controlView.kf11c45', [item.runId]), { type: 'warning' }) } catch { return }
+  try {
+    await controlApi.abort(item.runId)
+    await refreshSequenceRun(item.runId)
+  } catch (e) {
+    commandError.value = commandErrorMessage(e, tr('hmi.sequenceFailed'))
+    ElMessage.error({ message: commandError.value, duration: 5000, showClose: true })
+  }
+}
+usePolling(refreshSequenceRuns, 1000, { enabled: () => sequenceWatches.value.some(item => item.abortable) })
+
 async function poll(): Promise<void> {
   if (pollingGeneration === generation || !document.value || disposed) return
   if (replayMode.value) { await pollReplay(); return }
@@ -680,7 +764,7 @@ async function activateCommand(node: ScreenNode, value: number, operation?: stri
     const result = await screenApi.command(detail.value.id, node.id, detail.value.publishedRevision!, requestId, confirmed, value, operation, phase)
     receiptId.value = result.commandId ?? null
     ok = result.success
-    if (result.pending) { setFeedback(node.id, 'pending', tr('screenRuntime.dualApprovalPending')); ElMessage.warning(tr('screenRuntime.dualApprovalPending')) }
+    if (result.pending) { setFeedback(node.id, 'pending', tr('screenRuntime.dualApprovalPending')); notifySubmittedForApproval(tr('screenRuntime.dualApprovalPending'), router) }
     else if (result.success) { setFeedback(node.id, 'ok', tr('screenUx.readBack', [result.readBack ?? ''])); ElMessage.success(tr('screenRuntime.executedReadBack', [result.readBack])) }
     else { commandError.value = result.message || tr('screenRuntime.controlFailed'); setFeedback(node.id, 'rejected', tr('screenUx.rejected')) }
     await poll()
@@ -708,6 +792,7 @@ function stopRevisionPolling(): void {
 // 多页面宿主切到其他标签时暂停实时订阅、轮询和辅助定时器；返回时重新拉取快照后恢复。
 watch(() => props.suspended, suspended => {
   if (suspended) {
+    resuming.value = false
     popupVisible.value = false
     subscription?.dispose()
     subscription = undefined
@@ -717,8 +802,10 @@ watch(() => props.suspended, suspended => {
     return
   }
   if (disposed) return
+  resuming.value = true
   void (async () => {
-    await load()
+    // 无论成功失败都要收起"刷新中"，否则一次加载失败会让角标一直挂着。
+    await load().finally(() => { if (!disposed && !props.suspended) resuming.value = false })
     if (disposed) return
     if (props.suspended) {
       subscription?.dispose()

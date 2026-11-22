@@ -3774,6 +3774,7 @@ export interface paths {
                     deviceIds?: string;
                     quality?: string;
                     sort?: string;
+                    order?: string;
                     skip?: number | string;
                     take?: number | string;
                 };

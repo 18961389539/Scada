@@ -17,8 +17,8 @@
       :data-control-unavailable="!preview && feedbackTypes.includes(node.type) && !controlReferenceGood(node) ? 'true' : undefined"
       :transform="`translate(${node.x} ${node.y}) rotate(${node.rotation} ${node.width / 2} ${node.height / 2})`"
       :data-node-busy="!preview && nodeIsBusy(node) ? 'true' : undefined"
-      :class="{ actionable: !editing && isActionable(node), selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), frame: node.type === 'template', inner: !!node.ownerId, locked: !!node.locked, 'command-pending': feedbackOf(node)?.state === 'pending', 'command-rejected': feedbackOf(node)?.state === 'rejected', 'command-ok': feedbackOf(node)?.state === 'ok' }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
-      :tabindex="rovingTabindex.get(node.id)" :role="isActionable(node) ? 'button' : (node.tagId || node.alarmTagId ? 'img' : undefined)"
+      :class="{ actionable: !editing && isActionable(node), selected: selectedIds.includes(node.id), invalid: node.tagId && !isGood(node), alarm: alarmed(node), 'alarm-highlight': highlighted(node), frame: node.type === 'template', inner: !!node.ownerId, locked: !!node.locked, 'command-pending': feedbackOf(node)?.state === 'pending', 'command-rejected': feedbackOf(node)?.state === 'rejected', 'command-ok': feedbackOf(node)?.state === 'ok' }" :style="node.type === 'template' && !editing ? { pointerEvents: 'none' } : undefined"
+      :tabindex="rovingTabindex.get(node.id)" :role="!editing && isActionable(node) ? 'button' : (node.tagId || node.alarmTagId ? 'img' : undefined)"
       :aria-label="nodeAriaLabel(node)" :aria-pressed="node.type === 'switch' ? state(node) === 'running' : undefined"
       :aria-disabled="!editing && feedbackTypes.includes(node.type) ? !commandEnabled(node.action.tagId, node) || (node.type !== 'slider' && !controlReferenceGood(node)) : undefined" @pointerdown.stop="!editing && $emit('nodePointerDown', owner(node), $event)"
       @mousedown.stop="editing && $emit('nodePointerDown', owner(node), $event)" @touchstart.stop="editing && $emit('nodePointerDown', owner(node), $event)"
@@ -317,8 +317,8 @@ import { createChartRenderer } from '../screens/chartRenderer'
 import { builtinSymbols, isaColors, sanitizeSvgForRender } from '../screens/symbols'
 import { tr } from '../i18n'
 import { alarmMessage } from '../utils'
-const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean; replayAt?: number | null; preview?: boolean }>(),
-  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [], replayAt: null, preview: false })
+const props = withDefaults(defineProps<{ document: ScreenDocument; values?: Record<number, TagValue>; sampleMaxAge?: Record<number, number>; history?: Record<number, HistoryPoint[]>; alarmEvents?: AlarmEvent[]; alarmUnavailable?: boolean; alarmLimited?: boolean; historyUnavailable?: boolean; oeeUnavailable?: boolean; tagMeta?: Record<number, { name: string; unit: string }>; oee?: Record<number, OeeKpi>; editing?: boolean; zoom?: number; viewport?: { x: number; y: number; width: number; height: number } | null; selectedIds?: string[]; selectionBox?: ScreenRect | null; guides?: { vertical: number[]; horizontal: number[] } | null; library?: LibraryItem[]; libraryFailed?: boolean; canCommand?: (tagId: number | null) => boolean; controlBusy?: boolean; busyNodeIds?: string[]; commandFeedback?: Record<string, { state: 'pending' | 'rejected' | 'ok'; text: string }>; recipeTemplates?: RecipeTemplate[]; recipes?: Recipe[]; canRecipe?: (templateId: number) => boolean; replayAt?: number | null; preview?: boolean; highlightTagIds?: number[] }>(),
+  { values: () => ({}), sampleMaxAge: () => ({}), history: () => ({}), alarmEvents: () => [], alarmUnavailable: false, alarmLimited: false, historyUnavailable: false, oeeUnavailable: false, tagMeta: () => ({}), oee: () => ({}), editing: false, zoom: 1, viewport: null, selectedIds: () => [], library: () => [], libraryFailed: false, busyNodeIds: () => [], highlightTagIds: () => [], commandFeedback: () => ({}), recipeTemplates: () => [], recipes: () => [], replayAt: null, preview: false })
 const { locale } = useI18n()
 const nodes = computed(() => {
   const expanded = expandNodes(props.document.nodes, props.library)
@@ -684,6 +684,12 @@ const feedbackTypes = ['switch', 'slider', 'spinner', 'jog', 'pulse', 'selector'
 const inputDrafts = reactive<Record<string, string>>({}), inputErrors = reactive<Record<string, boolean>>({})
 function updateInput(node: ScreenNode, event: Event): void { inputDrafts[node.id] = (event.target as HTMLInputElement).value; inputErrors[node.id] = false }
 function nodeIsBusy(node: ScreenNode): boolean { return !!props.busyNodeIds?.includes(node.ownerId ?? node.id) }
+function highlighted(node: ScreenNode): boolean {
+  const ids = props.highlightTagIds
+  if (!ids?.length) return false
+  const set = new Set(ids)
+  return !!(node.tagId && set.has(node.tagId) || node.alarmTagId && set.has(node.alarmTagId) || node.animation?.tagId && set.has(node.animation.tagId) || node.action.type === 'command' && node.action.tagId && set.has(node.action.tagId))
+}
 function feedbackOf(node: ScreenNode): { state: 'pending' | 'rejected' | 'ok'; text: string } | undefined { return props.commandFeedback?.[node.ownerId ?? node.id] }
 function commandEnabled(tagId: number | null, node?: ScreenNode): boolean { return !props.editing && !props.controlBusy && !(node && nodeIsBusy(node)) && !!props.canCommand?.(tagId) }
 // 配方选择/下发控件：运行态按模板选择配方，权限由运行态预判、服务端在下发时再次校验。

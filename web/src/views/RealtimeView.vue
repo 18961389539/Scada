@@ -41,12 +41,15 @@
         <el-tag v-if="abnormalCount" type="danger" size="small" data-test="abnormal-count">{{ $t('realtimeView.abnormalCount', [abnormalCount]) }}</el-tag>
         <el-tag v-if="scopedAlarmCount" type="danger" size="small" data-test="realtime-alarm-count">{{ $t('realtimeMonitor.alarmCount', [scopedAlarmCount]) }}</el-tag>
       </div>
-      <el-table v-if="!narrowMonitor" class="monitor-table" :data="tags" row-key="id" size="small" height="100%" :empty-text="emptyText" :row-class-name="rowClass" data-test="realtime-table">
+      <el-table v-if="!narrowMonitor" class="monitor-table" :data="tags" row-key="id" size="small" height="100%" :row-class-name="rowClass" data-test="realtime-table">
+        <template #empty>
+          <PageState :state="tableState" :description="emptyText" :retry-text="$t('common.retry')" compact @retry="refresh()" />
+        </template>
         <el-table-column :label="$t('realtimeView.k01f2c1')" width="120" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
         <el-table-column prop="name" :label="$t('realtimeView.k8cff1c')" min-width="130" show-overflow-tooltip />
-        <el-table-column :label="$t('realtimeView.k521523')" width="150" show-overflow-tooltip>
+        <el-table-column :label="$t('realtimeView.k521523')" width="150" align="right" show-overflow-tooltip>
           <template #default="{ row }">
             <span class="value-strong" :class="valueClass(row.id)">
               {{ displayTag(row) }} <span class="muted tiny">{{ row.unit }}</span>
@@ -90,7 +93,7 @@
           <p v-else-if="tag.description !== tag.name" class="muted tiny">{{ tag.description }}</p>
           <div class="point-footer"><span class="muted tiny">{{ $t('realtimeMonitor.sampleTime') }} {{ formatTime(valueOf(tag.id)?.ts) }}</span><el-button v-if="canViewScreens" link @click="openScreen(tag)">{{ $t('alarmUx.openScreen') }}</el-button><router-link v-if="canViewTrends" :to="{ path: '/trends', query: { tagId: String(tag.id) } }" class="tiny">{{ $t('realtimeView.viewTrend') }}</router-link><el-button v-if="tag.writable && canControlTag(tag)" link type="primary" :disabled="frozen" @click="openWrite(tag)">{{ $t('realtimeView.k2fb871') }}</el-button></div>
         </article>
-        <p v-if="!tags.length" class="muted">{{ emptyText }}</p>
+        <PageState v-if="!tags.length" :state="tableState" :description="emptyText" :retry-text="$t('common.retry')" compact @retry="refresh()" />
       </div>
       <el-pagination :current-page="page" :page-size="100" :total="totalCount" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" />
     </section>
@@ -138,6 +141,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import CommandReceipt from '../components/CommandReceipt.vue'
+import PageState from '../components/PageState.vue'
 import { createCommandId } from '../api/commandTypes'
 import { Close, Refresh, VideoPause, VideoPlay } from '@element-plus/icons-vue'
 import { hubState as realtimeHubState, onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
@@ -276,6 +280,12 @@ const pageIssues = computed<PageIssue[]>(() => {
 function onStatusAction(): void { void refresh() }
 const scopedAlarmCount = computed(() => tags.value.reduce((total, tag) => total + alarmsFor(tag.id).length, 0))
 const emptyText = computed(() => loadError.value || configError.value || attentionError.value || (!configReady.value || deviceState.value === 'offline' && !attentionReady.value ? tr('realtimeMonitor.loading') : hasFilters.value ? tr('realtimeMonitor.noMatch') : tr('realtimeView.k1b4bde')))
+// 把三种"无行可显示"的原因分开：加载中显示骨架、失败显示错误+重试、其余才是真正的空结果。
+const tableState = computed<'loading' | 'error' | 'empty' | 'ready'>(() => {
+  if (loadError.value || configError.value || attentionError.value) return 'error'
+  if (!configReady.value || (deviceState.value === 'offline' && !attentionReady.value)) return 'loading'
+  return tags.value.length ? 'ready' : 'empty'
+})
 
 function valueOf(tagId: number): TagValue | undefined {
   return values[tagId]

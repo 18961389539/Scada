@@ -1,0 +1,11 @@
+{
+  "note": "B3 对比度取证基线（2026-11-18）。棘轮式：只允许减少，不允许新增；修掉某项后从 allowed 删除。签名 = selector|required|foreground，按缺陷族聚合，不绑定具体文案。",
+  "measuredAt": "2026-11-18",
+  "measuredOn": "11 页 x 明暗 x 1440/390，770 个文本节点/主题",
+  "allowed": [
+    "span.nav-item-label|4.5|rgb(11, 122, 99)",
+    "span|4.5|rgb(255, 255, 255)",
+    "span|4.5|rgb(168, 171, 178)",
+    "span|4.5|rgb(74, 90, 114)"
+  ]
+}

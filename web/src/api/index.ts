@@ -154,12 +154,13 @@ export interface TagRebindResult { screens: number; templates: number; alarmRule
 export const tagApi = {
   list: async (params?: { deviceId?: number; search?: string; ids?: number[] }) =>
     (await http.get<Tag[]>('/tags', { params: params?.ids ? { ...params, ids: params.ids.join(',') } : params })).data,
-  page: async (params: { deviceId?: number; search?: string; quality?: 'good' | 'abnormal'; sort?: 'abnormal'; deviceIds?: number[]; skip: number; take: number }) => {
+  page: async (params: { deviceId?: number; search?: string; quality?: 'good' | 'abnormal'; sort?: 'abnormal' | 'name' | 'id'; order?: 'asc' | 'desc'; deviceIds?: number[]; skip: number; take: number }) => {
     const response = await http.get<Tag[]>('/tags', {
-      params: { ...params, deviceIds: params.deviceIds?.join(','), quality: params.quality, sort: params.sort }
+      params: { ...params, deviceIds: params.deviceIds?.join(','), quality: params.quality, sort: params.sort, order: params.order }
     })
     const header = (name: string) => Number(response.headers[name] ?? response.headers[name.toLowerCase()] ?? 0)
-    return { items: response.data, total: header('x-total-count'), abnormal: header('x-abnormal-count') }
+    // 少数调用方（E2E mock、反向代理丢头）拿不到 X-Total-Count：退化为当前批条数，至少分页不会显示 0。
+    return { items: response.data, total: header('x-total-count') || response.data.length, abnormal: header('x-abnormal-count') }
   },
   create: async (input: TagInput) => (await http.post<Tag>('/tags', input)).data,
   update: async (id: number, input: TagInput) => (await http.put<Tag>(`/tags/${id}`, input)).data,

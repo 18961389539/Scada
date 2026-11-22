@@ -18,9 +18,9 @@
         :aria-label="$t('appLayout.soundHint')"
         @click="soundEnabled = !soundEnabled"
       >{{ soundEnabled ? $t('kioskUx.soundOn') : $t('kioskUx.soundMuted') }}</button>
-      <div v-if="!invalidId && playlist.length > 1" class="kiosk-playlist" aria-live="polite" data-test="kiosk-playlist">
-        <span>{{ currentIndex + 1 }} / {{ playlist.length }}</span>
-        <span v-if="alarmPaused">{{ $t('kioskUx.alarmPaused') }}</span>
+      <div v-if="!invalidId && (playlist.length > 1 || alarmPaused)" class="kiosk-playlist" aria-live="polite" data-test="kiosk-playlist">
+        <span v-if="playlist.length > 1">{{ currentIndex + 1 }} / {{ playlist.length }}</span>
+        <span v-if="alarmPaused" data-test="kiosk-alarm-paused">{{ $t('kioskUx.alarmPaused') }}</span>
       </div>
     </div>
   </div>
@@ -29,7 +29,9 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
-import { onCriticalAlarmRaise, useAlarmSession } from '../composables/useAlarmSession'
+import { useAlarmSession } from '../composables/useAlarmSession'
+import { applyKioskAlarmEvent, emptyKioskAlarmPause, type KioskAlarmPauseState } from '../composables/kioskAlarmPause'
+import { alarmApi } from '../api'
 import { onHubEvent } from '../realtime/hub'
 import { alarmMessage } from '../utils'
 import type { AlarmEvent } from '../types'
@@ -60,10 +62,9 @@ const current = ref(Number.isFinite(id.value) ? id.value : 0)
 const currentIndex = computed(() => Math.max(0, playlist.value.indexOf(current.value)))
 const alarmPaused = ref(false)
 const criticalBanner = ref('')
+let openAlarms = new Map<number, AlarmEvent>()
 let timer: number | undefined
-let pauseTimer: number | undefined
 let disposeAlarm: (() => void) | undefined
-let disposeCritical: (() => void) | undefined
 
 watch(id, value => { if (Number.isFinite(value)) current.value = value })
 watch(playlist, () => {
@@ -85,28 +86,36 @@ function startTimer(): void {
     current.value = ids[(ids.indexOf(current.value) + 1) % ids.length]!
   }, intervalSec.value * 1000)
 }
-function pauseForAlarm(): void {
-  alarmPaused.value = true
-  if (pauseTimer !== undefined) window.clearTimeout(pauseTimer)
-  pauseTimer = window.setTimeout(() => { alarmPaused.value = false; criticalBanner.value = '' }, Math.max(30_000, intervalSec.value * 1000))
+function applyPause(state: KioskAlarmPauseState): void {
+  alarmPaused.value = state.paused
+  criticalBanner.value = state.banner
 }
-function showCriticalBanner(alarm: AlarmEvent): void {
-  criticalBanner.value = alarmMessage(alarm)
-  pauseForAlarm()
+function onAlarmEvent(action: string, alarm: AlarmEvent): void {
+  const applied = applyKioskAlarmEvent(openAlarms, action, alarm, alarmMessage)
+  openAlarms = applied.open
+  applyPause(applied.state)
+}
+async function hydrateActiveAlarms(): Promise<void> {
+  try {
+    const page = await alarmApi.queryPage({ live: true, state: 'unack', offset: 0, limit: 200 })
+    for (const alarm of page.items) onAlarmEvent('raise', alarm)
+  } catch {
+    /* 启动时拉不到活动报警不阻断大屏，后续仍按推送更新。 */
+  }
 }
 onMounted(() => {
   startTimer()
-  // 无人值守大屏遇到重要报警先停在当前画面，避免轮播把报警画面切走。
-  disposeAlarm = onHubEvent('alarm', (payload: { action?: string; alarm?: { level?: string } } | null) => {
-    if (payload?.action === 'raise' && payload.alarm?.level === 'Warning') pauseForAlarm()
+  // 无人值守大屏在紧急/警告活动期间停在当前画面并保持横幅，恢复或确认后再继续轮播。
+  disposeAlarm = onHubEvent('alarm', (payload: { action?: string; alarm?: AlarmEvent } | null) => {
+    if (payload?.action && payload.alarm) onAlarmEvent(payload.action, payload.alarm)
   })
-  disposeCritical = onCriticalAlarmRaise(showCriticalBanner)
+  void hydrateActiveAlarms()
 })
 onBeforeUnmount(() => {
   stopTimer()
-  if (pauseTimer !== undefined) window.clearTimeout(pauseTimer)
   disposeAlarm?.()
-  disposeCritical?.()
+  openAlarms = new Map()
+  applyPause(emptyKioskAlarmPause())
 })
 </script>
 <style scoped>

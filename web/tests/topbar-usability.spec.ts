@@ -108,7 +108,7 @@ for (const width of [320, 390]) {
     })
     await page.route('**/hubs/realtime/**', route => route.fulfill({ status: 503, body: 'Connection unavailable in navigation test' }))
     await page.goto('/screens')
-    const title = page.getByRole('heading', { name: '工艺画面', exact: true })
+    const title = page.getByRole('heading', { name: '画面目录', exact: true })
     await expect(title).toBeVisible()
     await expect(page.locator('[data-test="hub-state"]')).toBeVisible()
     await expect(page.locator('[data-test="standby-banner"]')).toContainText('备机')

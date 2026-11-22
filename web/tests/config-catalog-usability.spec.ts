@@ -62,7 +62,11 @@ async function prepare(page: Page, request: APIRequestContext): Promise<void> {
   await page.route(url => url.pathname === '/api/tags', route => {
     const query = new URL(route.request().url()).searchParams
     const deviceId = query.get('deviceId'), search = query.get('search')?.toLowerCase()
-    return route.fulfill({ json: tags.filter(tag => (!deviceId || tag.deviceId === Number(deviceId)) && (!search || tag.name.toLowerCase().includes(search))) })
+    const filtered = tags.filter(tag => (!deviceId || tag.deviceId === Number(deviceId)) && (!search || tag.name.toLowerCase().includes(search)))
+    // 测点列表已改服务端分页：按 skip/take 切片并回总数，筛选断言才能反映真实页大小。
+    const skip = Number(query.get('skip') ?? 0)
+    const take = Number(query.get('take') ?? filtered.length)
+    return route.fulfill({ json: filtered.slice(skip, skip + take), headers: { 'X-Total-Count': String(filtered.length) } })
   })
   await page.route(url => url.pathname === '/api/alarm-rules', route => {
     const query = new URL(route.request().url()).searchParams

@@ -34,6 +34,9 @@ const hand = new Set(Object.keys(flat((await import(join(root, 'i18n/locales/zh-
 for (const f of files) {
   const src = readFileSync(f, 'utf8')
   for (const m of src.matchAll(/(?:\$t|\btr|\bt)\(\s*'([\w.]+)'/g)) if (!(m[1] in zh) && !hand.has(m[1]) && !m[1].startsWith('flow.')) problems.push(`unknown key in ${relative(root, f)}: ${m[1]}`)
+  // *.test.ts 里的中文是断言期望值（例如断言中文页面名），不是待抽取的界面文案；
+  // 翻译它反而会让断言失去意义。测试文件仍参与上面的 missing/hashed key 检查。
+  if (f.endsWith('.test.ts')) continue
   // 兼容 CRLF 检出：split('\n') 会留下 '\r'，而正则的 . 不匹配 \r，
   // 导致下面的注释剥离失效、把中文注释误报成未翻译字面量。
   src.split(/\r?\n/).forEach((line, i) => {

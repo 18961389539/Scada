@@ -98,31 +98,31 @@
     </div>
 
     <el-dialog v-model="lineDlg" :title="$t('oee.line')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="lineGuard.beforeClose" @keydown="lineGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form ref="lineFormRef" :model="lineForm" :rules="lineRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="lineForm.name" maxlength="100" data-test="oee-line-name" /></el-form-item>
-        <el-form-item :label="$t('oee.area')" prop="areaId"><el-select v-model="lineForm.areaId" style="width:100%" data-test="oee-line-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.area')" prop="areaId"><el-select v-model="lineForm.areaId" class="dialog-select" data-test="oee-line-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.idealCycle')" prop="idealCycleSec" :error="fieldErrors.idealCycleSec"><el-input-number v-model="lineForm.idealCycleSec" :min="0.001" :step="1" /></el-form-item>
-        <el-form-item :label="$t('oee.product')"><el-select v-model="lineForm.productId" clearable style="width:100%"><el-option v-for="p in products" :key="p.id" :value="p.id" :label="p.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.product')"><el-select v-model="lineForm.productId" clearable class="dialog-select"><el-option v-for="p in products" :key="p.id" :value="p.id" :label="p.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.enabled')"><el-switch v-model="lineForm.enabled" /></el-form-item>
       </el-form>
       <template #footer><el-button :disabled="saving" @click="lineGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-line-save" @click="saveLine">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="productDlg" :title="$t('oee.product')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="productGuard.beforeClose" @keydown="productGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form ref="productFormRef" :model="productForm" :rules="productRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="productForm.name" maxlength="100" data-test="oee-product-name" /></el-form-item>
         <el-form-item :label="$t('oee.code')" prop="code" :error="fieldErrors.code"><el-input v-model="productForm.code" maxlength="60" /></el-form-item>
-        <el-form-item :label="$t('oee.area')"><el-select v-model="productForm.areaId" :clearable="isGlobalConfigure" :placeholder="$t('oee.global')" style="width:100%" data-test="oee-product-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.area')"><el-select v-model="productForm.areaId" :clearable="isGlobalConfigure" :placeholder="$t('oee.global')" class="dialog-select" data-test="oee-product-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.idealCycle')" prop="idealCycleSec" :error="fieldErrors.idealCycleSec"><el-input-number v-model="productForm.idealCycleSec" :min="0.001" /></el-form-item>
       </el-form>
       <template #footer><el-button :disabled="saving" @click="productGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-product-save" @click="saveProduct">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="shiftDlg" :title="$t('oee.shift')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="shiftGuard.beforeClose" @keydown="shiftGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form ref="shiftFormRef" :model="shiftForm" :rules="shiftRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="shiftForm.name" maxlength="100" data-test="oee-shift-name" /></el-form-item>
-        <el-form-item :label="$t('oee.area')" prop="areaId"><el-select v-model="shiftForm.areaId" style="width:100%" data-test="oee-shift-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.area')" prop="areaId"><el-select v-model="shiftForm.areaId" class="dialog-select" data-test="oee-shift-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.startMin')" prop="startMinute"><el-input-number v-model="shiftForm.startMinute" :min="0" :max="1439" /></el-form-item>
         <el-form-item :label="$t('oee.endMin')" prop="endMinute"><el-input-number v-model="shiftForm.endMinute" :min="0" :max="1439" /></el-form-item>
         <el-form-item :label="$t('oee.enabled')"><el-switch v-model="shiftForm.enabled" /></el-form-item>
@@ -130,35 +130,35 @@
       <template #footer><el-button :disabled="saving" @click="shiftGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-shift-save" @click="saveShift">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="reasonDlg" :title="$t('oee.reason')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="reasonGuard.beforeClose" @keydown="reasonGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form ref="reasonFormRef" :model="reasonForm" :rules="reasonRules" label-width="120px" status-icon :disabled="saving">
         <el-form-item :label="$t('oee.code')" prop="code" :error="fieldErrors.code"><el-input v-model="reasonForm.code" maxlength="30" data-test="oee-reason-code" /></el-form-item>
         <el-form-item :label="$t('oee.name')" prop="name" :error="fieldErrors.name"><el-input v-model="reasonForm.name" maxlength="100" data-test="oee-reason-name" /></el-form-item>
-        <el-form-item :label="$t('oee.category')"><el-select v-model="reasonForm.category" style="width:100%" data-test="oee-reason-category"><el-option v-for="(label, key) in categoryLabels" :key="key" :value="key" :label="label" /></el-select></el-form-item>
-        <el-form-item :label="$t('oee.area')"><el-select v-model="reasonForm.areaId" :clearable="isGlobalConfigure" :placeholder="$t('oee.global')" style="width:100%" data-test="oee-reason-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.category')"><el-select v-model="reasonForm.category" class="dialog-select" data-test="oee-reason-category"><el-option v-for="(label, key) in categoryLabels" :key="key" :value="key" :label="label" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.area')"><el-select v-model="reasonForm.areaId" :clearable="isGlobalConfigure" :placeholder="$t('oee.global')" class="dialog-select" data-test="oee-reason-area"><el-option v-for="a in configurableAreas" :key="a.id" :value="a.id" :label="a.name" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.planned')"><el-switch v-model="reasonForm.isPlanned" /></el-form-item>
       </el-form>
       <template #footer><el-button :disabled="saving" @click="reasonGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-reason-save" @click="saveReason">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="dtDlg" :title="$t('oee.downtime')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="dtGuard.beforeClose" @keydown="dtGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form ref="dtFormRef" :model="dtForm" :rules="dtRules" label-width="120px" status-icon :disabled="saving">
-        <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="dtForm.lineId" :disabled="dtEditId !== null" style="width:100%" data-test="oee-dt-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
-        <el-form-item :label="$t('oee.start')" prop="start"><el-date-picker v-model="dtForm.start" type="datetime" style="width:100%" /></el-form-item>
-        <el-form-item :label="$t('oee.end')" prop="end" :error="fieldErrors.end"><el-date-picker v-if="!dtOngoing" v-model="dtForm.end" type="datetime" style="width:100%" /><el-checkbox v-model="dtOngoing">{{ $t('ux.events.ongoing') }}</el-checkbox></el-form-item>
-        <el-form-item :label="$t('oee.state')"><el-select v-model="dtForm.state" style="width:100%" data-test="oee-dt-state"><el-option v-for="key in downtimeStates" :key="key" :value="key" :label="stateLabels[key]" /></el-select></el-form-item>
-        <el-form-item :label="$t('oee.reason')"><el-select v-model="dtForm.reasonId" clearable style="width:100%" data-test="oee-dt-reason"><el-option v-for="r in reasons" :key="r.id" :value="r.id" :label="`${r.code} ${r.name}`" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="dtForm.lineId" :disabled="dtEditId !== null" class="dialog-select" data-test="oee-dt-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.start')" prop="start"><el-date-picker v-model="dtForm.start" type="datetime" class="dialog-select" /></el-form-item>
+        <el-form-item :label="$t('oee.end')" prop="end" :error="fieldErrors.end"><el-date-picker v-if="!dtOngoing" v-model="dtForm.end" type="datetime" class="dialog-select" /><el-checkbox v-model="dtOngoing">{{ $t('ux.events.ongoing') }}</el-checkbox></el-form-item>
+        <el-form-item :label="$t('oee.state')"><el-select v-model="dtForm.state" class="dialog-select" data-test="oee-dt-state"><el-option v-for="key in downtimeStates" :key="key" :value="key" :label="stateLabels[key]" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.reason')"><el-select v-model="dtForm.reasonId" clearable class="dialog-select" data-test="oee-dt-reason"><el-option v-for="r in reasons" :key="r.id" :value="r.id" :label="`${r.code} ${r.name}`" /></el-select></el-form-item>
         <el-form-item :label="$t('oee.note')"><el-input v-model="dtForm.note" maxlength="500" /></el-form-item>
         <el-form-item :label="$t('oee.confirmed')"><el-checkbox v-model="dtForm.confirmed">{{ $t('ux.events.confirmed') }}</el-checkbox></el-form-item>
       </el-form>
       <template #footer><el-button :disabled="saving" @click="dtGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-dt-save" @click="saveDt">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="corrDlg" :title="$t('oee.correction')" width="520px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="corrGuard.beforeClose" @keydown="corrGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form ref="corrFormRef" :model="corrForm" :rules="corrRules" label-width="120px" status-icon :disabled="saving">
-        <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="corrForm.lineId" style="width:100%" data-test="oee-corr-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
-        <el-form-item :label="$t('oee.start')" prop="start"><el-date-picker v-model="corrForm.start" type="datetime" style="width:100%" /></el-form-item>
-        <el-form-item :label="$t('oee.end')" prop="end" :error="fieldErrors.end"><el-date-picker v-model="corrForm.end" type="datetime" style="width:100%" /></el-form-item>
+        <el-form-item :label="$t('oee.line')" prop="lineId"><el-select v-model="corrForm.lineId" class="dialog-select" data-test="oee-corr-line"><el-option v-for="l in controllableLines" :key="l.id" :value="l.id" :label="l.name" /></el-select></el-form-item>
+        <el-form-item :label="$t('oee.start')" prop="start"><el-date-picker v-model="corrForm.start" type="datetime" class="dialog-select" /></el-form-item>
+        <el-form-item :label="$t('oee.end')" prop="end" :error="fieldErrors.end"><el-date-picker v-model="corrForm.end" type="datetime" class="dialog-select" /></el-form-item>
         <el-form-item :label="$t('oee.good')"><el-input-number v-model="corrForm.goodDelta" data-test="oee-corr-good" /></el-form-item>
         <el-form-item :label="$t('oee.reject')"><el-input-number v-model="corrForm.rejectDelta" /></el-form-item>
         <el-form-item :label="$t('oee.scrap')"><el-input-number v-model="corrForm.scrapDelta" /></el-form-item>
@@ -167,7 +167,7 @@
       <template #footer><el-button :disabled="saving" @click="corrGuard.close">{{ $t('oee.cancel') }}</el-button><el-button type="primary" :loading="saving" data-test="oee-corr-save" @click="saveCorr">{{ $t('oee.save') }}</el-button></template>
     </el-dialog>
     <el-dialog v-model="thDlg" :title="$t('oee.thresholds')" width="480px" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" :before-close="thGuard.beforeClose" @keydown="thGuard.onKey">
-      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon style="margin-bottom: 8px" data-test="oee-form-error" />
+      <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon class="dialog-alert" data-test="oee-form-error" />
       <el-form label-width="160px" v-if="thForm" :disabled="saving">
         <el-form-item :label="$t('oee.targetOee')"><el-input-number v-model="thForm.targetOee" :min="0" :max="1" :step="0.01" /></el-form-item>
         <el-form-item :label="$t('oee.targetA')"><el-input-number v-model="thForm.targetAvailability" :min="0" :max="1" :step="0.01" /></el-form-item>
@@ -537,9 +537,12 @@ const thGuard = useEditDialog({ visible: thDlg, saving, snapshot: () => JSON.str
 </script>
 
 <style scoped>
-.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+/* 弹窗内重复出现的内联宽度/间距收敛成语义类；等价值已由 token 表达。 */
+.dialog-select { width: 100%; }
+.dialog-alert { margin-bottom: var(--scada-space-2); }
+.toolbar { display: flex; gap: var(--scada-space-2); align-items: center; margin-bottom: var(--scada-space-3); }
 .spacer { flex: 1; }
-.mt { margin-top: 8px; }
+.mt { margin-top: var(--scada-space-2); }
 .event-filters { flex-wrap: wrap; }
 .event-filters :deep(.el-select) { width: 180px; }
 .event-filters :deep(.el-date-editor) { max-width: 100%; }

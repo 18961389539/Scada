@@ -76,6 +76,7 @@ public static class TagEndpoints
             string? deviceIds,
             string? quality,
             string? sort,
+            string? order,
             int? skip,
             int? take,
             HttpContext http,
@@ -126,6 +127,17 @@ public static class TagEndpoints
                 var rank = alarms.GroupBy(alarm => alarm.TagId).ToDictionary(group => group.Key, group => group.Any(alarm => alarm.Level == AlarmLevel.Critical) ? 4 : 3);
                 int Rank(Tag tag) => rank.TryGetValue(tag.Id, out var alarmRank) ? alarmRank : cache.Get(tag.Id) is { Quality: not TagQuality.Good } ? 2 : 0;
                 scoped = scoped.OrderByDescending(Rank).ThenBy(tag => tag.Id).ToList();
+            }
+            else if (sort is "id" or "name")
+            {
+                // 排序必须在 skip/take 之前做：分页后只排当前页，会让"按名称排序"看起来只对 100 条生效。
+                // 名称用 OrdinalIgnoreCase 而非 CurrentCulture：服务器与容器语言环境不同时顺序才不会漂移。
+                var descending = order is "desc" or "descending";
+                scoped = sort == "id"
+                    ? (descending ? scoped.OrderByDescending(tag => tag.Id) : scoped.OrderBy(tag => tag.Id)).ToList()
+                    : (descending
+                        ? scoped.OrderByDescending(tag => tag.Name, StringComparer.OrdinalIgnoreCase)
+                        : scoped.OrderBy(tag => tag.Name, StringComparer.OrdinalIgnoreCase)).ToList();
             }
 
             http.Response.Headers["X-Total-Count"] = scoped.Count.ToString();

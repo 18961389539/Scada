@@ -29,7 +29,7 @@
           class="nav-pin"
           :class="[{ active: isCurrent(item), 'is-dragging': isDragging('fav', item.path) }, dropClass('fav', item.path)]"
           :aria-current="isCurrent(item) ? 'page' : undefined"
-          :title="$t(item.titleKey)"
+          :title="item.id === 'control' && pendingCount ? $t('pendingApprovals.countTitle', [pendingCount]) : $t(item.titleKey)"
           :data-nav-path="item.path"
           :data-test="'nav-fav-' + item.id"
           @pointerdown="onPointerDown({ kind: 'fav', id: item.path }, $event)"
@@ -103,6 +103,12 @@
               {{ alarmCount > 99 ? '99+' : alarmCount }}
             </span>
           </template>
+          <template v-else-if="item.id === 'control' && pendingCount > 0">
+            <i v-if="collapsed" class="nav-dot pending" data-test="nav-pending-dot" />
+            <span v-else class="nav-count pending" data-test="nav-pending-count">
+              {{ pendingCount > 99 ? '99+' : pendingCount }}
+            </span>
+          </template>
           <button
             v-if="canDrag"
             type="button"
@@ -164,8 +170,9 @@ import { displayOrder, loadNavOrder, moveRelative, reorderVisible, saveNavOrder,
 const props = withDefaults(defineProps<{
   alarmCount?: number
   alarmFlood?: boolean
+  pendingCount?: number
   collapsed?: boolean
-}>(), { alarmCount: 0, alarmFlood: false, collapsed: false })
+}>(), { alarmCount: 0, alarmFlood: false, pendingCount: 0, collapsed: false })
 const emit = defineEmits<{ navigate: [] }>()
 
 const route = useRoute()
@@ -181,6 +188,7 @@ const navOrder = ref<NavOrder>(loadNavOrder(auth.user?.userName))
 
 const alarmCount = computed(() => props.alarmCount)
 const alarmFlood = computed(() => props.alarmFlood)
+const pendingCount = computed(() => props.pendingCount)
 const collapsed = computed(() => props.collapsed)
 const adjusting = ref(false)
 const canDrag = computed(() => adjusting.value && !collapsed.value && !filter.value.trim())

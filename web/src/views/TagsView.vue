@@ -8,7 +8,7 @@
         <el-input v-model="search" clearable :placeholder="$t('tagsView.k06b76d')" :aria-label="$t('tagsView.k06b76d')" style="width: 220px" @keydown.enter="onSearchKey" />
         <el-button type="primary" :icon="Search" :loading="loading" data-test="tag-query" @click="applyQuery">{{ $t('configurationUx.query') }}</el-button>
         <el-button v-if="filterDevice !== undefined || search || appliedDeviceId || catalog.applied.value.search" link type="primary" data-test="tag-reset-filters" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-        <el-button :icon="Refresh" :loading="loading" data-test="tag-refresh" @click="load">{{ $t('listFilters.refresh') }}</el-button>
+        <el-button :icon="Refresh" :loading="loading" data-test="tag-refresh" @click="load(true)">{{ $t('listFilters.refresh') }}</el-button>
         <el-button v-if="controllableDevices.length" :icon="View" data-test="tag-preview" @click="openPreview">{{ $t('tagsView.k7f76da') }}</el-button>
         <!-- 低频操作收进「更多」：核心的查询、预览、新建始终留在工具栏首层 -->
         <el-dropdown trigger="click" @command="onMoreCommand">
@@ -25,7 +25,8 @@
         <input ref="importInput" type="file" accept=".xlsx" class="hidden-file" @change="onImportFile" />
         <span class="spacer" />
         <template v-if="selected.length">
-          <el-text data-test="tag-batch-count">{{ $t('tagsView.k805f4f', [selected.length]) }}</el-text>
+          <el-text data-test="tag-batch-count">{{ $t('tagsUxExtra.pageSelected', [selected.length, tagTotal]) }}</el-text>
+          <el-button v-if="tagTotal > selected.length" data-test="tag-select-all-matching" @click="selectAllMatching">{{ $t('tagsUxExtra.selectAllMatching') }}</el-button>
           <el-dropdown trigger="click" @command="batchArchive">
             <el-button data-test="tag-batch-archive">{{ $t('tagsView.k66f217') }}</el-button>
             <template #dropdown>
@@ -40,22 +41,21 @@
         <el-button type="primary" :icon="Plus" data-test="tag-create" @click="openCreate">{{ $t('tagsView.k573b8c') }}</el-button>
       </div>
       <div class="engineering-summary">
-        <p v-if="!loading || tags.length" class="catalog-result muted" role="status" data-test="tag-result-count">{{ $t('listFilters.loadedCount', [tags.length]) }}</p>
+        <p v-if="!loading || tags.length" class="catalog-result muted" role="status" data-test="tag-result-count">{{ $t('listFilters.loadedCount', [tagTotal]) }}</p>
         <el-switch v-model="showEngineering" :active-text="$t('ux.tables.engineering')" data-test="tag-engineering-columns" />
       </div>
       <el-alert v-if="pendingQuery" :title="$t('configurationUx.pendingQuery')" type="info" :closable="false" show-icon data-test="tag-query-pending" />
-      <p v-if="displayedQuery" class="tiny muted" role="status" data-test="tag-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, tags.length]) }}</p>
+      <p v-if="displayedQuery" class="tiny muted" role="status" data-test="tag-query-context">{{ $t('configurationUx.resultScope', [queryScope, page, tagTotal]) }}</p>
       <el-alert v-if="batchProgress" :title="batchCancel ? $t('batchUx.stopping') : batchProgress" type="info" :closable="false" show-icon style="margin-bottom: 8px" data-test="tag-batch-progress" />
       <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
 
       <el-table
         ref="tableRef"
         v-loading="loading"
-        :data="pagedTags"
+        :data="tags"
         :default-sort="{ prop: sortKey, order: sortOrder }"
         size="small"
         height="100%"
-        :empty-text="loadError && !tags.length ? loadError : $t('tagsView.k1b4bde')"
         row-key="id"
         class="engineering-table"
         data-test="tags-table"
@@ -63,15 +63,14 @@
         @sort-change="onSortChange"
       >
         <template #empty>
-          <span v-if="loadError">{{ loadError }}</span>
-          <template v-else-if="filterDevice !== undefined || search.trim()">
-            <span>{{ $t('listFilters.noMatches') }}</span>
+          <PageState v-if="loadError" state="error" :description="loadError" :retry-text="$t('common.retry')" compact @retry="load(true)" />
+          <PageState v-else-if="filterDevice !== undefined || search.trim()" state="empty" :description="$t('listFilters.noMatches')" compact>
             <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-          </template>
-          <span v-else>{{ $t('tagsView.k1b4bde') }}</span>
+          </PageState>
+          <PageState v-else state="empty" :description="$t('tagsView.k1b4bde')" compact />
         </template>
         <el-table-column type="selection" width="48" :selectable="canSelect" />
-        <el-table-column v-if="showEngineering" prop="id" label="ID" width="70" sortable="custom" show-overflow-tooltip />
+        <el-table-column v-if="showEngineering" prop="id" label="ID" width="70" align="right" sortable="custom" show-overflow-tooltip />
         <el-table-column :label="$t('tagsView.k01f2c1')" width="130" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceName(row.deviceId) }}</template>
         </el-table-column>
@@ -89,8 +88,8 @@
         <el-table-column :label="$t('tagsView.ke4e46c')" width="80" show-overflow-tooltip>
           <template #default="{ row }">{{ dataTypeLabels[row.dataType] }}</template>
         </el-table-column>
-        <el-table-column v-if="showEngineering" :label="$t('tagsView.k93c2cc')" width="100" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.scale }} / {{ row.offset }}</template>
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k93c2cc')" width="100" align="right" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatValue(row.scale) }} / {{ formatValue(row.offset) }}</template>
         </el-table-column>
         <el-table-column prop="unit" :label="$t('tagsView.k8ec8c8')" width="70" show-overflow-tooltip />
         <el-table-column :label="$t('tagsView.k26ae2c')" width="56" show-overflow-tooltip>
@@ -99,8 +98,10 @@
         <el-table-column :label="$t('tagsView.k091ca5')" width="90" show-overflow-tooltip>
           <template #default="{ row }">{{ archiveModeLabels[row.archiveMode] }}</template>
         </el-table-column>
-        <el-table-column v-if="showEngineering" prop="deadband" :label="$t('tagsView.k687c0b')" width="60" show-overflow-tooltip />
-        <el-table-column v-if="showEngineering" :label="$t('tagsView.k9b415a')" width="90" show-overflow-tooltip>
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k687c0b')" width="60" align="right" show-overflow-tooltip>
+          <template #default="{ row }">{{ formatValue(row.deadband) }}</template>
+        </el-table-column>
+        <el-table-column v-if="showEngineering" :label="$t('tagsView.k9b415a')" width="90" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ row.kind === 'Physical' && row.scanRateMs ? `${row.scanRateMs} ms` : '—' }}</template>
         </el-table-column>
         <el-table-column :label="$t('tagsView.kf3ea6d')" width="160" fixed="right">
@@ -121,7 +122,7 @@
           </div></template>
         </el-table-column>
       </el-table>
-      <el-pagination :current-page="page" :page-size="100" :total="tags.length" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @update:current-page="page = $event" @current-change="clearSelection" />
+      <el-pagination v-model:current-page="page" :page-size="PAGE_SIZE" :total="tagTotal" :pager-count="5" layout="total, prev, pager, next" hide-on-single-page data-test="tag-pagination" @current-change="clearSelection" />
     </div>
 
     <el-dialog v-model="dialogVisible" :title="editingId ? $t('tagsView.k4521a6') : (copying ? $t('tagsView.k40056b') : $t('tagsView.k573b8c'))" width="720px" data-test="tag-dialog" :before-close="editDialog.beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editDialog.onKey" @opened="onDialogOpened">
@@ -249,7 +250,7 @@
     <TagBatchDialog ref="batchDialog" :devices="batchableDevices" :initial-device-id="appliedDeviceId" @saved="onBatchSaved" />
 
     <TagPreviewDialog ref="previewDialog" :devices="controllableDevices" :initial-device-id="appliedDeviceId" />
-    <TagUsageDialog ref="usageDialog" :can-configure-tag="canConfigureTag" :fallback-candidates="tags" @changed="load" />
+    <TagUsageDialog ref="usageDialog" :can-configure-tag="canConfigureTag" :fallback-candidates="tags" @changed="load(true)" />
   </div>
 </template>
 
@@ -262,18 +263,20 @@ import { deviceApi, tagApi } from '../api'
 import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag, TagInput } from '../types'
 import { protocolDef } from '../protocols'
-import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, protocolAreas } from '../utils'
+import { areaLabels, archiveModeLabels, dataTypeLabels, downloadBlob, formatValue, protocolAreas } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { tr } from '../i18n'
 import { isMobile } from '../mobile'
 import { useAuthStore } from '../stores/auth'
 import { runBatch, summarizeBatch } from '../composables/batchRunner'
+import { tagQueryHasFilters } from '../composables/tagSelectionScope'
 import { readLastNumber, readLastText, rememberNumber, rememberText } from '../composables/lastChoice'
 import { applyFieldErrors, clearFieldErrors, serverFormErrors, type FieldErrorMap } from '../composables/formErrors'
 import { positiveQueryId } from '../nav/query'
 import { focusFormError, useEditDialog } from '../composables/useEditDialog'
 import { useCatalogQuery } from '../composables/useCatalogQuery'
 import PageStatusBar, { type PageIssue } from '../components/PageStatusBar.vue'
+import PageState from '../components/PageState.vue'
 import TagBatchDialog from '../components/tags/TagBatchDialog.vue'
 import TagPreviewDialog from '../components/tags/TagPreviewDialog.vue'
 import TagUsageDialog from '../components/tags/TagUsageDialog.vue'
@@ -281,27 +284,25 @@ import { emptyTagInput, tagToInput } from '../components/tags/tagInput'
 
 const auth = useAuthStore()
 const route = useRoute()
+const PAGE_SIZE = 100
 const devices = ref<Device[]>([])
 const tags = ref<Tag[]>([])
+const tagTotal = ref(0)
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
 const catalog = useCatalogQuery({ deviceId: '', search: '' })
 const page = computed({
-  get: () => Math.min(catalog.page.value, Math.max(1, Math.ceil(tags.value.length / 100))),
+  get: () => catalog.page.value,
   set: value => { catalog.page.value = value }
 })
 const sortKey = computed(() => route.query.sort === 'name' || route.query.sort === 'id' ? route.query.sort : '')
 const sortOrder = computed(() => route.query.order === 'ascending' || route.query.order === 'descending' ? route.query.order : null)
-const sortedTags = computed(() => {
-  const key = sortKey.value, direction = sortOrder.value === 'descending' ? -1 : 1
-  if (!key || !sortOrder.value) return tags.value
-  return [...tags.value].sort((a, b) => direction * (key === 'id' ? a.id - b.id : a.name.localeCompare(b.name, undefined, { numeric: true })))
-})
-const pagedTags = computed(() => sortedTags.value.slice((page.value - 1) * 100, page.value * 100))
+const sortParam = computed(() => sortKey.value && sortOrder.value ? sortKey.value : undefined)
+const orderParam = computed(() => sortOrder.value === 'ascending' ? 'asc' : sortOrder.value === 'descending' ? 'desc' : undefined)
 const tableRef = ref<TableInstance>()
 // 行内“更多”菜单只挂载当前打开的那一个下拉：100 行各挂一个 popper 会把首次渲染拖慢约 0.4 秒。
 const rowMenuId = ref<number | null>(null)
 const rowMenuRef = ref<DropdownInstance>()
-const rowMenuTag = computed(() => pagedTags.value.find(tag => tag.id === rowMenuId.value) ?? null)
+const rowMenuTag = computed(() => tags.value.find(tag => tag.id === rowMenuId.value) ?? null)
 async function openRowMenu(tag: Tag): Promise<void> {
   rowMenuId.value = tag.id
   await nextTick()
@@ -347,6 +348,8 @@ const displayedQuery = ref<{ deviceId?: number; search?: string } | null>(null)
 const requestedQuery = computed(() => ({ deviceId: appliedDeviceId.value, search: catalog.applied.value.search.trim() || undefined }))
 const pendingQuery = computed(() => catalog.pending.value || !!displayedQuery.value && JSON.stringify(displayedQuery.value) !== JSON.stringify(requestedQuery.value))
 const queryScope = computed(() => [displayedQuery.value?.deviceId ? deviceName(displayedQuery.value.deviceId) : '', displayedQuery.value?.search].filter(Boolean).join(' · ') || tr('configurationUx.all'))
+// 一次加载的唯一签名：筛选、页码、排序任一变化才发请求，watch 与手动刷新共用同一份去重依据。
+const requestKey = computed(() => JSON.stringify({ query: requestedQuery.value, page: page.value, sort: sortParam.value, order: orderParam.value }))
 const showEngineering = ref(false)
 const loading = ref(false)
 const loadError = ref('')
@@ -361,7 +364,7 @@ const pageIssues = computed<PageIssue[]>(() => {
   return issues
 })
 function onStatusAction(id: string): void {
-  if (id === 'load') void load()
+  if (id === 'load') void load(true)
   else if (id === 'devices') void loadDevices()
 }
 const saving = ref(false)
@@ -421,7 +424,7 @@ async function onBatchSaved(deviceId: number, created: number): Promise<void> {
   catalog.draft.search = ''
   const filtered = await catalog.apply()
   ElMessage.success(filtered ? tr('tagsUx.batchCreatedFiltered', [created, deviceLabel]) : tr('tagsView.k5e1fa9', [created]))
-  if (!filtered) await load()
+  if (!filtered) await load(true)
 }
 
 const formIsS7 = computed(() => devices.value.find(x => x.id === form.deviceId)?.protocol === 'SiemensS7')
@@ -466,17 +469,39 @@ function addressLabel(tag: Tag): string {
 const toInput = tagToInput
 
 let loadVersion = 0, disposed = false
-async function load(): Promise<void> {
+let loadedKey = ''
+async function load(force = false): Promise<void> {
   if (disposed) return
+  const key = requestKey.value
+  // 强制加载用于刷新按钮与写操作之后：数据可能变了，但筛选/页码/排序签名没变。
+  if (!force && key === loadedKey) return
   const version = ++loadVersion
   loading.value = true
   clearSelection()
   const query = { ...requestedQuery.value }
+  const requestedPage = page.value
   try {
-    const result = await tagApi.list(query)
+    const result = await tagApi.page({
+      ...query,
+      skip: (requestedPage - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      sort: sortParam.value,
+      order: orderParam.value
+    })
     if (version !== loadVersion) return
-    tags.value = result
+    tagTotal.value = result.total
+    const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE))
+    if (!result.items.length && requestedPage > lastPage) {
+      // 删掉当前页最后一条后会停在空页：回到最后一页，页码变化会重新触发一次加载。
+      loadedKey = ''
+      page.value = lastPage
+      displayedQuery.value = query
+      loadError.value = ''
+      return
+    }
+    tags.value = result.items
     displayedQuery.value = query
+    loadedKey = key
     loadError.value = ''
   } catch (error) {
     if (version !== loadVersion) return
@@ -485,11 +510,11 @@ async function load(): Promise<void> {
     if (version === loadVersion) loading.value = false
   }
 }
-watch(() => JSON.stringify(requestedQuery.value), () => { void load() })
+watch(requestKey, () => { void load() })
 onBeforeUnmount(() => { disposed = true; loadVersion++ })
 function onSearchKey(event: KeyboardEvent): void { event.preventDefault(); if (!event.isComposing && event.keyCode !== 229) void applyQuery() }
-async function applyQuery(): Promise<void> { if (!await catalog.apply()) await load() }
-async function resetFilters(): Promise<void> { if (!await catalog.apply(true)) await load() }
+async function applyQuery(): Promise<void> { if (!await catalog.apply()) await load(true) }
+async function resetFilters(): Promise<void> { if (!await catalog.apply(true)) await load(true) }
 
 function fillForm(tag: Tag, nameOverride?: string): void {
   Object.assign(form, toInput(tag, nameOverride ? { name: nameOverride } : {}))
@@ -576,7 +601,7 @@ async function save(): Promise<void> {
     }
     ElMessage.success(tr('tagsView.k7e68eb'))
     dialogVisible.value = false
-    await load()
+    await load(true)
   } catch (error) {
     const mapped = serverFormErrors(error, tr('tagsView.k40525a'), ['name', 'deviceId', 'nodeId', 'address'])
     applyFieldErrors(fieldErrors, mapped.fields)
@@ -604,7 +629,7 @@ async function remove(tag: Tag): Promise<void> {
     await ElMessageBox.confirm(`${tr('tagsView.kb70f0d')}\n\n${tr('actionUx.deleteTagCascade')}`, tr('ux.tables.confirmDelete', [tag.name]), { type: 'warning', confirmButtonText: tr('tagsView.k3755f5'), cancelButtonText: tr('tagsView.k4d0b46') })
     await tagApi.remove(tag.id)
     ElMessage.success(tr('tagsView.kfb5fe1'))
-    await load()
+    await load(true)
   } catch (error) {
     if (error === 'cancel' || error === 'close') return
     actionError.value = errorMessage(error, tr('tagsView.k72250c'))
@@ -623,7 +648,7 @@ async function reportBatch(report: Awaited<ReturnType<typeof runBatch>>, okText:
     const body = report.canceled ? `${summary}\n\n${tr('batchUx.stoppedSuffix', [pending])}` : summary
     await ElMessageBox.alert(body, tr('tagsView.kcfc1db'), { type: report.ok ? 'warning' : 'error', confirmButtonText: tr('tagsView.kcb63c6') })
   }
-  await load()
+  await load(true)
 }
 
 async function batchDelete(): Promise<void> {
@@ -653,7 +678,34 @@ async function batchArchive(mode: string): Promise<void> {
   await reportBatch(report, tr('tagsView.k10213b', [report.ok]))
 }
 
+
+async function selectAllMatching(): Promise<void> {
+  try {
+    const collected: Tag[] = []
+    let skip = 0
+    const take = 500
+    while (skip < tagTotal.value) {
+      const result = await tagApi.page({ ...requestedQuery.value, skip, take, sort: sortParam.value, order: orderParam.value })
+      collected.push(...result.items)
+      if (!result.items.length) break
+      skip += result.items.length
+    }
+    selected.value = collected.filter(canSelect)
+    await nextTick()
+    for (const row of selected.value) tableRef.value?.toggleRowSelection(row, true)
+  } catch (error) {
+    ElMessage.error(errorMessage(error, tr('tagsUxExtra.selectAllFailed')))
+  }
+}
 async function exportTags(): Promise<void> {
+  const filtered = tagQueryHasFilters(requestedQuery.value)
+  try {
+    await ElMessageBox.confirm(
+      tr(filtered ? 'tagsUxExtra.exportAllFilteredConfirm' : 'tagsUxExtra.exportAllConfirm'),
+      tr('tagsView.kc7f85b'),
+      { type: 'warning' }
+    )
+  } catch { return }
   actionError.value = ''
   try {
     const blob = await tagApi.export()
@@ -692,7 +744,7 @@ async function importTags(file: File): Promise<void> {
       tr('tagsView.k747404'),
       { type: result.errors.length ? 'warning' : 'success' }
     )
-    await load()
+    await load(true)
   } catch (error) {
     actionError.value = errorMessage(error, tr('tagsView.ka01a8d'))
   } finally { importing.value = false }

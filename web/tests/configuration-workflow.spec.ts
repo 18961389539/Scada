@@ -149,9 +149,8 @@ for (const kind of ['device', 'tag']) {
       const search = query.get('search')?.trim() ?? ''
       let filtered = items.filter(item => !search || item.name.includes(search))
       if (query.get('sort') === 'name') filtered = [...filtered].sort((a, b) => a.name.localeCompare(b.name))
-      if (query.get('order') === 'descending') filtered.reverse()
-      // 设备列表已是服务端分页：mock 必须按 skip/take 切片并回 X-Total-Count，否则页面只能拿到全量。
-      if (kind === 'tag') return route.fulfill({ json: filtered })
+      if (query.get('order') === 'descending' || query.get('order') === 'desc') filtered.reverse()
+      // 设备与测点列表都是服务端分页：mock 必须按 skip/take 切片并回 X-Total-Count，否则页面只能拿到全量。
       const skip = Number(query.get('skip') ?? 0)
       const take = Number(query.get('take') ?? filtered.length)
       return route.fulfill({ json: filtered.slice(skip, skip + take), headers: { 'X-Total-Count': String(filtered.length) } })

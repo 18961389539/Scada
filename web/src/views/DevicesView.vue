@@ -56,12 +56,11 @@
       </el-alert>
       <el-table ref="tableRef" v-loading="loading" :data="devices" :default-sort="{ prop: sortKey, order: sortOrder }" size="small" height="100%" row-key="id" class="engineering-table" data-test="devices-table" @selection-change="onSelect" @sort-change="onSortChange">
         <template #empty>
-          <span v-if="loadError">{{ loadError }}</span>
-          <template v-else-if="hasFilters">
-            <span>{{ $t('listFilters.noMatches') }}</span>
+          <PageState v-if="loadError" state="error" :description="loadError" :retry-text="$t('common.retry')" compact @retry="load()" />
+          <PageState v-else-if="hasFilters" state="empty" :description="$t('listFilters.noMatches')" compact>
             <el-button link type="primary" @click="resetFilters">{{ $t('listFilters.clear') }}</el-button>
-          </template>
-          <span v-else>{{ $t('devicesView.k2b9379') }}</span>
+          </PageState>
+          <PageState v-else state="empty" :description="$t('devicesView.k2b9379')" compact />
         </template>
         <el-table-column type="selection" width="48" :selectable="canConfigureDevice" />
         <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" show-overflow-tooltip />
@@ -154,6 +153,7 @@ import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
 import SimulationDialog from '../components/SimulationDialog.vue'
 import DeviceFormDialog from '../components/devices/DeviceFormDialog.vue'
+import PageState from '../components/PageState.vue'
 import DeviceTestDialog from '../components/devices/DeviceTestDialog.vue'
 import { tr } from '../i18n'
 import { formatTime } from '../utils'

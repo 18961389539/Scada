@@ -15,6 +15,12 @@ export interface UiAuditSnapshot {
   unlabeledFields: string[]
   /** 仅有占位提示、没有真正标签的字段（棘轮项，当前不阻断） */
   placeholderOnlyFields: string[]
+  /** 声明了 role="button" 却没有 tabindex 的自绘控件：鼠标能点，键盘 Tab 到不了 */
+  roleButtonsWithoutTabindex: string[]
+  /** tabindex 大于 0 会打乱整页 Tab 顺序 */
+  positiveTabindex: string[]
+  /** aria-hidden 容器里的可聚焦元素：读屏看不见，键盘却能 Tab 进去 */
+  focusableInAriaHidden: string[]
   /** 同一文档内重复的 id */
   duplicateIds: string[]
   h1Count: number
@@ -84,7 +90,9 @@ export async function collectUiAudit(page: Page, labelScope = 'body'): Promise<U
     const describe = (element: Element, kind: string): string => {
       const testId = element.getAttribute('data-test')
       const className = typeof element.className === 'string' ? element.className.slice(0, 60) : ''
-      return `${kind}${testId ? `[data-test=${testId}]` : ''}${className ? ` .${className.split(/\s+/).filter(Boolean).slice(0, 2).join('.')}` : ''}`
+      // 附带 outerHTML 片段：巡检报错必须能直接定位元素，否则只报"1 个 role=button"无法修复。
+      const snippet = element.outerHTML.slice(0, 90).replace(/\s+/g, ' ')
+      return `${kind}${testId ? `[data-test=${testId}]` : ''}${className ? ` .${className.split(/\s+/).filter(Boolean).slice(0, 2).join('.')}` : ''} <${snippet}>`
     }
 
     const unnamedButtons = [...scope.querySelectorAll('button')]
@@ -104,12 +112,41 @@ export async function collectUiAudit(page: Page, labelScope = 'body'): Promise<U
 
     const ids = [...document.querySelectorAll('[id]')].map(element => element.id).filter(Boolean)
     const duplicateIds = [...new Set(ids.filter((id, index) => ids.indexOf(id) !== index))]
+
+    // 键盘可达性：只查 DOM 能稳定判定的事实，避免绑定具体组件。
+    // 原生 button 自带 tabindex；Element Plus 组件内部（如 el-input-number 的增减按钮）由组件自身
+    // 接管键盘，不算我们漏了 tabindex——只查页面自绘的 role=button。
+    const isElementPlusWidget = (element: Element): boolean =>
+      /(^|\s)el-/.test(typeof element.className === 'string' ? element.className : '')
+    const roleButtonsWithoutTabindex = [...scope.querySelectorAll('[role="button"]')]
+      .filter(visible)
+      .filter(element => element.tagName !== 'BUTTON' && !element.hasAttribute('tabindex'))
+      .filter(element => !isElementPlusWidget(element))
+      .map(element => describe(element, 'role=button'))
+    const positiveTabindex = [...scope.querySelectorAll('[tabindex]')]
+      .filter(visible)
+      .filter(element => Number(element.getAttribute('tabindex')) > 0)
+      .map(element => describe(element, `tabindex=${element.getAttribute('tabindex')}`))
+    const focusableInAriaHidden = [...scope.querySelectorAll('[aria-hidden="true"]')]
+      .filter(visible)
+      .flatMap(hidden => [
+        ...hidden.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+      ])
+      .filter(visible)
+      // Element Plus 的 tooltip/popover 会把内容放进 aria-hidden 容器，元素本身仍由组件管理焦点，
+      // 与"我们的代码把可聚焦元素藏起来"不是一回事，按与 role=button 相同的规则排除。
+      .filter(element => !isElementPlusWidget(element))
+      .map(element => describe(element, 'aria-hidden-focusable'))
+
     const root = document.scrollingElement ?? document.documentElement
     return {
       horizontalOverflow: Math.max(0, root.scrollWidth - root.clientWidth),
       unnamedButtons,
       unlabeledFields,
       placeholderOnlyFields,
+      roleButtonsWithoutTabindex,
+      positiveTabindex,
+      focusableInAriaHidden,
       duplicateIds,
       h1Count: document.querySelectorAll('h1').length,
       mainCount: document.querySelectorAll('main, [role="main"]').length
@@ -127,6 +164,9 @@ export function auditViolations(rows: UiAuditRow[]): string[] {
     if (row.unnamedButtons.length) issues.push(`${where}: ${row.unnamedButtons.length} 个按钮没有可访问名称 → ${list(row.unnamedButtons)}`)
     if (row.unlabeledFields.length) issues.push(`${where}: ${row.unlabeledFields.length} 个字段没有标签 → ${list(row.unlabeledFields)}`)
     if (row.placeholderOnlyFields.length) issues.push(`${where}: ${row.placeholderOnlyFields.length} 个字段只有 placeholder 没有可访问名称 → ${list(row.placeholderOnlyFields)}`)
+    if (row.roleButtonsWithoutTabindex.length) issues.push(`${where}: ${row.roleButtonsWithoutTabindex.length} 个 role=button 缺少 tabindex，键盘无法到达 → ${list(row.roleButtonsWithoutTabindex)}`)
+    if (row.positiveTabindex.length) issues.push(`${where}: ${row.positiveTabindex.length} 处 tabindex>0 打乱 Tab 顺序 → ${list(row.positiveTabindex)}`)
+    if (row.focusableInAriaHidden.length) issues.push(`${where}: ${row.focusableInAriaHidden.length} 个可聚焦元素藏在 aria-hidden 容器里 → ${list(row.focusableInAriaHidden)}`)
     if (row.duplicateIds.length) issues.push(`${where}: 重复 id → ${list(row.duplicateIds)}`)
     if (row.h1Count !== 1) issues.push(`${where}: 期望 1 个 h1，实际 ${row.h1Count}`)
     // 页面里再嵌一层 main 会让读屏把内容切成两块主区域，HTML 本身也不允许

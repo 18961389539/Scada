@@ -3,7 +3,7 @@
     <!-- 键盘与读屏用户的第一个落点：跳过侧栏与顶栏，直接进入当前页面正文 -->
     <a class="skip-link" href="#main-content" data-test="skip-to-content" @click.prevent="focusMainContent">{{ $t('uxShell.skipToContent') }}</a>
     <el-aside v-if="!isMobile" :width="isMini ? '64px' : '220px'" class="aside">
-      <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :collapsed="isMini" />
+      <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :pending-count="pendingCount" :collapsed="isMini" />
     </el-aside>
 
     <el-drawer v-if="isMobile" v-model="drawer" direction="ltr" size="240px" :title="$t('nav.primary')" :with-header="false" class="mobile-drawer" data-test="mobile-drawer">
@@ -12,7 +12,7 @@
           <h2>{{ $t('nav.primary') }}</h2>
           <el-button text :aria-label="$t('nav.close')" data-test="mobile-menu-close" @click="drawer = false"><el-icon :size="20"><Close /></el-icon></el-button>
         </div>
-        <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" @navigate="drawer = false" />
+        <NavMenu id="primary-navigation" :alarm-count="activeAlarmCount" :alarm-flood="alarmFlood" :pending-count="pendingCount" @navigate="drawer = false" />
       </div>
     </el-drawer>
 
@@ -163,6 +163,7 @@ import { applyDensity, applyDisplay, applyTheme, currentDensity, currentDisplay,
 import { onHubEvent } from '../realtime/hub'
 import { useAlarmSession } from '../composables/useAlarmSession'
 import { useServiceStatus } from '../composables/useServiceStatus'
+import { usePendingApprovals } from '../composables/pendingApprovals'
 import ServiceStatusChips from '../components/ServiceStatusChips.vue'
 import { readSidebarMiniPreference, rememberSidebarMiniPreference, sidebarMiniFromMedia } from '../composables/sidebarMini'
 import { errorMessage } from '../api/http'
@@ -234,6 +235,7 @@ function toggleSidebar(): void {
 }
 
 const { soundEnabled, schedule: scheduleAnnunciatorSound } = useAlarmSession()
+const { pendingCount } = usePendingApprovals()
 const { healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
 const showHeaderStatus = computed(() =>
   healthAbnormal.value || alarmFlood.value ||

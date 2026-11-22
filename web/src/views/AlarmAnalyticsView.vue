@@ -51,8 +51,8 @@
           <div class="card" :class="{ warn: kpi.standing.length > 0 }"><div class="value">{{ kpi.standing.length }} / {{ kpi.stale.length }}</div><div class="label">{{ $t('alarmAnalytics.standingStale', [th.standingHours]) }}</div></div>
           <div class="card"><div class="value">{{ kpi.shelveCount }} · {{ kpi.shelvedHours }}h</div><div class="label">{{ $t('alarmAnalytics.shelved') }}</div></div>
           <div class="card"><div class="value">{{ kpi.suppressed }} · {{ kpi.suppressedHours }}h</div><div class="label">{{ $t('alarmAnalytics.suppressed') }}</div></div>
-          <div class="card clickable" data-test="kpi-fleeting" @click="drill({ kind: 'fleeting' }, $t('alarmAnalytics.fleeting'))"><div class="value">{{ kpi.fleetingTotal }}</div><div class="label">{{ $t('alarmAnalytics.fleetingCard', [th.fleetingSec]) }}</div></div>
-          <div class="card clickable" @click="drill({ kind: 'chattering' }, $t('alarmAnalytics.chattering'))"><div class="value">{{ kpi.chattering }}</div><div class="label">{{ $t('alarmAnalytics.chatteringCard') }}</div></div>
+          <div class="card clickable" role="button" tabindex="0" data-test="kpi-fleeting" @click="drillFleeting" @keydown.enter.prevent="drillFleeting" @keydown.space.prevent="drillFleeting"><div class="value">{{ kpi.fleetingTotal }}</div><div class="label">{{ $t('alarmAnalytics.fleetingCard', [th.fleetingSec]) }}</div></div>
+          <div class="card clickable" role="button" tabindex="0" data-test="kpi-chattering" @click="drillChattering" @keydown.enter.prevent="drillChattering" @keydown.space.prevent="drillChattering"><div class="value">{{ kpi.chattering }}</div><div class="label">{{ $t('alarmAnalytics.chatteringCard') }}</div></div>
         </div>
 
         <el-row :gutter="16">
@@ -71,48 +71,48 @@
               <el-table-column type="index" width="50" />
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
               <el-table-column :label="$t('alarmAnalytics.priority')" width="90" show-overflow-tooltip><template #default="{ row }"><el-tag :type="levelType(row.level)" size="small">{{ levelLabel(row.level) }}</el-tag></template></el-table-column>
-              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
-              <el-table-column prop="annunciated" :label="$t('alarmAnalytics.annunciatedCol')" width="90" show-overflow-tooltip />
-              <el-table-column prop="chatterEpisodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" show-overflow-tooltip />
-              <el-table-column prop="fleeting" :label="$t('alarmAnalytics.fleeting')" width="80" show-overflow-tooltip />
-              <el-table-column prop="percent" :label="$t('alarmAnalytics.percent')" width="80" show-overflow-tooltip />
-              <el-table-column prop="cumulativePercent" :label="$t('alarmAnalytics.cumulative')" width="90" show-overflow-tooltip />
+              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column prop="annunciated" :label="$t('alarmAnalytics.annunciatedCol')" width="90" align="right" show-overflow-tooltip />
+              <el-table-column prop="chatterEpisodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" align="right" show-overflow-tooltip />
+              <el-table-column prop="fleeting" :label="$t('alarmAnalytics.fleeting')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column prop="percent" :label="$t('alarmAnalytics.percent')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column prop="cumulativePercent" :label="$t('alarmAnalytics.cumulative')" width="90" align="right" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabChattering', [kpi.chatteringSources.length])" name="chatter">
             <el-table :data="kpi.chatteringSources" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-chatter" @row-click="(r: AlarmChatterItem) => drill({ source: r.source }, r.message)">
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
               <el-table-column :label="$t('alarmAnalytics.priority')" width="90" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
-              <el-table-column prop="activations" :label="$t('alarmAnalytics.activations')" width="90" show-overflow-tooltip />
-              <el-table-column prop="episodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" show-overflow-tooltip />
-              <el-table-column prop="maxInWindow" :label="$t('alarmAnalytics.maxInWindow', [th.chatterWindowSec])" width="140" show-overflow-tooltip />
+              <el-table-column prop="activations" :label="$t('alarmAnalytics.activations')" width="90" align="right" show-overflow-tooltip />
+              <el-table-column prop="episodes" :label="$t('alarmAnalytics.chatterEpisodes')" width="90" align="right" show-overflow-tooltip />
+              <el-table-column prop="maxInWindow" :label="$t('alarmAnalytics.maxInWindow', [th.chatterWindowSec])" width="140" align="right" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabFleeting', [kpi.fleeting.length])" name="fleeting">
             <el-table :data="kpi.fleeting" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-fleeting" @row-click="(r: AlarmFleetingItem) => drill({ source: r.source, kind: 'fleeting' }, r.message)">
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
-              <el-table-column prop="count" :label="$t('alarmAnalytics.fleeting')" width="80" show-overflow-tooltip />
-              <el-table-column prop="total" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
-              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80" show-overflow-tooltip><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
-              <el-table-column prop="p90DurationSec" :label="$t('alarmAnalytics.p90Duration')" width="120" show-overflow-tooltip />
+              <el-table-column prop="count" :label="$t('alarmAnalytics.fleeting')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column prop="total" :label="$t('alarmAnalytics.count')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80" align="right" show-overflow-tooltip><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
+              <el-table-column prop="p90DurationSec" :label="$t('alarmAnalytics.p90Duration')" width="120" align="right" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabConsequential', [kpi.consequential.length])" name="consequential">
             <el-table :data="kpi.consequential" size="small" :empty-text="$t('alarmAnalytics.none')" data-test="aa-consequential">
               <el-table-column prop="messageA" :label="$t('alarmAnalytics.alarmA')" min-width="160" show-overflow-tooltip />
-              <el-table-column prop="countA" :label="$t('alarmAnalytics.count')" width="70" show-overflow-tooltip />
+              <el-table-column prop="countA" :label="$t('alarmAnalytics.count')" width="70" align="right" show-overflow-tooltip />
               <el-table-column prop="messageB" :label="$t('alarmAnalytics.alarmB')" min-width="160" show-overflow-tooltip />
-              <el-table-column prop="countB" :label="$t('alarmAnalytics.count')" width="70" show-overflow-tooltip />
-              <el-table-column prop="together" :label="$t('alarmAnalytics.together', [th.consequentialWindowSec])" width="130" show-overflow-tooltip />
-              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80" show-overflow-tooltip><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
+              <el-table-column prop="countB" :label="$t('alarmAnalytics.count')" width="70" align="right" show-overflow-tooltip />
+              <el-table-column prop="together" :label="$t('alarmAnalytics.together', [th.consequentialWindowSec])" width="130" align="right" show-overflow-tooltip />
+              <el-table-column :label="$t('alarmAnalytics.ratio')" width="80" align="right" show-overflow-tooltip><template #default="{ row }">{{ Math.round(row.ratio * 100) }}%</template></el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabFloods', [kpi.floods.length])" name="floods">
             <el-table :data="kpi.floods" size="small" :empty-text="$t('alarmAnalytics.noFloods')" data-test="aa-floods" @row-click="(r: AlarmFloodPeriod) => drillFlood(r)">
               <el-table-column :label="$t('alarmAnalytics.start')" width="165" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-              <el-table-column :label="$t('alarmAnalytics.duration')" width="90" show-overflow-tooltip><template #default="{ row }">{{ Math.round((row.endTs - row.startTs) / 60000) }} min</template></el-table-column>
-              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
-              <el-table-column prop="peak10Min" :label="$t('alarmAnalytics.peak10Short')" width="100" show-overflow-tooltip />
+              <el-table-column :label="$t('alarmAnalytics.duration')" width="90" align="right" show-overflow-tooltip><template #default="{ row }">{{ Math.round((row.endTs - row.startTs) / 60000) }} min</template></el-table-column>
+              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column prop="peak10Min" :label="$t('alarmAnalytics.peak10Short')" width="100" align="right" show-overflow-tooltip />
               <el-table-column :label="$t('alarmAnalytics.firstOut')" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.firstOut?.message ?? '—' }}</template></el-table-column>
               <el-table-column :label="$t('alarmAnalytics.contributors')" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ row.contributors.slice(0, 3).map((c: AlarmSourceCount) => `${c.message}×${c.count}`).join('; ') }}</template></el-table-column>
             </el-table>
@@ -122,15 +122,15 @@
               <el-table-column prop="message" :label="$t('alarmAnalytics.alarm')" min-width="180" show-overflow-tooltip />
               <el-table-column :label="$t('alarmAnalytics.priority')" width="90" show-overflow-tooltip><template #default="{ row }">{{ levelLabel(row.level) }}</template></el-table-column>
               <el-table-column :label="$t('alarmAnalytics.start')" width="165" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.startTs) }}</template></el-table-column>
-              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" show-overflow-tooltip />
+              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" align="right" show-overflow-tooltip />
               <el-table-column :label="$t('alarmAnalytics.acked')" width="90" show-overflow-tooltip><template #default="{ row }">{{ row.acked ? $t('alarmAnalytics.yes') : $t('alarmAnalytics.no') }}</template></el-table-column>
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabShelving')" name="shelving">
             <el-table :data="kpi.shelvedByRule" size="small" :empty-text="$t('alarmAnalytics.none')">
               <el-table-column :label="$t('alarmAnalytics.rule')" min-width="180" show-overflow-tooltip><template #default="{ row }">{{ ruleName(row.ruleId) }}</template></el-table-column>
-              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" show-overflow-tooltip />
-              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" show-overflow-tooltip />
+              <el-table-column prop="count" :label="$t('alarmAnalytics.count')" width="80" align="right" show-overflow-tooltip />
+              <el-table-column prop="hours" :label="$t('alarmAnalytics.hours')" width="80" align="right" show-overflow-tooltip />
             </el-table>
           </el-tab-pane>
           <el-tab-pane :label="$t('alarmAnalytics.tabSuggestions', [report.suggestions.length])" name="suggestions">
@@ -397,6 +397,9 @@ async function drill(extra: { source?: string; kind?: string; ids?: number[] }, 
   finally { if (!disposed && seq === drillSeq) drillLoading.value = false }
 }
 function drillFlood(f: AlarmFloodPeriod): void { void drill({ ids: f.eventIds }, `${tr('alarmAnalytics.flood')} ${formatTime(f.startTs)}`, { from: f.startTs, to: f.endTs }) }
+// 自绘卡片不是原生按钮，必须补齐键盘入口；Enter 与 Space 都按按钮语义处理。
+function drillFleeting(): void { void drill({ kind: 'fleeting' }, tr('alarmAnalytics.fleeting')) }
+function drillChattering(): void { void drill({ kind: 'chattering' }, tr('alarmAnalytics.chattering')) }
 
 async function exportAs(format: 'xlsx' | 'pdf'): Promise<void> {
   if (disposed || !canExport.value || !lastFilter.value) return

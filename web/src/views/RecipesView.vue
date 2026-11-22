@@ -171,6 +171,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { notifySubmittedForApproval } from '../composables/pendingApprovalToast'
 import { areaApi, deviceApi, realtimeApi, tagApi } from '../api'
 import { recipeApi, type Recipe, type RecipeCheck, type RecipeCompare, type RecipeDownload, type RecipeParameter, type RecipeTemplate, type RecipeValue, type RecipeVersion } from '../api/recipes'
 import { continueFrom, errorMessage } from '../api/http'
@@ -471,7 +472,7 @@ async function confirmDownload(): Promise<void> {
     if (disposed) return
     lastSubmitted.value = d; downloads.value = [d, ...downloads.value.filter(row => row.id !== d.id)]
     if (d.status === 'Rejected') { downloadError.value = d.message || tr('recipesView.k5bf97e'); checkResult.value = null; return }
-    if (d.status === 'Pending') ElMessage.success(tr('recipesView.k33430c'))
+    if (d.status === 'Pending') notifySubmittedForApproval(tr('recipesView.k33430c'))
     else if (['Running', 'Completed'].includes(d.status)) ElMessage.success(tr('recipesView.kdfd357', [d.id]))
     downloadDialog.value = false
     await refresh(); if (!disposed) await showDownloads(id)

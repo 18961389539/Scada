@@ -6,6 +6,13 @@ import { test, expect, type APIRequestContext, type Page, loginApi } from './fix
 
 const total = 8
 
+// 应用启动时会先取协议目录；全局兜底 mock 若返回 [] 会触发"协议目录加载失败"整页阻断，
+// 这些用例就看不到任何表格。给出一项最小合法目录即可，协议本身不参与批量操作断言。
+const protocolCatalog = [{
+  value: 'ModbusTcp', label: 'Modbus TCP', defaultPort: 502, hostPort: true, credentials: false,
+  fields: [], addressPlaceholder: '40001'
+}]
+
 async function prepare(page: Page, request: APIRequestContext) {
   const auth = await loginApi(request)
   await page.addInitScript(({ token, user }) => {
@@ -44,6 +51,7 @@ test('测点批量删除可以中途停止', async ({ page, request }) => {
   await page.route('**/api/**', async route => {
     const { pathname, method } = { pathname: new URL(route.request().url()).pathname, method: route.request().method() }
     if (method === 'DELETE' && writes.pattern.test(pathname)) return writes.handler(route)
+    if (pathname === '/api/protocols') return route.fulfill({ json: protocolCatalog })
     if (pathname === '/api/tags') return route.fulfill({ json: tags() })
     if (pathname === '/api/devices') return route.fulfill({ json: devices().slice(0, 1) })
     return route.fulfill({ json: [] })
@@ -73,6 +81,7 @@ test('设备批量禁用可以中途停止', async ({ page, request }) => {
   await page.route('**/api/**', async route => {
     const { pathname, method } = { pathname: new URL(route.request().url()).pathname, method: route.request().method() }
     if (method === 'PUT' && writes.pattern.test(pathname)) return writes.handler(route)
+    if (pathname === '/api/protocols') return route.fulfill({ json: protocolCatalog })
     if (pathname === '/api/devices') return route.fulfill({ json: devices() })
     return route.fulfill({ json: [] })
   })
@@ -95,6 +104,7 @@ test('报警规则批量删除可以中途停止', async ({ page, request }) => 
   await page.route('**/api/**', async route => {
     const { pathname, method } = { pathname: new URL(route.request().url()).pathname, method: route.request().method() }
     if (method === 'DELETE' && writes.pattern.test(pathname)) return writes.handler(route)
+    if (pathname === '/api/protocols') return route.fulfill({ json: protocolCatalog })
     if (pathname === '/api/alarm-rules') return route.fulfill({ json: rules() })
     if (pathname === '/api/tags') return route.fulfill({ json: tags().slice(0, 1) })
     if (pathname === '/api/devices') return route.fulfill({ json: devices().slice(0, 1) })

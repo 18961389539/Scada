@@ -141,7 +141,7 @@ test('workbench onboarding: empty runtime explains screen/layout separation and 
   for (const size of [{ width: 1600, height: 900 }, { width: 1167, height: 768 }, { width: 320, height: 640 }]) {
     await page.setViewportSize(size)
     await page.goto('/console')
-    await expect(page.locator('.console-title')).toHaveText('运行工作台')
+    await expect(page.locator('.console-title')).toHaveText('控制室布局')
     await expect(page.locator('[data-test="console-layout-error"]')).toContainText('画面已发布不代表工作台已配置')
     await expect(page.locator('[data-test="console-create-workbench"]')).toBeVisible()
     expect(await page.locator('.console-controls [data-test="console-layout-error"]').count()).toBe(0)
@@ -267,7 +267,7 @@ test('workbench onboarding: runtime load errors remain explicit and English entr
   await expect(page.locator('[data-test="console-layout-error"]')).not.toContainText('No published workbench is available')
   state.failLayouts = false
   await page.locator('[data-test="console-layout-retry"]').click()
-  await expect(page.locator('.console-title')).toHaveText('Runtime workbench')
+  await expect(page.locator('.console-title')).toHaveText('Control room layout')
   await page.locator('[data-test="console-empty-configure"]').click()
   await expect(page.locator('[data-test="nav-item-layouts"]')).toContainText('Workbench setup')
   await expect(page.locator('[data-test="nav-item-console"]')).toContainText('Control room layout')

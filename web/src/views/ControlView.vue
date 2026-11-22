@@ -161,6 +161,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { InfoFilled } from '@element-plus/icons-vue'
 import { areaApi, deviceApi, tagApi } from '../api'
 import { controlApi, type ControlLockout, type ControlPoint, type ControlRequest, type ControlRun, type ControlSequence, type ControlStep, type DeviceControlState } from '../api/control'
+import { isPendingControlRequest, usePendingApprovals } from '../composables/pendingApprovals'
 import { commandErrorMessage, continueFrom, errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
@@ -219,8 +220,9 @@ watch(tab, value => {
 const devices = ref<NamedDevice[]>([]), tags = ref<NamedTag[]>([]), areas = ref<{ id: number; name: string }[]>([])
 const configurableAreas = computed(() => areas.value.filter(a => canConfigureArea(a.id)))
 type ControlRequestRow = { request: ControlRequest; sequenceName: string | null; recipe?: RecipeDownload | null; mine: boolean }
-const requests = ref<ControlRequestRow[]>([])
-const loadError = ref(''), areasError = ref(''), requestsError = ref(''), runsError = ref(''), actionError = ref('')
+const pendingApprovals = usePendingApprovals()
+const requests = pendingApprovals.rows as typeof pendingApprovals.rows
+const loadError = ref(''), areasError = ref(''), requestsError = pendingApprovals.error, runsError = ref(''), actionError = ref('')
 // 六类错误合并为一条状态条：失败多的场景下不再把页签内容顶到首屏之外。
 const pageIssues = computed<PageIssue[]>(() => {
   const issues: PageIssue[] = []
@@ -256,7 +258,7 @@ const deciding = reactive(new Set<string>())
 
 // 双人复核有有效期（expiresTs），此前前端完全没展示：审批人不知道还剩多久
 const now = ref(Date.now())
-function requestStatus(request: ControlRequest): string { return request.status === 'Pending' && request.expiresTs <= now.value ? 'Expired' : request.status }
+function requestStatus(request: ControlRequest): string { return request.status === 'Pending' && !isPendingControlRequest(request, now.value) ? 'Expired' : request.status }
 function requestIsCurrent(id: string): boolean {
   const request = requests.value.find(row => row.request.id === id)?.request
   return !!request && request.status === 'Pending' && request.expiresTs > Date.now()
@@ -472,6 +474,22 @@ const runFlowFailure = computed(() => {
   }
 })
 function openRunFlow(row: ControlRun): void { runFlowId.value = row.id; runFlowVisible.value = true }
+function runIdFromQuery(value: unknown): number | null {
+  const id = Number(value)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+watch([() => route.query.run, runs, tab], async () => {
+  const id = runIdFromQuery(route.query.run)
+  if (id == null) return
+  if (tab.value !== 'sequences') {
+    tab.value = 'sequences'
+    return
+  }
+  const row = runs.value.find(item => item.id === id)
+  if (!row) return
+  focusedKey.value = `run:${row.id}`
+  if (runFlowId.value !== row.id || !runFlowVisible.value) openRunFlow(row)
+})
 // 弹窗里的画布首次渲染时容器还没有尺寸，组件内那次 fit 会落空，等打开动画结束再处理一次。
 // 失败/中止的运行直接定位到出错那一步（保持 100%），其余情况整览。
 const runFlowRef = ref<{ fit: (options?: { padding?: number; minZoom?: number }) => void; focusNode: (id: string) => void } | null>(null)
@@ -550,11 +568,7 @@ usePolling(async () => {
   catch (e) { runsError.value = errorMessage(e, tr('controlView.runsLoadFailed')) }
 }, 1000)
 // 待审批请求自动刷新：审批人盯着页面时不必反复手动点「刷新」
-usePolling(async () => {
-  if (tab.value !== 'requests') return
-  try { requests.value = await controlApi.requests(); requestsError.value = '' }
-  catch (e) { requestsError.value = errorMessage(e, tr('controlView.requestsLoadFailed')) }
-}, 5000)
+// 待复核列表与侧栏/控制室角标共用同一轮询，避免两套刷新逻辑漂移。
 function requestRowClass({ row }: { row: ControlRequestRow }): string {
   return tab.value === 'requests' && focusedKey.value === row.request.id ? 'control-row-focused' : ''
 }

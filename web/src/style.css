@@ -361,6 +361,14 @@ a:focus-visible { outline: 2px solid var(--scada-primary); outline-offset: 2px; 
   font-variant-numeric: tabular-nums;
 }
 
+/* 自绘可点击控件（role="button" 的 div/span/li）统一焦点环：
+   原生 button/a 与 Element Plus 组件保留自身样式，避免双层描边。
+   新增自绘按钮照此约定补 role + tabindex + Enter/Space 处理，ui-audit 会拦漏项。 */
+[role='button']:not(button):focus-visible {
+  outline: 2px solid var(--scada-accent-ink);
+  outline-offset: 2px;
+}
+
 /* ---------- Page framework ---------- */
 /* 页面名只出现在顶栏；面板内标题统一降为区块标题，避免同一屏里重复两次。 */
 .toolbar h2,
@@ -528,6 +536,12 @@ html.dark .login-card {
   --el-table-row-hover-bg-color: var(--scada-panel-hover);
 }
 
+/* 表格里的数字统一等宽字形：同一列的小数位在滚动、刷新时不左右跳，长表更容易扫读。
+   只影响数字字形，中文与普通字母不受影响。数值列另用 align="right" 对齐。 */
+.panel .el-table .cell {
+  font-variant-numeric: tabular-nums;
+}
+
 .panel .el-table th.el-table__cell {
   font-weight: 600;
   color: var(--scada-text-secondary);
@@ -628,6 +642,31 @@ html[data-density='compact'] .el-table th.el-table__cell {
 
 html[data-density='compact'] .el-table .cell {
   line-height: 1.35;
+}
+
+/* compact 之前只收紧了 .page/.panel/表格，自定义卡片与工具栏仍是舒适密度，
+   切换后"只有表格变紧"、上下留白反而不协调。这里把同一层级的容器一起收紧。 */
+html[data-density='compact'] .toolbar {
+  gap: var(--scada-space-2);
+  margin-bottom: var(--scada-space-3);
+}
+
+html[data-density='compact'] .card-grid {
+  gap: var(--scada-space-2);
+  margin-bottom: var(--scada-space-3);
+}
+
+html[data-density='compact'] .stat-card {
+  padding: var(--scada-space-3) var(--scada-space-4);
+}
+
+html[data-density='compact'] .stat-card .value {
+  font-size: 22px;
+  margin-top: var(--scada-space-1);
+}
+
+html[data-density='compact'] .page-state {
+  padding: 0;
 }
 
 /* 控制室显示档：与 compact 相反，面向 2–3 米观看距离。
@@ -785,3 +824,60 @@ html[data-display='control-room'] .el-tag {
 /* Critical 报警弹窗挂在布局之外：样式必须是全局的，运行工作台/Kiosk 才能看见可点击提示。 */
 .scada-alarm-toast { cursor: pointer; border-left: 4px solid var(--scada-alarm-critical); }
 .scada-alarm-toast:hover { box-shadow: var(--scada-shadow); }
+
+
+.pending-approval-toast {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pending-approval-toast__action {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--scada-accent-ink);
+  cursor: pointer;
+  text-decoration: underline;
+}
+.pending-approval-toast__action:focus-visible {
+  outline: 2px solid var(--scada-accent-ink);
+  outline-offset: 2px;
+}
+.ws-tab-alarm.is-button,
+.ws-all-alarm.is-button {
+  cursor: pointer;
+}
+.ws-tab-alarm.is-incomplete,
+.ws-all-alarm.is-incomplete {
+  opacity: 0.9;
+}
+.nav-count.pending {
+  background: var(--scada-warning-bg, color-mix(in srgb, var(--el-color-warning) 18%, transparent));
+  color: var(--el-color-warning);
+}
+.console-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.runtime-sequence-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--scada-panel, var(--el-bg-color));
+  border-bottom: 1px solid var(--scada-border, var(--el-border-color));
+}
+.runtime-sequence-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.screen-canvas g.alarm-highlight,
+.canvas-preview g.alarm-highlight {
+  outline: 2px solid var(--scada-alarm-critical);
+  outline-offset: 2px;
+}
