@@ -25,6 +25,7 @@ export function emptyTagInput(): TagInput {
 
 export function tagToInput(tag: Tag, patch: Partial<TagInput> = {}): TagInput {
   return {
+    revision: tag.calculationRevision ?? tag.revision,
     deviceId: tag.deviceId!,
     name: tag.name,
     description: tag.description ?? '',

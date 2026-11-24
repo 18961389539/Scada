@@ -1,4 +1,6 @@
 using Microsoft.EntityFrameworkCore;
+using Scada.Core.Configuration;
+using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Alarms;
@@ -53,6 +55,8 @@ public static class AnnunciatorEndpoints
             if (await RequireConfigureAsync(http, input.AreaId, $"修改声光面板区域 {input.Name}") is { } d2) return d2;
             if (await RequireOutputsAsync(http, factory, runtimeFactory, input, ct) is { } outputDenied) return outputDenied;
             var (dto, error) = await svc.UpsertAsync(id, input, http.User.GetUserName(), ct);
+            if (error == ConfigRevision.ConflictMessage)
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { new ValidationIssue(ConfigRevision.ConflictCode, ConfigRevision.Field, ConfigRevision.ConflictMessage).ToApiIssue() } });
             if (error is not null) return EndpointHelpers.BadRequest(error);
             // 审计行由 AuditInterceptor 自动写（AnnunciatorPanel 实现了 IAuditedEntity）。
             return Results.Ok(dto);

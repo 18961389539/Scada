@@ -48,7 +48,7 @@ public sealed class McpGovernanceTools(
             .ToArray();
         return new(snapshot.Status, snapshot.Warnings, snapshot.Ha, snapshot.Environment, snapshot.ServerTime,
             snapshot.UptimeSeconds, snapshot.HostUptimeSeconds, snapshot.OnlineDevices, snapshot.TotalDevices,
-            offline, snapshot.ConfiguredTags, snapshot.BusBacklog, snapshot.BusDropped, snapshot.HistoryCapacity,
+            offline, snapshot.ConfiguredTags, snapshot.BusBacklog, snapshot.BusDropped, snapshot.BusHistoryRejected, snapshot.BusHistoryGapRejected, snapshot.HistoryCapacity,
             snapshot.HistoryQueries, snapshot.HistorySpool, snapshot.AlarmWebhook, snapshot.AlarmNotifications,
             snapshot.Disk, snapshot.Storage, snapshot.ServerTime.ToUnixTimeMilliseconds(),
             snapshot.Devices.Count(x => !x.Online) > offline.Length);
@@ -314,7 +314,7 @@ public sealed class McpGovernanceTools(
     public sealed record McpHealth(string Status, IReadOnlyList<SystemWarning> Warnings, HealthHa? Ha,
         string Environment, DateTimeOffset ServerTime, long UptimeSeconds, long HostUptimeSeconds,
         int OnlineDevices, int TotalDevices, IReadOnlyList<McpOfflineDevice> OfflineDevices,
-        int ConfiguredTags, int BusBacklog, long BusDropped, HistoryCapacity? HistoryCapacity,
+        int ConfiguredTags, int BusBacklog, long BusDropped, long BusHistoryRejected, long BusHistoryGapRejected, HistoryCapacity? HistoryCapacity,
         HealthHistoryQueries? HistoryQueries, HealthSpool HistorySpool, HealthWebhook AlarmWebhook,
         HealthNotifications? AlarmNotifications, HealthDisk Disk, HealthStorage Storage,
         long DataAsOf, bool Truncated);

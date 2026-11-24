@@ -15,6 +15,12 @@ export interface GatewayAssignment {
   deviceId: number; deviceName: string; gatewayId: number | null; gatewayName: string | null
   enabled: boolean; disabledSinceTs: number; canMove: boolean; blockReason: string | null
 }
+export interface GatewayDeadLetterPreview {
+  gatewayId: number; streamId: string; sequence: number
+  canReplay: boolean; alreadyReplayed: boolean
+  writeCount: number; skipCount: number
+  reason: string | null; notes: string[]
+}
 export interface GatewayDeadLetter {
   gatewayId: number; streamId: string; sequence: number; deviceId: number; revision: string
   receivedTs: number; failedTs: number; attempts: number; error: string | null; payloadBytes: number; payloadJson: string | null
@@ -28,6 +34,8 @@ export const gatewayApi = {
     readPage(await http.get<GatewayDeadLetter[]>(`/gateways/${id}/dead-letters`, { params: before ? { beforeTs: before.failedTs, beforeSequence: before.sequence, beforeStream: before.streamId } : {} })),
   deadLetter: async (letter: GatewayDeadLetter) => (await http.get<GatewayDeadLetter>(letterPath(letter))).data,
   discardDeadLetter: async (letter: GatewayDeadLetter) => http.delete(letterPath(letter)),
+  previewDeadLetter: async (letter: GatewayDeadLetter) => (await http.post<GatewayDeadLetterPreview>(`${letterPath(letter)}/preview`)).data,
+  replayDeadLetter: async (letter: GatewayDeadLetter) => (await http.post<GatewayDeadLetterPreview>(`${letterPath(letter)}/replay`)).data,
   create: async (name: string) => (await http.post<{ id: number; token: string }>('/gateways', { name })).data,
   update: async (gateway: GatewayInfo, name: string, enabled: boolean) => http.put(`/gateways/${gateway.id}`, { name, enabled }, match(gateway.adminRevision)),
   rotate: async (gateway: GatewayInfo) => (await http.post<{ token: string }>(`/gateways/${gateway.id}/rotate-key`, undefined, match(gateway.adminRevision))).data,

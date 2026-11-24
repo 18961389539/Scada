@@ -7,6 +7,7 @@ using Scada.Data;
 using Scada.Server.Auth;
 using Scada.Server.Services;
 using Scada.Engine.Alarms;
+using Scada.Core.Configuration;
 
 namespace Scada.Server.Endpoints;
 
@@ -149,9 +150,17 @@ public static class AlarmRuleEndpoints
             if (await CheckSuppressTagAccessAsync(http, updated!) is { } suppressError) return suppressError;
             if (await CheckExpressionTagAccessAsync(http, updated!, $"修改报警规则 #{id}") is { } expressionError) return expressionError;
 
+            if (!ConfigRevision.TryAccept(rule.Revision, request.Revision, out var revisionIssue))
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { revisionIssue!.Value.ToApiIssue() } });
+
             rule.ApplyEditableFrom(updated!);
+            rule.Revision = ConfigRevision.Next(rule.Revision);
             // 审计由拦截器写。
-            await commands.SaveAsync(db, cancellationToken);
+            try { await commands.SaveAsync(db, cancellationToken); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage });
+            }
             return Results.Ok(rule);
         }).Produces<AlarmRule>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Configure);
 

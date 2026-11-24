@@ -38,6 +38,7 @@ public class NotificationChannel
     // 敏感参数（SMTP 口令、webhook/短信鉴权头的值）以 DataProtection 加密保存，接口永不回显。
     [Sensitive]
     public string? SecretProtected { get; set; }
+    public long Revision { get; set; } = 1;
 }
 
 public class DutyShift
@@ -69,6 +70,7 @@ public class NotificationRoute
     public bool OnRecover { get; set; }
     // 有值时为升级路由：报警持续未确认达到该分钟数才发送一次，不参与触发/恢复通知。
     public int? EscalateAfterMinutes { get; set; }
+    public long Revision { get; set; } = 1;
 }
 
 public class AlarmNotificationLog

@@ -1,6 +1,6 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { realtimeApi } from '../api'
-import { subscribeTags, type TagSubscription } from '../realtime/hub'
+import { onHubReconnected, subscribeTags, type TagSubscription } from '../realtime/hub'
 import type { TagValue } from '../types'
 
 /**
@@ -23,6 +23,7 @@ export function useDesignerTagValues(options: {
   let generation = 0
   let timer: number | undefined
   let stopped = false
+  let disposeReconnect: (() => void) | undefined
 
   function stopSubscription(): void {
     generation++
@@ -67,6 +68,8 @@ export function useDesignerTagValues(options: {
   function start(): void {
     if (options.disabled()) return
     stopped = false
+    disposeReconnect?.()
+    disposeReconnect = onHubReconnected(() => { void refresh() })
     void refresh()
     timer = window.setInterval(() => {
       if (window.document.visibilityState === 'visible') void refresh()
@@ -76,6 +79,8 @@ export function useDesignerTagValues(options: {
   function stop(): void {
     stopped = true
     stopSubscription()
+    disposeReconnect?.()
+    disposeReconnect = undefined
     if (timer !== undefined) {
       window.clearInterval(timer)
       timer = undefined

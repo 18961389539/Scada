@@ -35,7 +35,8 @@ public sealed class HistorySpool
         long segmentBytes = 16L * 1024 * 1024,
         long minFreeMb = 0,
         bool dropOldestOnFull = false,
-        Func<long?>? freeBytesProbe = null)
+        Func<long?>? freeBytesProbe = null,
+        HistoryLossLog? lossLog = null)
     {
         if (string.IsNullOrWhiteSpace(historyRoot)) throw new ArgumentException("历史根目录不能为空", nameof(historyRoot));
         if (maxBytes < 512) throw new ArgumentOutOfRangeException(nameof(maxBytes));
@@ -49,6 +50,7 @@ public sealed class HistorySpool
         _minFreeMb = Math.Max(0, minFreeMb);
         _freeBytesProbe = freeBytesProbe;
         _dropOldestOnFull = dropOldestOnFull;
+        _lossLog = lossLog;
         DiscoverState();
     }
 
@@ -56,6 +58,7 @@ public sealed class HistorySpool
     public string FilePath => Path.Combine(_directory, LegacyFileName);
     public string DirectoryPath => _directory;
     public long DroppedBatches => Interlocked.Read(ref _dropped);
+    private readonly HistoryLossLog? _lossLog;
     public long SpilledBatches => Interlocked.Read(ref _spilled);
     public long CorruptLines => Interlocked.Read(ref _corrupt);
     // 淘汰旧分段时删除失败（文件被读者/杀软占用）的次数。持续增长说明暂存永远降不下来，
@@ -102,6 +105,7 @@ public sealed class HistorySpool
             if (IsDiskCriticallyLow())
             {
                 Interlocked.Increment(ref _dropped);
+                RecordDrop(batch, "磁盘可用空间低于拒收门槛");
                 throw new IOException($"历史根目录可用空间低于拒收门槛 {_minFreeMb} MB，本批次 {batch.Count} 条未能落盘");
             }
 
@@ -114,6 +118,7 @@ public sealed class HistorySpool
                 if (pending + bytes > _maxBytes)
                 {
                     Interlocked.Increment(ref _dropped);
+                    RecordDrop(batch, "暂存已达上限");
                     throw new IOException($"历史暂存已达上限（{_maxBytes} 字节），本批次 {batch.Count} 条未能落盘");
                 }
             }
@@ -192,6 +197,99 @@ public sealed class HistorySpool
         finally { _gate.Release(); }
     }
 
+
+    public HistorySpoolPending DescribePending()
+    {
+        _gate.Wait();
+        try
+        {
+            DiscoverState();
+            var files = ListPendingFiles();
+            long bytes = 0, count = 0, from = long.MaxValue, to = long.MinValue;
+            foreach (var path in files)
+            {
+                try { bytes += new FileInfo(path).Length; } catch { }
+                IEnumerable<string> lines;
+                try { lines = File.ReadLines(path); }
+                catch { continue; }
+                foreach (var line in lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    // 每行是一批样本的 JSON 数组（AppendAsync 一次写入一批），大约条数按样本计，不是按行计。
+                    InspectPendingLine(line, ref count, ref from, ref to);
+                }
+            }
+            return new HistorySpoolPending(files.Count, bytes, count,
+                count == 0 || from == long.MaxValue ? null : from,
+                count == 0 || to == long.MinValue ? null : to);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<int> MergeFromDirectoryAsync(string sourceDirectory, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sourceDirectory) || !Directory.Exists(sourceDirectory)) return 0;
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            DiscoverState();
+            Directory.CreateDirectory(_directory);
+            var imported = 0;
+            foreach (var file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.TopDirectoryOnly).OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var dest = SegmentPath(_nextSequence++);
+                File.Copy(file, dest);
+                imported++;
+            }
+            DiscoverState();
+            return imported;
+        }
+        finally { _gate.Release(); }
+    }
+
+    // 暂存一行是样本数组；兼容误写入的单条对象。无法解析的行仍计入大约条数，但不扩大时间窗。
+    private static void InspectPendingLine(string line, ref long count, ref long from, ref long to)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(line);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in doc.RootElement.EnumerateArray())
+                {
+                    count++;
+                    ApplyTimestamp(ReadTimestamp(item), ref from, ref to);
+                }
+                return;
+            }
+
+            count++;
+            ApplyTimestamp(ReadTimestamp(doc.RootElement), ref from, ref to);
+        }
+        catch (JsonException)
+        {
+            count++;
+        }
+    }
+
+    private static void ApplyTimestamp(long? ts, ref long from, ref long to)
+    {
+        if (ts is not long value) return;
+        if (value < from) from = value;
+        if (value > to) to = value;
+    }
+
+    private static long? ReadTimestamp(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return null;
+        foreach (var name in new[] { "ts", "Ts" })
+        {
+            if (element.TryGetProperty(name, out var ts) && ts.TryGetInt64(out var value))
+                return value;
+        }
+        return null;
+    }
     // 按写入顺序补传；任一批次写失败立即停止，剩余批次原序写回磁盘等待下一轮。
     public async Task DrainAsync(Func<IReadOnlyCollection<HistoryValue>, Task> write, CancellationToken cancellationToken)
     {
@@ -444,6 +542,7 @@ public sealed class HistorySpool
                 if (length <= 0) continue;
                 File.Delete(path);
                 Interlocked.Increment(ref _dropped);
+                _lossLog?.Record(HistoryGapKind.SpoolDropped, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), detail: $"丢弃暂存分段 {Path.GetFileName(path)}");
                 pending -= length;
                 if (pending + neededBytes <= _maxBytes) return true;
             }
@@ -455,6 +554,15 @@ public sealed class HistorySpool
     }
 
     public long MinFreeMb => _minFreeMb;
+
+    private void RecordDrop(IReadOnlyCollection<HistoryValue> batch, string reason)
+    {
+        if (batch.Count == 0) return;
+        var from = batch.Min(x => x.Ts);
+        var to = batch.Max(x => x.Ts);
+        _lossLog?.Record(HistoryGapKind.SpoolDropped, from, to, detail: $"{reason}，{batch.Count} 条");
+    }
+
 
     private bool IsDiskCriticallyLow()
     {
@@ -485,3 +593,5 @@ public sealed class HistorySpool
         try { File.Delete(path); } catch { }
     }
 }
+
+public sealed record HistorySpoolPending(int Segments, long Bytes, long ApproxCount, long? From, long? To);

@@ -38,6 +38,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     private readonly SemaphoreSlim _drainGate = new(1, 1);
     private long _sent, _failed, _dropped, _spilled;
     private string? _lastError;
+    private readonly ILegacyAlarmWebhookDelivery? _legacyWebhook;
 
     public AlarmNotificationDispatcher(
         IDbContextFactory<ConfigDbContext> factory,
@@ -47,7 +48,8 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         IEnumerable<INotificationSender> senders,
         IOptions<ScadaSettings> options,
         ILogger<AlarmNotificationDispatcher> logger,
-        Func<DateTimeOffset>? clock = null)
+        Func<DateTimeOffset>? clock = null,
+        ILegacyAlarmWebhookDelivery? legacyWebhook = null)
     {
         _factory = factory;
         _runtime = runtime;
@@ -57,7 +59,11 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         _settings = options.Value;
         _logger = logger;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _legacyWebhook = legacyWebhook;
     }
+
+    public const int EscalationScanBatchSize = 500;
+    public const int EscalationScanMaxBatches = 20;
 
     // 抢占期限：须大于任何通道的发送超时上限（见 NotificationChannelSettings.MaxTimeoutMs）。
     public const long LeaseMs = 5 * 60_000L;
@@ -181,13 +187,30 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             {
                 var now = _clock().ToUnixTimeMilliseconds();
                 var minMs = escalations.Min(x => Math.Max(x.EscalateAfterMinutes!.Value, 0)) * 60_000L;
-                var candidates = await runtime.AlarmEvents.AsNoTracking()
-                    .Where(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed && !x.Chattering && x.StartTs <= now - minMs)
-                    .OrderBy(x => x.StartTs).Take(500).ToListAsync(ct);
-                foreach (var alarm in candidates)
-                    foreach (var (route, channel) in await MatchingRoutesAsync(db, alarm, escalation: true, ct))
-                        if (now - alarm.StartTs >= route.EscalateAfterMinutes!.Value * 60_000L)
-                            await EnqueueAsync(alarm.Id, route.Id, channel.Id, "escalate", ct);
+                long? afterStart = null;
+                var afterId = 0;
+                for (var batch = 0; batch < EscalationScanMaxBatches; batch++)
+                {
+                    var query = runtime.AlarmEvents.AsNoTracking()
+                        .Where(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed && !x.Chattering && x.StartTs <= now - minMs);
+                    if (afterStart is long start)
+                        query = query.Where(x => x.StartTs > start || x.StartTs == start && x.Id > afterId);
+                    var candidates = await query.OrderBy(x => x.StartTs).ThenBy(x => x.Id).Take(EscalationScanBatchSize).ToListAsync(ct);
+                    if (candidates.Count == 0) break;
+                    var ids = candidates.Select(x => x.Id).ToList();
+                    var existing = (await runtime.NotificationOutbox.AsNoTracking()
+                        .Where(x => x.Action == "escalate" && x.AlarmEventId != null && ids.Contains(x.AlarmEventId.Value))
+                        .Select(x => x.DedupKey)
+                        .ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+                    foreach (var alarm in candidates)
+                        foreach (var (route, channel) in await MatchingRoutesAsync(db, alarm, escalation: true, ct))
+                            if (now - alarm.StartTs >= route.EscalateAfterMinutes!.Value * 60_000L
+                                && !existing.Contains($"escalate:{alarm.Id}:{route.Id}"))
+                                await EnqueueAsync(alarm.Id, route.Id, channel.Id, "escalate", ct);
+                    afterStart = candidates[^1].StartTs;
+                    afterId = candidates[^1].Id;
+                    if (candidates.Count < EscalationScanBatchSize) break;
+                }
             }
         }
         return await DrainAsync(ct);
@@ -239,9 +262,11 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             try
             {
                 var attachments = new List<NotificationAttachment>();
-                foreach (var (path, hash, type) in new[] { (run.XlsxPath, run.XlsxSha256, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), (run.PdfPath, run.PdfSha256, "application/pdf") })
+                foreach (var (stored, hash, type) in new[] { (run.XlsxPath, run.XlsxSha256, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"), (run.PdfPath, run.PdfSha256, "application/pdf") })
                 {
-                    if (string.IsNullOrEmpty(path)) continue;
+                    if (string.IsNullOrEmpty(stored)) continue;
+                    var path = ReportArchivePaths.Resolve(_settings.ReportsRoot, stored);
+                    if (!File.Exists(path)) { permanent = true; throw new FileNotFoundException($"归档文件不存在：{Path.GetFileName(path)}"); }
                     var bytes = await File.ReadAllBytesAsync(path, ct);
                     if (!string.Equals(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)), hash, StringComparison.OrdinalIgnoreCase))
                     { permanent = true; throw new InvalidDataException($"归档文件校验失败：{Path.GetFileName(path)}"); }
@@ -324,6 +349,95 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
         _pending = stats.Pending; _finalFailed = stats.Failed;
     }
 
+    public sealed record OutboxRetryResult(int Retried, int Skipped, IReadOnlyList<string> Reasons);
+
+    // 人工重试：重置尝试次数并重新进入待发。已确认/已恢复的升级跳过。知悉标记保留，因此重试本身不重新构成健康缺口。
+    public async Task<OutboxRetryResult> RetryFailedAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0) return new(0, 0, []);
+        await using var runtime = await _runtime.CreateDbContextAsync(ct);
+        var items = await runtime.NotificationOutbox.Where(x => ids.Contains(x.Id) && x.Status == NotificationOutboxStatus.Failed).ToListAsync(ct);
+        var retried = 0;
+        var skipped = 0;
+        var reasons = new List<string>();
+        var now = _clock().ToUnixTimeMilliseconds();
+        foreach (var item in items)
+        {
+            if (item.Action == "escalate" && item.AlarmEventId is int alarmId)
+            {
+                var alarm = await runtime.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == alarmId, ct);
+                if (alarm is not null && (alarm.AckTs is not null || alarm.EndTs is not null))
+                {
+                    skipped++;
+                    reasons.Add($"#{item.Id} 报警已确认或已恢复，升级不再发送");
+                    continue;
+                }
+            }
+            item.Status = NotificationOutboxStatus.Pending;
+            item.Attempts = 0;
+            item.NextAttemptTs = now;
+            item.FinishedTs = null;
+            item.LeaseUntilTs = null;
+            item.LastError = null;
+            retried++;
+        }
+        if (retried > 0) await runtime.SaveChangesAsync(ct);
+        return new(retried, skipped, reasons);
+    }
+
+    private async Task<NotificationDelivery> DeliverLegacyOutboxAsync(RuntimeDbContext runtime, NotificationOutbox item, CancellationToken ct)
+    {
+        var alarm = item.AlarmEventId is int alarmId
+            ? await runtime.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == alarmId, ct)
+            : null;
+        string? error;
+        if (_legacyWebhook is null || !_legacyWebhook.Enabled) error = "未配置 AlarmWebhookUrl";
+        else if (alarm is null) error = "报警已删除";
+        else error = await _legacyWebhook.DeliverAsync(alarm, item.Action, ct);
+
+        var finalNow = _clock().ToUnixTimeMilliseconds();
+        var permanent = alarm is null || _legacyWebhook is null || !_legacyWebhook.Enabled;
+        item.LeaseUntilTs = null;
+        item.LastError = error;
+        if (error is null)
+        {
+            item.Status = NotificationOutboxStatus.Sent;
+            item.SentTs = finalNow; item.FinishedTs = finalNow;
+        }
+        else if (permanent || item.Attempts >= item.MaxAttempts)
+        {
+            item.Status = NotificationOutboxStatus.Failed; item.FinishedTs = finalNow;
+        }
+        else
+        {
+            item.Status = NotificationOutboxStatus.Pending;
+            var backoff = Math.Min(Math.Max(_settings.NotificationRetryBaseSec, 0) * Math.Pow(2, item.Attempts - 1), Math.Max(_settings.NotificationRetryMaxSec, 0));
+            item.NextAttemptTs = finalNow + (long)(backoff * 1000);
+        }
+
+        if (alarm is not null)
+        {
+            var label = "旧版 webhook";
+            if (error is null)
+                runtime.AlarmNotificationLogs.Add(new AlarmNotificationLog { AlarmEventId = alarm.Id, RouteId = 0, ChannelId = 0, Action = item.Action, Ts = finalNow, Success = true, Error = null });
+            else
+                runtime.AlarmNotificationLogs.Add(new AlarmNotificationLog { AlarmEventId = alarm.Id, RouteId = 0, ChannelId = 0, Action = item.Action, Ts = finalNow, Success = false, Error = error });
+            string? note = error is null
+                ? $"{label}：已发送（第 {item.Attempts} 次）"
+                : item.Status == NotificationOutboxStatus.Failed
+                    ? $"{label}：最终失败（共 {item.Attempts} 次）{error}"
+                    : $"{label}：第 {item.Attempts} 次失败，稍后重试：{error}";
+            runtime.AlarmActivities.Add(new AlarmActivity
+            {
+                AlarmEventId = alarm.Id, Ts = finalNow,
+                Action = item.Status == NotificationOutboxStatus.Failed ? "notify-failed" : "notify",
+                Note = note
+            });
+        }
+        await runtime.SaveChangesAsync(ct);
+        return new(item.RouteId, item.ChannelId, item.Action, error is null, error) { AlarmEventId = item.AlarmEventId ?? 0, Attempt = item.Attempts, Final = item.Status != NotificationOutboxStatus.Pending };
+    }
+
     // 保留期清理：删除早于保留天数的已发送/最终失败记录；待发与发送中的记录永不清理。
     public async Task<int> PurgeAsync(CancellationToken ct = default)
     {
@@ -348,6 +462,8 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
 
         var item = await runtime.NotificationOutbox.SingleAsync(x => x.Id == id, ct);
         if (item.ReportRunId is long reportRunId) return await DeliverReportAsync(config, runtime, item, reportRunId, ct);
+        if (_legacyWebhook is not null && _legacyWebhook.IsLegacy(item))
+            return await DeliverLegacyOutboxAsync(runtime, item, ct);
         var alarm = await runtime.AlarmEvents.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.AlarmEventId, ct);
         var route = await config.NotificationRoutes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.RouteId, ct);
         var channel = await config.NotificationChannels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.ChannelId, ct);

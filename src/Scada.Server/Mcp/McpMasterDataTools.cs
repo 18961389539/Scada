@@ -12,6 +12,7 @@ using Scada.Server.Endpoints;
 using Scada.Server.Services;
 using static Scada.Server.Mcp.McpActors;
 using static Scada.Server.Mcp.McpText;
+using Scada.Core.Configuration;
 
 namespace Scada.Server.Mcp;
 
@@ -124,7 +125,8 @@ public sealed class McpMasterDataTools(
         OpcSecurityMode? opcSecurityMode = null, OpcSecurityPolicy? opcSecurityPolicy = null,
         string? opcUserName = null, string? opcPassword = null, bool clearOpcPassword = false,
         string? protocolOptions = null,
-        [Description("Channel to bind (shared physical link). 0 unbinds, omit to keep unchanged.")] int? channelId = null)
+        [Description("Channel to bind (shared physical link). 0 unbinds, omit to keep unchanged.")] int? channelId = null,
+        [Description("Current device revision. Omit for older clients (write still increments). If provided it must match.")] long? revision = null)
     {
         if (deviceId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "deviceId must be positive.");
         if (stationNumber is < 0 or > 255)
@@ -174,7 +176,7 @@ public sealed class McpMasterDataTools(
         // 先记停用时刻，再把请求值合并回被跟踪实体：ApplyEditableFrom 会覆盖 Enabled。
         if (before.Enabled && !updated.Enabled) device.DisabledSinceTs = ScadaTime.NowMs();
         device.ApplyEditableFrom(updated);
-        var result = await deviceCommands.UpdateAsync(db, device, cancellationToken);
+        var result = await deviceCommands.UpdateAsync(db, device, cancellationToken, revision);
         return result.Success
             ? new(device.Id, true, "Updated.", device.Name, device.AreaId, device.Enabled, ScadaTime.NowMs())
             : new(deviceId, false, result.Message, device.Name, targetArea, device.Enabled, ScadaTime.NowMs());
@@ -242,7 +244,8 @@ public sealed class McpMasterDataTools(
         bool? writable = null, ArchiveMode? archiveMode = null, double? deadband = null,
         int? archivePeriodSec = null, double? minValue = null, double? maxValue = null,
         [Description("Scan rate in milliseconds (10-3600000); pass 0 to clear it and follow the device PollIntervalMs. Omit to keep the current value. At most 4 rates per device.")] int? scanRateMs = null,
-        [Description("Text length in bytes (1-254) for String tags; pass 0 to clear it. Omit to keep the current value.")] int? textLength = null)
+        [Description("Text length in bytes (1-254) for String tags; pass 0 to clear it. Omit to keep the current value.")] int? textLength = null,
+        [Description("Current CalculationRevision. Omit for older clients (write still increments). If provided it must match.")] long? revision = null)
     {
         if (tagId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "tagId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -267,7 +270,7 @@ public sealed class McpMasterDataTools(
             MinValue = minValue ?? tag.MinValue, MaxValue = maxValue ?? tag.MaxValue,
             ScanRateMs = scanRateMs is null ? tag.ScanRateMs : scanRateMs is > 0 ? scanRateMs : null
         };
-        var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken);
+        var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken, revision);
         return result.Success
             ? new(tag.Id, true, "Updated.", tag.Name, tag.DeviceId ?? 0, ScadaTime.NowMs())
             : new(tagId, false, result.Message, updated.Name, targetDeviceId, ScadaTime.NowMs());
@@ -339,7 +342,8 @@ public sealed class McpMasterDataTools(
         [Description("Discrete alarms only: On = alarm while the bit is 1, Off = alarm while the bit is 0, Change = alarm on every toggle. Ignored for other types.")] AlarmActiveWhen? activeWhen = null,
         AlarmCategory? category = null, AlarmConsequence? consequence = null, int? responseTimeSec = null, bool? autoPriority = null,
         [Description("Discrete alarms on integer tags only: zero-based bit index. Omit to keep the current value.")] int? bitIndex = null,
-        [Description("Expression alarms only: composite condition such as \"#12 > 80 && #15 < 2\". Omit to keep the current value.")] string? expression = null)
+        [Description("Expression alarms only: composite condition such as \"#12 > 80 && #15 < 2\". Omit to keep the current value.")] string? expression = null,
+        [Description("Current alarm-rule revision. Omit for older clients (write still increments). If provided it must match.")] long? revision = null)
     {
         if (ruleId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "ruleId must be positive.");
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -375,7 +379,10 @@ public sealed class McpMasterDataTools(
             expression is null ? current.Expression : (string.IsNullOrWhiteSpace(expression) ? null : expression.Trim())),
             excludeRuleId: ruleId, cancellationToken);
         if (error is not null) return new(ruleId, false, error, targetTagId, ScadaTime.NowMs());
+        if (!ConfigRevision.TryAccept(rule.Revision, revision, out _))
+            return new(ruleId, false, ConfigRevision.ConflictMessage, targetTagId, ScadaTime.NowMs());
         rule.ApplyEditableFrom(updated!);
+        rule.Revision = ConfigRevision.Next(rule.Revision);
         // 审计由拦截器写；落库与热加载由命令服务成对执行。
         await alarmRules.SaveAsync(db, cancellationToken);
         return new(rule.Id, true, "Updated.", rule.TagId, ScadaTime.NowMs());

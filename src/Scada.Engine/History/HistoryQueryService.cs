@@ -10,7 +10,8 @@ public sealed record HistoryQueryResult(
     HistoryResolution Resolution,
     IReadOnlyList<HistorySeries> Series,
     bool Downsampled = false,
-    int PointLimit = 0);
+    int PointLimit = 0,
+    IReadOnlyList<HistoryGap>? Gaps = null);
 
 public sealed class HistoryQueryException(string code, string message) : Exception(message)
 {
@@ -25,14 +26,16 @@ public sealed class HistoryQueryService : IDisposable
     private readonly IHistoryStore _store;
     private readonly SemaphoreSlim _slots;
     private readonly ScadaSettings _settings;
+    private readonly HistoryLossLog? _loss;
     private long _rejected;
     private long _timedOut;
     private long _readLimited;
 
-    public HistoryQueryService(IHistoryStore store, IOptions<ScadaSettings>? settings = null)
+    public HistoryQueryService(IHistoryStore store, IOptions<ScadaSettings>? settings = null, HistoryLossLog? loss = null)
     {
         _store = store;
         _settings = settings?.Value ?? new ScadaSettings();
+        _loss = loss;
         MaxConcurrent = Math.Clamp(_settings.HistoryQueryMaxConcurrent, 1, 64);
         _slots = new SemaphoreSlim(MaxConcurrent, MaxConcurrent);
     }
@@ -73,22 +76,22 @@ public sealed class HistoryQueryService : IDisposable
         {
             var values = ReadLimitedAsync(reader.ReadAsync(tagIds, from, to, resolution, cancellationToken),
                 Math.Max(1, _settings.HistoryQueryMaxReadPoints), cancellationToken);
-            if (maxPoints <= 0) return new HistoryQueryResult(resolution, await CollectAsync(values, cancellationToken));
+            if (maxPoints <= 0) return WithGaps(new HistoryQueryResult(resolution, await CollectAsync(values, cancellationToken)), from, to);
             var (series, downsampled) = await HistoryDownsampler.ApplyStreamingAsync(
                 values, tagIds, from, to, maxPoints, cancellationToken);
-            return new HistoryQueryResult(resolution, series, downsampled, maxPoints);
+            return WithGaps(new HistoryQueryResult(resolution, series, downsampled, maxPoints), from, to);
         }
         if (span <= RawLimit)
         {
-            return Limit(HistoryResolution.Raw, await _store.QueryRawAsync(tagIds, from, to, cancellationToken), maxPoints);
+            return WithGaps(Limit(HistoryResolution.Raw, await _store.QueryRawAsync(tagIds, from, to, cancellationToken), maxPoints), from, to);
         }
 
         if (span <= FiveMinuteLimit)
         {
-            return Limit(HistoryResolution.FiveMinute, await _store.QueryAggregate5MinAsync(tagIds, from, to, cancellationToken), maxPoints);
+            return WithGaps(Limit(HistoryResolution.FiveMinute, await _store.QueryAggregate5MinAsync(tagIds, from, to, cancellationToken), maxPoints), from, to);
         }
 
-        return Limit(HistoryResolution.Hour, await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken), maxPoints);
+        return WithGaps(Limit(HistoryResolution.Hour, await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken), maxPoints), from, to);
     }
 
     public Task<IReadOnlyList<HistoryValue>> SnapshotAsync(
@@ -149,6 +152,14 @@ public sealed class HistoryQueryService : IDisposable
     }
 
     public void Dispose() => _slots.Dispose();
+
+    private HistoryQueryResult WithGaps(HistoryQueryResult result, long from, long to)
+    {
+        var loss = _loss?.Overlapping(from, to);
+        var gaps = HistoryGapFinder.FromSeries(result.Series, from, to, result.Resolution, loss);
+        return result with { Gaps = gaps };
+    }
+
 
     private static HistoryQueryResult Limit(HistoryResolution resolution, IReadOnlyList<HistorySeries> series, int maxPoints)
     {

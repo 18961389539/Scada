@@ -174,7 +174,7 @@
 
 | 配置键 | 默认值 | 配置文件 | 说明 |
 |---|---|---|---|
-| `ReportsRoot` | `"data/reports"` | — | 已生成报表归档目录（只追加，文件带 SHA256 校验）。 |
+| `ReportsRoot` | `"data/reports"` | — | 已生成报表归档目录（只追加，文件带 SHA256 校验）。库内保存相对本目录的路径；完整备份会按保留期打包尚未清理的归档，还原时按新目录重写路径并校验哈希，缺失或哈希不符会明确失败，不会把记录标成已清理，也不重签旧文件。 |
 | `ReportFontPath` | `（无）` | — | PDF 中文字体文件（.ttf/.otf/.ttc）；为空时依次尝试常见系统字体。 |
 | `ReportLocale` | `"zh-CN"` | — | 归档报表（班报/日报/月报）固定表头的语言；归档文件生成后不可修改，因此按系统配置而非查看人语言。 |
 | `ReportArchiveRetentionDays` | `（无）` | — | 归档文件保留天数；0 表示永久保留（默认）。到期只删文件，记录保留，并写审计。 |
@@ -268,3 +268,17 @@
 - `Scada:Telemetry`（`TelemetryOptions`）：OTLP 端点、采样比例、EF Core 埋点开关。
 - `Scada:BackupTargets`（数组）：异地备份目标，`Type` 为 `Directory` 或 `S3`。
 - `Scada:Ai`、`Mcp`、`External:*`、`Ha`、`Jwt`：各有独立段落与校验，见 `appsettings.json`。
+
+## 主备（`Ha`）与密钥环
+
+启用 `Ha` 后，两台节点必须共用同一套 ASP.NET Data Protection 密钥环（配置库同目录的 `keys/`，含 `report-signing.pfx`）以及 OPC PKI。日常配置快照只复制 `config.db`；密钥与 PKI 走已认证的节点共享密钥通道（`X-Scada-Ha-Key` / `/api/ha/peer/secrets`），落盘后限制目录权限。该通道只做认证，HTTP 明文仍可能泄露密钥，生产环境应使用 HTTPS。Windows 双机不再使用本机 DPAPI（否则接管后无法解密设备口令与通知凭据）；改为可用证书保护的密钥环（`keys/ha-dataprotection.pfx`，口令来自 `Ha:SharedKey`）或受 ACL 保护的目录。无 HA 的 Windows 单机仍使用 DPAPI。启动时会用已有密文或哨兵做一次解密自检，失败写入健康告警。不引入外部 KMS，也不提供在线改密接口。
+详见 [high-availability.md](high-availability.md)。
+
+
+## Optimistic concurrency for core configuration
+
+Devices, tags (`CalculationRevision`), alarm rules, acquisition channels, notification routes and calculation jobs carry a revision token.
+
+- Web, MCP, Excel import and project apply all go through the same accept-and-increment rule.
+- **Legacy clients that omit the revision** are still allowed to write; the server increments the token so the next updated client is protected.
+- If a revision is provided and does not match the current value, the write returns HTTP 409 with “配置已被其他用户修改，请重新打开并合并”. Reopen the record and merge manually; the server does not overwrite or auto-merge.

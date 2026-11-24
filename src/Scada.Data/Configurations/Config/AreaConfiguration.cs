@@ -15,7 +15,8 @@ public sealed class AreaConfiguration : IEntityTypeConfiguration<Area>
         entity.ToTable("Area"); entity.HasKey(x => x.Id);
         entity.Property(x => x.Name).IsRequired().HasMaxLength(100); entity.HasIndex(x => x.Name).IsUnique();
         entity.Property(x => x.Description).HasMaxLength(500);
+        entity.Property(x => x.Revision).IsRequired().HasDefaultValue(1L);
         // 旧库升级时已有设备落入默认区域。
-        entity.HasData(new Area { Id = Area.DefaultId, Name = "默认区域", Description = "升级前的设备与未指定区域的设备" });
+        entity.HasData(new Area { Id = Area.DefaultId, Name = "默认区域", Description = "升级前的设备与未指定区域的设备", Revision = 1 });
     }
 }

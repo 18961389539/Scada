@@ -8,6 +8,7 @@ public class Area : IAuditedEntity
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public long Revision { get; set; } = 1;
 
     // 审计拦截器用的派生属性；[JsonIgnore] 防止它们进工程包与接口契约。
     [JsonIgnore] public string AuditTargetType => "Area";

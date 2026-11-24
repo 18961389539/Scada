@@ -6,6 +6,7 @@ using Scada.Engine.History;
 using Scada.Engine.Health;
 using Scada.Engine.Maintenance;
 using Scada.Engine.Notifications;
+using Scada.Server.Ha;
 
 namespace Scada.Server.Services;
 
@@ -17,6 +18,7 @@ public sealed record HealthWebhook(bool Enabled, long Sent, long Suppressed, lon
 public sealed record HealthNotifications(long Sent, long Failed, long Dropped, string? LastError, int Pending, int FinalFailed);
 public sealed record HealthDisk(string Root, double TotalGb, double FreeGb);
 public sealed record HealthStorage(string ConfigDb, long ConfigDbBytes, long HistoryBytes);
+public sealed record HealthHistoryLoss(bool Persistent, int Windows, long? OldestFrom, string Note);
 
 public sealed record HealthSnapshot(
     string Status,
@@ -32,13 +34,18 @@ public sealed record HealthSnapshot(
     int ConfiguredTags,
     int BusBacklog,
     long BusDropped,
+    long BusHistoryRejected,
+    long BusHistoryGapRejected,
     HistoryCapacity? HistoryCapacity,
     HealthHistoryQueries? HistoryQueries,
     HealthSpool HistorySpool,
     HealthWebhook AlarmWebhook,
     HealthNotifications? AlarmNotifications,
     HealthDisk Disk,
-    HealthStorage Storage);
+    HealthStorage Storage,
+    SpaceReclaimStatus? SpaceReclaim = null,
+    HealthHistoryLoss? HistoryLoss = null,
+    HealthTakeoverReview? TakeoverReview = null);
 
 // Shared by /api/health and the MCP query_health tool so both report the same snapshot.
 // 依赖通过 IHealthContributor 集合收集，不再用 IServiceProvider 反查具体服务类型：
@@ -59,7 +66,10 @@ public sealed class HealthSnapshotService(
     IHostEnvironment environment,
     // 可选依赖放最后：C# 要求带默认值的参数在所有必填参数之后。
     // 历史查询统计只在 Engine 注册后才存在（轻量宿主与单测可能没有）。
-    HistoryQueryService? queries = null)
+    HistoryQueryService? queries = null,
+    SpaceReclaimService? spaceReclaim = null,
+    HistoryLossLog? historyLoss = null,
+    Scada.Server.Ha.TakeoverReviewService? takeoverReview = null)
 {
     private readonly object _cacheGate = new();
     private HealthSnapshot? _cached;
@@ -144,6 +154,8 @@ public sealed class HealthSnapshotService(
             config.Tags.Count,
             bus.Backlog,
             bus.DroppedTotal,
+            bus.HistoryRejected,
+            bus.HistoryGapRejected,
             capacity,
             queries is null ? null : new HealthHistoryQueries(
                 queries.ActiveQueries,
@@ -158,13 +170,23 @@ public sealed class HealthSnapshotService(
             new HealthWebhook(webhook.Enabled, webhook.Sent, webhook.Suppressed, webhook.Failed, webhook.Dropped, webhook.LastError),
             new HealthNotifications(dispatcher.Sent, dispatcher.Failed, dispatcher.Dropped, dispatcher.LastError, dispatcher.Pending, dispatcher.FinalFailed),
             new HealthDisk(dataRoot, totalGb, freeGb),
-            new HealthStorage(Path.GetFileName(configPath), File.Exists(configPath) ? new FileInfo(configPath).Length : 0, historyBytes));
+            new HealthStorage(Path.GetFileName(configPath), File.Exists(configPath) ? new FileInfo(configPath).Length : 0, historyBytes),
+            spaceReclaim?.Snapshot(),
+            MapHistoryLoss(historyLoss),
+            takeoverReview is null ? null : takeoverReview.SnapshotAsync().GetAwaiter().GetResult());
     }
 
     /// <summary>
     /// 进程运行秒数。原先这里用的是 <c>Environment.TickCount64</c>，那是**系统开机时长**，
     /// 服务重启后不会归零，运维据此判断「服务多久没重启」会得到错误结论。取不到进程启动时间时返回 0（界面显示 0 秒）。
     /// </summary>
+    private static HealthHistoryLoss? MapHistoryLoss(HistoryLossLog? log)
+    {
+        if (log is null) return null;
+        var status = log.Status();
+        return new HealthHistoryLoss(status.Persistent, status.Windows, status.OldestFrom, status.Note);
+    }
+
     private static long ProcessUptimeSeconds()
     {
         try

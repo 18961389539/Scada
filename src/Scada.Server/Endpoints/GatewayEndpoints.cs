@@ -36,6 +36,10 @@ public static class GatewayEndpoints
             await service.DiscardDeadLetterAsync(id, streamId, sequence, http.User.GetUserId()!.Value, http.User.GetUserName(), ct);
             return Results.NoContent();
         }));
+        admin.MapPost("/{id:int}/dead-letters/{streamId:guid}/{sequence:long}/preview", (int id, Guid streamId, long sequence, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+            Results.Ok(await service.PreviewDeadLetterAsync(id, streamId, sequence, ct))));
+        admin.MapPost("/{id:int}/dead-letters/{streamId:guid}/{sequence:long}/replay", (int id, Guid streamId, long sequence, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
+            Results.Ok(await service.ReplayDeadLetterAsync(id, streamId, sequence, http.User.GetUserId()!.Value, http.User.GetUserName(), ct))));
         admin.MapGet("/assignments/{deviceId:int}", (int deviceId, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () => Results.Ok(await service.AssignmentInfoAsync(deviceId, ct))));
         admin.MapPost("", (GatewayCreateRequest request, GatewayCenterService service, HttpContext http, CancellationToken ct) => Run(http, async () =>
         {

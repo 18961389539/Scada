@@ -31,7 +31,8 @@ public sealed record AlarmRuleRequest(
     string? CauseEn = null,
     string? ActionEn = null,
     int? BitIndex = null,
-    string? Expression = null);
+    string? Expression = null,
+    long? Revision = null);
 
 /// <summary>
 /// 报警规则写入的唯一落地点。

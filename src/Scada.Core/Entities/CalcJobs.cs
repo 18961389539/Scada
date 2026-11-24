@@ -18,6 +18,7 @@ public class CalcJob
     public bool Enabled { get; set; } = true;
     public int AreaId { get; set; } = Area.DefaultId;
     public int IntervalMs { get; set; } = 1000;
+    // 草稿/定义并发令牌，与 PublishedRevision（已发布副本）不是同一个值。省略修订号视为旧客户端，允许写入但仍递增。
     public long Revision { get; set; } = 1;
     // 输入测点：累计器为脉冲计数或瞬时流量；运行小时为运行状态；能耗为功率。脚本不用。
     public int? InputTagId { get; set; }

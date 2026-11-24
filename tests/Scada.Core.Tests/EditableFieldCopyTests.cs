@@ -21,13 +21,15 @@ public class EditableFieldCopyTests
     private static readonly HashSet<string> DeviceNotEditable = new(StringComparer.Ordinal)
     {
         // 归属由网关侧维护；DisabledSinceTs 由调用方按"本次是否由启用改为停用"决定。
-        nameof(Device.Id), nameof(Device.GatewayId), nameof(Device.DisabledSinceTs)
+        nameof(Device.Id), nameof(Device.GatewayId), nameof(Device.DisabledSinceTs),
+        nameof(Device.Revision) // 并发令牌由写入入口递增，不走 ApplyEditableFrom
     };
 
     private static readonly HashSet<string> AlarmRuleNotEditable = new(StringComparer.Ordinal)
     {
         // Key 由服务端生成并保持稳定；停用（out of service）有独立的业务端点与审本文案。
-        nameof(AlarmRule.Id), nameof(AlarmRule.Key), nameof(AlarmRule.OutOfService), nameof(AlarmRule.OutOfServiceReason)
+        nameof(AlarmRule.Id), nameof(AlarmRule.Key), nameof(AlarmRule.OutOfService), nameof(AlarmRule.OutOfServiceReason),
+        nameof(AlarmRule.Revision) // 并发令牌由写入入口递增，不走 ApplyEditableFrom
     };
 
     [Fact]

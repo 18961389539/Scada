@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Scada.Core.Options;
 using Scada.Data;
 using Scada.Server.Reports;
+using Scada.Engine.Maintenance;
 
 namespace Scada.Server.Tests;
 
@@ -19,6 +20,8 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
     public ReportSigningTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
     private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+    private string ArchiveFile(string stored) =>
+        ReportArchivePaths.Resolve(_site.Services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportsRoot, stored);
 
     private static async Task<JsonElement> Json(HttpResponseMessage r)
     {
@@ -26,8 +29,20 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
         return await r.Content.ReadFromJsonAsync<JsonElement>();
     }
 
+
+    private string IsolateReportsRoot()
+    {
+        var settings = _site.Services.GetRequiredService<IOptions<ScadaSettings>>().Value;
+        var root = Path.Combine(settings.ReportsRoot, "case-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        settings.ReportsRoot = root;
+        // directory lives under the site ReportsRoot and is removed with the site fixture.
+        return root;
+    }
+
     private async Task<long> GenerateAsync()
     {
+        IsolateReportsRoot();
         var cfg = await _site.ClientAsync("cfgA");
         var body = new
         {
@@ -38,6 +53,7 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
         var run = await Json(await cfg.PostAsJsonAsync($"/api/report-templates/{template.GetProperty("id").GetInt32()}/generate", new { }));
         Assert.True(run.GetProperty("signed").GetBoolean());
         // 归档目录按 Site 隔离（Root = Scada:ReportsRoot，每个测试类独立临时目录）。
+        // 同一 Site 上的用例再按方法名记录归档快照，避免共享根目录下误判“归档文件缺失”。
         // 这里在生成端就核对文件确实落盘：若此后下载 404，失败信息能直接区分「没写」与「被删/被锁」。
         var archive = _site.Services.GetRequiredService<ReportArchiveService>();
         var archived = Directory.Exists(archive.Root) ? Directory.GetFiles(archive.Root, "*", SearchOption.AllDirectories) : [];
@@ -84,9 +100,9 @@ public sealed class ReportSigningTests : IClassFixture<AuthorizationTests.Site>
         await using (var runtimeDb = await Runtime().CreateDbContextAsync())
         {
             var run = await runtimeDb.ReportRuns.SingleAsync(x => x.Id == runId);
-            File.SetAttributes(run.XlsxPath, FileAttributes.Normal);
-            var tampered = (await File.ReadAllBytesAsync(run.XlsxPath)).Concat(new byte[] { 0 }).ToArray();
-            await File.WriteAllBytesAsync(run.XlsxPath, tampered);
+            File.SetAttributes(ArchiveFile(run.XlsxPath), FileAttributes.Normal);
+            var tampered = (await File.ReadAllBytesAsync(ArchiveFile(run.XlsxPath))).Concat(new byte[] { 0 }).ToArray();
+            await File.WriteAllBytesAsync(ArchiveFile(run.XlsxPath), tampered);
             run.XlsxSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(tampered));
             await runtimeDb.SaveChangesAsync();
         }

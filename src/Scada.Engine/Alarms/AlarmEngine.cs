@@ -30,6 +30,8 @@ public sealed class AlarmEngine : BackgroundService
     private readonly AlarmShelfService _shelf;
     private readonly ScadaSettings _settings;
     private readonly AlarmFloodGuard _flood;
+    private readonly INodeRole _role;
+    private long _alignedGeneration = long.MinValue;
     private readonly Dictionary<int, bool> _suppressed = new();
     private readonly Dictionary<int, Queue<long>> _raiseHistory = new();
     // 被洪水自动抑制的报警实例；洪水退出时逐个恢复，避免把条件抑制误解除。
@@ -52,11 +54,13 @@ public sealed class AlarmEngine : BackgroundService
         ILogger<AlarmEngine> logger,
         AlarmShelfService? shelf = null,
         Microsoft.Extensions.Options.IOptions<ScadaSettings>? options = null,
-        AlarmFloodGuard? floodGuard = null)
+        AlarmFloodGuard? floodGuard = null,
+        INodeRole? role = null)
     {
         _shelf = shelf ?? new AlarmShelfService(contextFactory, runtimeFactory, notifier);
         _settings = options?.Value ?? new ScadaSettings();
         _flood = floodGuard ?? new AlarmFloodGuard(_settings);
+        _role = role ?? new StandaloneNodeRole();
         _bus = bus;
         _config = config;
         _cache = cache;
@@ -71,9 +75,7 @@ public sealed class AlarmEngine : BackgroundService
         // 租约随 ExecuteAsync 结束释放：服务重启后旧队列必须摘掉，否则会留下一个没人读的满队列。
         using var subscription = _bus.Subscribe(out var reader);
         ReloadConfigIfNeeded();
-        await RestoreActiveAlarmsAsync(stoppingToken);
-        try { await _shelf.EnsureLoadedAsync(stoppingToken); }
-        catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "加载报警暂挂失败"); }
+        await AlignWithRoleAsync(stoppingToken);
         using var ticker = new PeriodicTimer(TimeSpan.FromMilliseconds(250));
         var tick = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
         var ready = reader.WaitToReadAsync(stoppingToken).AsTask();
@@ -84,21 +86,32 @@ public sealed class AlarmEngine : BackgroundService
             {
                 var completed = await Task.WhenAny(ready, tick);
                 ReloadConfigIfNeeded();
+                await AlignWithRoleAsync(stoppingToken);
                 if (completed == ready)
                 {
-                    while (reader.TryRead(out var value)) await EvaluateAsync(value, value.Ts, stoppingToken);
+                    if (_role.IsActive)
+                    {
+                        while (reader.TryRead(out var value)) await EvaluateAsync(value, value.Ts, stoppingToken);
+                    }
+                    else
+                    {
+                        while (reader.TryRead(out _)) { }
+                    }
                     ready = reader.WaitToReadAsync(stoppingToken).AsTask();
                 }
                 if (tick.IsCompleted)
                 {
                     if (!await tick) break;
-                    var now = ScadaTime.NowMs();
-                    foreach (var tagId in _rulesByTag.Keys)
+                    if (_role.IsActive)
                     {
-                        var value = _cache.Get(tagId);
-                        if (value is not null) await EvaluateAsync(value, now, stoppingToken);
+                        var now = ScadaTime.NowMs();
+                        foreach (var tagId in _rulesByTag.Keys)
+                        {
+                            var value = _cache.Get(tagId);
+                            if (value is not null) await EvaluateAsync(value, now, stoppingToken);
+                        }
+                        await TickManagementAsync(now, stoppingToken);
                     }
-                    await TickManagementAsync(now, stoppingToken);
                     tick = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
                 }
             }
@@ -148,6 +161,21 @@ public sealed class AlarmEngine : BackgroundService
 
             if (transition.Kind == AlarmTransitionKind.Raise)
             {
+                if (_activeEventIds.TryGetValue(rule.Id, out _))
+                {
+                    latched = true;
+                    return;
+                }
+                var existing = await db.AlarmEvents.FirstOrDefaultAsync(x => x.RuleId == rule.Id && x.EndTs == null, cancellationToken);
+                if (existing is not null)
+                {
+                    _evaluator.RestoreActive(rule.Id);
+                    _activeEventIds[rule.Id] = existing.Id;
+                    _suppressed[rule.Id] = existing.Suppressed;
+                    latched = true;
+                    return;
+                }
+
                 var decision = _flood.OnRaise(areaId, transition.Value.Ts);
                 var alarm = NewAlarm(tag, rule, transition, end: false);
                 ApplyFlags(alarm, rule, transition.Value.Ts);
@@ -357,6 +385,21 @@ public sealed class AlarmEngine : BackgroundService
 
     private int? AreaOfTagId(int? tagId) =>
         tagId is int id && _tags.TryGetValue(id, out var tag) ? AreaOf(tag) : null;
+
+
+    private async Task AlignWithRoleAsync(CancellationToken cancellationToken)
+    {
+        if (!_role.IsActive)
+        {
+            _alignedGeneration = long.MinValue;
+            return;
+        }
+        if (_alignedGeneration == _role.Generation) return;
+        await RestoreActiveAlarmsAsync(cancellationToken);
+        try { await _shelf.EnsureLoadedAsync(cancellationToken); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { _logger.LogWarning(ex, "加载报警暂挂失败"); }
+        _alignedGeneration = _role.Generation;
+    }
 
     private async Task RestoreActiveAlarmsAsync(CancellationToken cancellationToken)
     {

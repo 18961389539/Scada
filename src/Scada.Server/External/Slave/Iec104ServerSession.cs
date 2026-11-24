@@ -20,6 +20,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
 
     private readonly Stream _stream;
     private readonly Iec104ServerOptions _options;
+    private readonly Func<(ModbusSlaveOptions Modbus, Iec104ServerOptions Iec)>? _optionsProvider;
     private readonly ExportPointMap _map;
     private readonly ExportWriteRouter _router;
     private readonly ILogger _logger;
@@ -46,10 +47,12 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
     private CancellationTokenSource? _cts;
 
     public Iec104ServerSession(Stream stream, Iec104ServerOptions options, ExportPointMap map, ExportWriteRouter router,
-        ILogger logger, string remoteIp, int commonAddress)
+        ILogger logger, string remoteIp, int commonAddress,
+        Func<(ModbusSlaveOptions Modbus, Iec104ServerOptions Iec)>? optionsProvider = null)
     {
         _stream = stream;
         _options = options;
+        _optionsProvider = optionsProvider;
         _map = map;
         _router = router;
         _logger = logger;
@@ -229,6 +232,13 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
         }
     }
 
+    /// <summary>热替换点表快照，不拆 TCP 会话。监听地址/端口变更仍由宿主决定是否重启监听。</summary>
+    private void RefreshMap()
+    {
+        var (modbus, iec) = _optionsProvider?.Invoke() ?? (new ModbusSlaveOptions(), _options);
+        _map.Ensure(modbus, iec);
+    }
+
     // ---- 变化上送 ----
 
     private async Task ChangeLoopAsync(CancellationToken ct)
@@ -236,6 +246,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
         while (!ct.IsCancellationRequested)
         {
             await Task.Delay(Math.Clamp(_options.ChangeScanMs, 50, 5000), ct);
+            RefreshMap();
             if (!_transferEnabled || _map.Iec.Count == 0) continue;
 
             // 首轮只建立基线不发报文：主站连上后应先发总召唤取全量，否则会收到一屏"变化"。
@@ -287,6 +298,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
 
     private async Task InterrogationAsync(Asdu request, CancellationToken ct)
     {
+        RefreshMap();
         var qoi = request.Objects.Count > 0 && request.Objects[0].Element.Length > 0 ? request.Objects[0].Element[0] : (byte)20;
         await EnqueueAsync(new Asdu(Iec104Types.C_IC_NA, false, Iec104Types.CotActCon, false, false, 0,
             request.CommonAddress, [new InfoObject(0, [qoi])]), ct);
@@ -382,6 +394,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
 
     private async Task ExecuteCommandAsync(Asdu request, InfoObject obj, double value, CancellationToken ct)
     {
+        RefreshMap();
         if (!_map.Iec.Points.TryGetValue(obj.Ioa, out var slot) || !slot.Writable)
         {
             await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, true), ct);

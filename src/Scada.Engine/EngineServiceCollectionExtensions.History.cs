@@ -23,12 +23,19 @@ public static partial class EngineServiceCollectionExtensions
         services.AddSingleton<IHistoryStore>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<IGatewayHistoryWriter>(sp => sp.GetRequiredService<HistoryStore>());
         services.AddSingleton<IHistoryStreamReader>(sp => sp.GetRequiredService<HistoryStore>());
+        services.AddSingleton(sp =>
+        {
+            var s = sp.GetRequiredService<IOptions<ScadaSettings>>().Value;
+            Directory.CreateDirectory(s.HistoryRoot);
+            var path = Path.Combine(s.HistoryRoot, HistoryLossLog.FileName);
+            return new HistoryLossLog(path, () => DateTimeOffset.UtcNow.AddMonths(-Math.Max(s.HistoryRetentionMonths, 1)).ToUnixTimeMilliseconds());
+        });
         services.AddSingleton<HistoryQueryService>();
         services.AddSingleton(sp =>
         {
             var s = sp.GetRequiredService<IOptions<ScadaSettings>>().Value;
             return new HistorySpool(s.HistoryRoot, s.HistorySpoolMaxBytes, s.HistorySpoolSegmentBytes,
-                s.HistorySpoolMinFreeMb, s.HistorySpoolDropOldestOnFull);
+                s.HistorySpoolMinFreeMb, s.HistorySpoolDropOldestOnFull, lossLog: sp.GetRequiredService<HistoryLossLog>());
         });
         services.AddSingleton<HistoryWriterService>();
         return services;

@@ -16,9 +16,14 @@ public sealed class HistoryWriterService : BackgroundService
     private readonly IHistoryStore _store;
     private readonly ScadaSettings _settings;
     private readonly HistorySpool _spool;
+    private readonly HistoryLossLog? _lossLog;
     private readonly ILogger<HistoryWriterService> _logger;
     private readonly LivenessRegistry? _liveness;
-    private long _reportedBusDrops;
+    private long _reportedHistoryRejected;
+    private long _reportedHistoryGapRejected;
+    private long _gapMarkFrom;
+    private long _gapMarkTo;
+    private int _gapMarkCount;
     private bool _spoolFailed;
     private long _spoolWarningAt;
 
@@ -36,7 +41,8 @@ public sealed class HistoryWriterService : BackgroundService
         IOptions<ScadaSettings> settings,
         HistorySpool spool,
         ILogger<HistoryWriterService> logger,
-        LivenessRegistry? liveness = null)
+        LivenessRegistry? liveness = null,
+        HistoryLossLog? lossLog = null)
     {
         _liveness = liveness;
         _bus = bus;
@@ -45,6 +51,7 @@ public sealed class HistoryWriterService : BackgroundService
         _store = store;
         _settings = settings.Value;
         _spool = spool;
+        _lossLog = lossLog;
         _logger = logger;
     }
 
@@ -77,6 +84,7 @@ public sealed class HistoryWriterService : BackgroundService
                 }
                 while (gapReader.TryRead(out var gap))
                 {
+                    NoteGapMark(gap.Ts);
                     Evaluate(gap);
                     if (_buffer.Count >= _settings.ArchiveBatchSize)
                     {
@@ -198,7 +206,7 @@ public sealed class HistoryWriterService : BackgroundService
     private Task DrainSpoolAsync(CancellationToken cancellationToken) =>
         _spool.DrainAsync(async batch => { await _store.WriteRawAsync(batch, cancellationToken); MarkStored(batch); }, cancellationToken);
 
-    private async Task RecoverSpoolAsync(CancellationToken cancellationToken)
+    public async Task RecoverSpoolAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -218,14 +226,45 @@ public sealed class HistoryWriterService : BackgroundService
         }
     }
 
-    private void ReportBusDrops()
+    internal void NoteGapMark(long ts)
     {
-        var total = _bus.DroppedTotal;
-        var reported = Interlocked.Exchange(ref _reportedBusDrops, total);
-        if (total > reported)
+        if (_gapMarkCount == 0)
         {
-            _logger.LogError("实时总线积压超限，新增丢弃 {Count} 条采集值，累计 {Total} 条", total - reported, total);
+            _gapMarkFrom = _gapMarkTo = ts;
         }
+        else
+        {
+            if (ts < _gapMarkFrom) _gapMarkFrom = ts;
+            if (ts > _gapMarkTo) _gapMarkTo = ts;
+        }
+        _gapMarkCount++;
+    }
+
+    // 只把历史订阅拒收与缺口标记队列溢出记入损失日志；界面订阅积压（DroppedTotal）不计入历史缺口。
+    // 窗口优先用已读到的缺口标记时间戳；标记队列本身溢出时没有时间戳，才退回本次冲洗周期。
+    internal void ReportBusDrops()
+    {
+        var rejected = _bus.HistoryRejected;
+        var prevRejected = Interlocked.Exchange(ref _reportedHistoryRejected, rejected);
+        var gapRejected = _bus.HistoryGapRejected;
+        var prevGapRejected = Interlocked.Exchange(ref _reportedHistoryGapRejected, gapRejected);
+        var now = ScadaTime.NowMs();
+        var flush = Math.Max(_settings.ArchiveFlushIntervalMs, 200);
+        if (rejected > prevRejected)
+        {
+            var from = _gapMarkCount > 0 ? _gapMarkFrom : now - flush;
+            var to = _gapMarkCount > 0 ? _gapMarkTo : now;
+            _lossLog?.Record(HistoryGapKind.Rejected, from, to,
+                detail: $"总线拒收 {rejected - prevRejected} 条历史样本");
+            _logger.LogError("历史订阅队列已满，新增拒收 {Count} 条，累计 {Total} 条", rejected - prevRejected, rejected);
+        }
+        if (gapRejected > prevGapRejected)
+        {
+            _lossLog?.Record(HistoryGapKind.Rejected, now - flush, now,
+                detail: $"缺口标记队列溢出 {gapRejected - prevGapRejected} 条");
+            _logger.LogError("历史缺口标记队列已满，新增丢弃 {Count} 条，累计 {Total} 条", gapRejected - prevGapRejected, gapRejected);
+        }
+        _gapMarkCount = 0;
     }
 
     private void MarkStored(IReadOnlyCollection<HistoryValue> values)

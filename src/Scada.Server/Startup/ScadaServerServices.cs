@@ -56,6 +56,7 @@ internal static class ScadaServerServices
         builder.Services.AddSingleton<GatewayCenterService>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterService>());
         builder.Services.AddSingleton<LocalCommandLedger>();
+        builder.Services.AddHostedService<LocalCommandLedgerReconciler>();
         builder.Services.AddSingleton<ICollectorControl, GatewayCollectorCoordinator>();
 
         builder.Services.AddOptions<Scada.Core.Options.ExternalIntegrationOptions>()

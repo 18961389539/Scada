@@ -8,6 +8,7 @@ using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
 using Scada.Engine.Health;
+using Scada.Engine.History;
 using Scada.Engine.Maintenance;
 
 namespace Scada.Server.Ha;
@@ -15,7 +16,8 @@ namespace Scada.Server.Ha;
 public sealed record HaEvent(long Ts, string Kind, string Message, long Term, string? Actor = null);
 public sealed record HaStatus(bool Enabled, string NodeId, string Role, long Term, long Generation, string? SelfUrl, string? PeerUrl, HaPeerStatus? Peer, long PeerSeenTs,
     string? Witness, HaLease? Lease, string? WitnessError, bool AutoFailover, long PromotedTs, long ConfigSyncTs, long HistorySyncTs, long HistoryRowsBehind,
-    long ConfigApplied, long HistoryRowsApplied, long RuntimeSyncTs, long RuntimeRowsApplied, string? ReplicationError, long Switchovers, IReadOnlyList<HaEvent> Events);
+    long ConfigApplied, long HistoryRowsApplied, long RuntimeSyncTs, long RuntimeRowsApplied, string? ReplicationError, long Switchovers, IReadOnlyList<HaEvent> Events,
+    long RuntimeRowsBehind = 0);
 
 // 主备协调：心跳 + 仲裁租约（带任期）防双主；只有持有有效租约的节点是主机。
 // 主机续租失败且本地租约期限已到 → 自我隔离降为备机；备机仅在租约过期（加时钟偏差余量）后才能接管。
@@ -42,10 +44,12 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
     private bool _initialized;
 
     private readonly LivenessRegistry? _liveness;
+    private readonly HistoryLossLog? _historyLoss;
 
-    public HaCoordinator(IOptions<HaOptions> options, IOptions<ScadaSettings> settings, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HaReplication replication, ILogger<HaCoordinator> logger, LivenessRegistry? liveness = null)
+    public HaCoordinator(IOptions<HaOptions> options, IOptions<ScadaSettings> settings, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HaReplication replication, ILogger<HaCoordinator> logger, LivenessRegistry? liveness = null, HistoryLossLog? historyLoss = null)
     {
         _liveness = liveness;
+        _historyLoss = historyLoss;
         _options = options.Value; _options.Validate();
         _factory = factory;
         _runtimeFactory = runtimeFactory; _replication = replication; _logger = logger;
@@ -78,7 +82,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
         return new(_options.Enabled, _options.Enabled ? _options.NodeId : "standalone", _options.Enabled ? (_primary ? "Primary" : "Standby") : "Standalone", _state.Term, Generation,
             _options.SelfUrl, _options.Enabled ? _options.PeerUrl : null, _peer, _peerSeenTs, _witness?.Name, _lease, _witnessError, _options.AutoFailover && _witness is not null,
             _promotedTs, _replication.LastConfigSyncTs, _replication.LastHistorySyncTs, _replication.HistoryRowsBehind, _replication.ConfigApplied, _replication.HistoryRowsApplied,
-            _replication.LastRuntimeSyncTs, _replication.RuntimeRowsApplied, _replication.LastError, Interlocked.Read(ref _switchovers), events);
+            _replication.LastRuntimeSyncTs, _replication.RuntimeRowsApplied, _replication.LastError, Interlocked.Read(ref _switchovers), events, _replication.RuntimeRowsBehind);
     }
 
     public IEnumerable<SystemWarning> Warnings()
@@ -91,6 +95,12 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
         if (!_primary && _peer?.Role == "Primary" && _replication.LastConfigSyncTs > 0 && now - _replication.LastConfigSyncTs > Math.Max(_options.ConfigSyncMs * 6, 60000))
             yield return new("ha_replication_stalled", "备机配置复制已超过 1 分钟未成功");
         if (!_primary && _peer is { Role: not "Primary" }) yield return new("ha_no_primary", "主备两节点都不是主机");
+        if (!_primary && _peer?.Role == "Primary" && _replication.HistoryLag.Warning() is { } lag)
+            yield return new("ha_history_behind", lag);
+        if (!_primary && _peer?.Role == "Primary" && _replication.RuntimeLag.Warning() is { } runtimeLag)
+            yield return new("ha_runtime_behind", runtimeLag);
+        if (!_primary && _peer?.Role == "Primary" && _replication.PeerSpool is { Bytes: >= HaReplication.SpoolUnreplicatedWarnBytes } spool)
+            yield return new("ha_spool_unreplicated", $"主机历史暂存约 {spool.ApproxCount} 条（{spool.Bytes} 字节）尚未进入备机，接管时可能记为缺口");
     }
 
     // 健康聚合只认接口，不再按具体类型反查（见 IHealthContributor 的说明）。
@@ -221,6 +231,19 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
         _state.Term = term; await SaveStateAsync();
         _gapStreams.Clear();
         Interlocked.Exchange(ref _promotedTs, ScadaTime.NowMs());
+        HaHistoryLagMonitor.RecordPromotionGap(_historyLoss, _replication.HistoryRowsBehind, _replication.LastHistorySyncTs, ScadaTime.NowMs(), reason);
+        if (_replication.RuntimeRowsBehind > 0)
+        {
+            var tables = _replication.RuntimeLag.Tables.Count == 0 ? "未知" : string.Join("、", _replication.RuntimeLag.Tables);
+            Record("runtime-gap", $"主备接管时运行库未同步尾段 {_replication.RuntimeRowsBehind} 行（表：{tables}；{reason}）");
+        }
+        if (!_replication.HistoryArtifactsImported && _replication.PeerSpool is { } spool && (spool.ApproxCount > 0 || spool.Bytes > 0))
+        {
+            var from = spool.From ?? ScadaTime.NowMs();
+            var to = spool.To ?? ScadaTime.NowMs();
+            if (to < from) to = from;
+            _historyLoss?.Record(HistoryGapKind.SpoolDropped, from, to, detail: $"主备接管时主机未回放暂存约 {spool.ApproxCount} 条（{spool.Bytes} 字节；{reason}）");
+        }
         _primary = true;
         _replication.EnsureRuntimeChangeFeed();
         Interlocked.Increment(ref _generation); Interlocked.Increment(ref _switchovers);

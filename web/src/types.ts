@@ -17,6 +17,7 @@ export interface Area {
   description?: string | null
   deviceCount?: number
   isDefault?: boolean
+  revision?: number
 }
 
 export interface AccessRoleItem {
@@ -74,6 +75,7 @@ export interface Device {
   gatewayId: number | null
   /** 绑定的物理通道；设置后端点（host/port 或串口参数）由通道下发。 */
   channelId: number | null
+  revision?: number
   areaId?: number
   name: string
   protocol: string
@@ -140,6 +142,7 @@ export interface Tag {
   calculationIntervalMs: number
   inputMaxAgeMs: number
   calculationRevision: number
+  revision?: number
   name: string
   description?: string | null
   area: TagArea
@@ -164,10 +167,11 @@ export interface Tag {
   registerCount: number
 }
 
-export type TagInput = Omit<Tag, 'id' | 'registerCount' | 'kind' | 'expression' | 'calculationEnabled' | 'calculationIntervalMs' | 'inputMaxAgeMs' | 'calculationRevision' | 'deviceId'> & { deviceId: number }
+export type TagInput = Omit<Tag, 'id' | 'registerCount' | 'kind' | 'expression' | 'calculationEnabled' | 'calculationIntervalMs' | 'inputMaxAgeMs' | 'calculationRevision' | 'deviceId'> & { deviceId: number; revision?: number }
 
 export interface AlarmRule {
   id: number
+  revision?: number
   tagId: number
   type: AlarmType
   /** 位报警（Discrete）的触发条件：On=读到 1 报警，Off=读到 0 报警，Change=每次翻转报警。 */
@@ -213,6 +217,7 @@ export interface AlarmPageQuery {
   category?: AlarmCategory
   keyword?: string
   tagId?: number
+  tagIds?: string
   offset?: number
   limit?: number
 }
@@ -355,6 +360,7 @@ export interface NotificationChannel {
   settings: NotificationChannelSettings
   hasSecret: boolean
   secret?: string | null
+  revision?: number
 }
 
 export interface NotificationChannelInput {
@@ -363,6 +369,7 @@ export interface NotificationChannelInput {
   enabled: boolean
   settings: NotificationChannelSettings
   secret?: string | null
+  revision?: number
 }
 
 export interface DutyShift {
@@ -376,6 +383,7 @@ export interface DutyShift {
 
 export interface NotificationRoute {
   id: number
+  revision?: number
   name: string
   enabled: boolean
   channelId: number
@@ -455,11 +463,22 @@ export interface HistorySnapshotResult {
   items: HistorySnapshotItem[]
 }
 
+export type HistoryGapKind = 'BadQuality' | 'Missing' | 'Rejected' | 'SpoolDropped'
+
+export interface HistoryGap {
+  tagId?: number | null
+  from: number
+  to: number
+  kind: HistoryGapKind
+  detail?: string | null
+}
+
 export interface HistoryResult {
   resolution: string
   downsampled?: boolean
   pointLimit?: number
   series: HistorySeries[]
+  gaps?: HistoryGap[]
 }
 
 export interface HistoryQualityInterval {
@@ -488,6 +507,7 @@ export interface HistoryAnalysisResult {
   to: number
   resolution: string
   tags: HistoryTagAnalysis[]
+  gaps?: HistoryGap[]
 }
 
 export interface ReportPoint {
@@ -578,6 +598,8 @@ export interface Health {
   configuredTags: number
   busBacklog: number
   busDropped?: number
+  busHistoryRejected?: number
+  busHistoryGapRejected?: number
   warnings?: { code: string; message: string }[]
   historyCapacity?: HistoryCapacity | null
   historyQueries?: {
@@ -587,6 +609,24 @@ export interface Health {
   disk: { root: string; totalGb: number; freeGb: number }
   storage: { configDb: string; configDbBytes: number; historyBytes: number }
   ha?: { node: string; role: 'Primary' | 'Standby'; primaryUrl: string | null } | null
+  spaceReclaim?: {
+    targets: { id: string; path: string; autoVacuumMode: string; pageSize: number; pageCount: number; freelistPages: number; fileBytes: number; freelistBytes: number }[]
+    lastRuns: { targetId: string; action: string; ok: boolean; reason?: string | null; beforeBytes: number; afterBytes: number; durationMs: number; ts: string }[]
+    lastOkTs?: string | null
+    checkedAt: string
+  } | null
+  historyLoss?: {
+    persistent: boolean
+    windows: number
+    oldestFrom?: number | null
+    note: string
+  } | null
+  takeoverReview?: {
+    unknownCommands: number
+    interruptedSequences: number
+    interruptedRecipes: number
+    items: { kind: string; id: string; name: string; message: string; ts?: number | null }[]
+  } | null
 }
 
 export interface ImportResult {

@@ -3,7 +3,7 @@ import { ElNotification } from 'element-plus'
 import type { AlarmEvent } from '../types'
 import { handleAlarmPush, primeAlarmAudio } from '../alarmAudio'
 import { useAlarmSound } from './useAlarmSound'
-import { onHubClosed, onHubEvent, resetHub } from '../realtime/hub'
+import { onHubClosed, onHubEvent, onHubReconnected, resetHub } from '../realtime/hub'
 import { useAuthStore } from '../stores/auth'
 import { alarmMessage, levelLabel, notificationType } from '../utils'
 import { tr } from '../i18n'
@@ -14,6 +14,7 @@ const CRITICAL_TOAST_LIMIT = 3
 let running = false
 let disposeAlarmHandler: (() => void) | undefined
 let disposeHubClosed: (() => void) | undefined
+let disposeReconnect: (() => void) | undefined
 const criticalToasts = new Set<NotificationHandle>()
 
 function unlockAudio(): void {
@@ -120,6 +121,7 @@ export function useAlarmSession() {
       handleAlarmPush(payload)
       sound.schedule()
     })
+    disposeReconnect = onHubReconnected(() => { void sound.refresh() })
     const auth = useAuthStore()
     disposeHubClosed = onHubClosed(() => { void auth.confirmSession().catch(() => undefined) })
   }
@@ -131,8 +133,10 @@ export function useAlarmSession() {
     window.removeEventListener('keydown', unlockAudio, true)
     disposeAlarmHandler?.()
     disposeHubClosed?.()
+    disposeReconnect?.()
     disposeAlarmHandler = undefined
     disposeHubClosed = undefined
+    disposeReconnect = undefined
     sound.dispose()
     closeCriticalToasts()
     // 登出或未登录才断开共享连接；从总览进入运行工作台不会走到这里。
@@ -153,8 +157,10 @@ export function resetAlarmSessionForTests(): void {
   window.removeEventListener('keydown', unlockAudio, true)
   disposeAlarmHandler?.()
   disposeHubClosed?.()
+  disposeReconnect?.()
   disposeAlarmHandler = undefined
   disposeHubClosed = undefined
+  disposeReconnect = undefined
   criticalListeners.clear()
   closeCriticalToasts()
 }

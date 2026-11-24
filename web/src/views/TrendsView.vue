@@ -104,6 +104,7 @@
         :rows="analysisRows"
         :display-from="displayFrom"
         :display-to="displayTo"
+        :gaps="analysisGaps"
       />
     </div>
   </div>
@@ -116,7 +117,7 @@ import { Download, Search } from '@element-plus/icons-vue'
 import * as echarts from '../charts'
 import { alarmApi, deviceApi, historyApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
-import type { AlarmEvent, Device, HistoryAnalysisResult, HistoryPoint, HistorySeries, Tag, TagQuality } from '../types'
+import type { AlarmEvent, Device, HistoryAnalysisResult, HistoryPoint, HistoryGap, HistorySeries, Tag, TagQuality } from '../types'
 import { exportCsv, formatTime, levelLabel, levelType } from '../utils'
 import { formatValue } from '../utils'
 import { usePolling } from '../composables/usePolling'
@@ -148,6 +149,7 @@ const loading = ref(false)
 const resolution = ref('')
 const downsampled = ref(false)
 const series = ref<HistorySeries[]>([])
+const historyGaps = ref<HistoryGap[]>([])
 const chartRef = ref<HTMLDivElement>()
 let chart: echarts.ECharts | null = null
 // 预置范围高亮：点了哪个按钮一眼可见；手动改日期后取消高亮
@@ -171,6 +173,7 @@ const displayFrom = computed(() => displayedQuery.value?.from ?? from.value)
 const displayTo = computed(() => displayedQuery.value?.to ?? to.value)
 
 const analysis = ref<HistoryAnalysisResult | null>(null)
+const analysisGaps = computed(() => analysis.value?.gaps ?? historyGaps.value)
 const analysisLoading = ref(false)
 const analysisError = ref('')
 const cursorTs = ref(from.value)
@@ -211,7 +214,7 @@ const canViewAlarms = computed(() => visibleNavItems(auth.user).some(item => ite
 const themeVersion = ref(0)
 const chartModel = computed(() => {
   void themeVersion.value
-  return buildTrendChart(chartTraces.value, {
+  return buildTrendChart(chartTraces.value, { gaps: historyGaps.value, 
     from: displayFrom.value, to: displayTo.value, resolution: resolution.value, palette: chartPalette(), labels: valueLabels,
     marks: alarmMarks.value
   })
@@ -496,6 +499,7 @@ async function query(resetPlayback = true, background = false): Promise<void> {
     resolution.value = result.resolution
     downsampled.value = result.downsampled === true
     series.value = result.series
+    historyGaps.value = result.gaps ?? []
     displayedQuery.value = { tagIds: requestTags, from: requestFrom, to: requestTo, key: requestKey }
     syncUrl()
     rememberRecentTags(requestTags)

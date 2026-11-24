@@ -17,4 +17,8 @@
     <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Scada.Engine.Tests" />
+  </ItemGroup>
+
 </Project>

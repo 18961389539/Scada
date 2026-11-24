@@ -92,6 +92,8 @@
           <el-table-column :label="$t('designReview2.deadLetterSize')" width="90"><template #default="{ row }">{{ bytes(row.payloadBytes) }}</template></el-table-column>
           <el-table-column :label="$t('gatewaysView.kf3ea6d')" width="150"><template #default="{ row }">
             <el-button link type="primary" :disabled="!!letterBusy" data-test="gateway-dead-letter-view" @click="viewDeadLetter(row)">{{ $t('designReview2.deadLetterView') }}</el-button>
+            <el-button link type="primary" :disabled="!!letterBusy" data-test="gateway-dead-letter-preview" @click="previewLetter(row)">{{ $t('designReview2.deadLetterPreview') }}</el-button>
+            <el-button link type="primary" :disabled="!!letterBusy" data-test="gateway-dead-letter-replay" @click="replayLetter(row)">{{ $t('designReview2.deadLetterReplay') }}</el-button>
             <el-button link type="danger" :disabled="!!letterBusy" :loading="letterBusy === letterKey(row)" data-test="gateway-dead-letter-discard" @click="discardDeadLetter(row)">{{ $t('designReview2.deadLetterDiscard') }}</el-button>
           </template></el-table-column>
         </el-table>
@@ -233,6 +235,33 @@ const prettyPayload = computed(() => {
   try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
 })
 let deadLetterSeq = 0
+
+async function previewLetter(letter: GatewayDeadLetter): Promise<void> {
+  try {
+    const preview = await gatewayApi.previewDeadLetter(letter)
+    if (preview.alreadyReplayed) ElMessage.info(tr('designReview2.deadLetterAlready'))
+    else if (!preview.canReplay) ElMessage.warning(tr('designReview2.deadLetterCannot', [preview.reason || '']))
+    else ElMessage.success(`${tr('designReview2.deadLetterPreview')}: ${preview.writeCount} / ${preview.skipCount}`)
+  } catch (error) {
+    ElMessage.error(errorMessage(error, tr('designReview2.deadLetterCannot', [''])))
+  }
+}
+async function replayLetter(letter: GatewayDeadLetter): Promise<void> {
+  try {
+    await ElMessageBox.confirm(tr('designReview2.deadLetterReplayConfirm'), tr('designReview2.deadLetterReplay'), { type: 'warning' })
+  } catch { return }
+  try {
+    const result = await gatewayApi.replayDeadLetter(letter)
+    if (result.alreadyReplayed && result.writeCount === 0 && result.reason)
+      ElMessage.info(tr('designReview2.deadLetterAlready'))
+    else
+      ElMessage.success(tr('designReview2.deadLetterReplayOk', [result.writeCount, result.skipCount]))
+    await loadDeadLetters()
+  } catch (error) {
+    ElMessage.error(errorMessage(error, tr('designReview2.deadLetterCannot', [''])))
+  }
+}
+
 async function loadDeadLetters(append = false): Promise<void> {
   const id = detailId.value, seq = ++deadLetterSeq
   if (!id) { deadLetters.value = []; deadLettersMore.value = false; return }

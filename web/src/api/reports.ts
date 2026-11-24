@@ -28,7 +28,15 @@ export interface ReportVerification {
 }
 export interface ReportSignInput { step: 'review' | 'approve'; decision: 'approved' | 'rejected'; reason: string; password: string }
 export interface ReportRowData { label: string; from: number; to: number; values: (number | string | null)[] }
-export interface ReportTableData { title: string; periodKey: string; columns: { key: string; title: string; unit: string | null; decimals: number }[]; rows: ReportRowData[]; summary: ReportRowData }
+export interface ReportCoverageData {
+  ratio: number
+  incomplete: boolean
+  expectedHours: number
+  coveredHours: number
+  columns: { key: string; ratio: number; incomplete: boolean; expectedHours: number; coveredHours: number }[]
+  rows: { label: string; from: number; to: number; ratio: number; incomplete: boolean; expectedHours: number; coveredHours: number }[]
+}
+export interface ReportTableData { title: string; periodKey: string; columns: { key: string; title: string; unit: string | null; decimals: number }[]; rows: ReportRowData[]; summary: ReportRowData; coverage?: ReportCoverageData | null }
 
 export const reportCenterApi = {
   templates: async () => (await http.get<ReportTemplate[]>('/report-templates')).data,

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Scada.Core.Entities;
+using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
 
@@ -12,9 +13,13 @@ namespace Scada.Engine.Control;
 public sealed class ControlWorkflowException(string message, int status = 400) : Exception(message) { public int Status { get; } = status; }
 
 // 双人复核与顺控执行。顺控在后台逐步执行：每步走完整控制检查与下发，再在超时内等待本步完成条件；任一步失败即停止，其余步骤记为跳过。
-public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, RecipeService recipes, ILogger<ControlWorkflowService> logger) : BackgroundService
+public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, RecipeService recipes, ILogger<ControlWorkflowService> logger, INodeRole? role = null) : BackgroundService
 {
+    public const string RestartInterruptMessage = "服务重启，顺控中断；请核对现场状态后重新执行";
+    public const string TakeoverUnknownMessage = "主备接管，顺控结果未知，不会自动续跑；请核对现场状态后重新执行";
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private readonly INodeRole _role = role ?? new StandaloneNodeRole();
+    private long _reconciledGeneration = long.MinValue;
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _running = new();
     private readonly ConcurrentDictionary<int, Task> _tasks = new();
     private readonly CancellationTokenSource _shutdown = new();
@@ -27,18 +32,34 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
         await base.StopAsync(cancellationToken);
     }
 
-    // 启动时把上次进程退出时仍在运行的顺控标记为中断（不自动续跑，避免重启后对现场重复动作）。
+    // 仅在主机上收口滞留 Running：备机启动时不把复制来的在途作业写成失败。提升并完成运行库追平后再按结果未知收口，不自动续跑。
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        do
+        {
+            if (_role.IsActive && _reconciledGeneration != _role.Generation)
+            {
+                var takeover = _role.Generation > 0;
+                await ReconcileOrphanRunsAsync(takeover, stoppingToken);
+                _reconciledGeneration = _role.Generation;
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+    }
+
+    internal async Task ReconcileOrphanRunsAsync(bool takeover, CancellationToken stoppingToken)
     {
         try
         {
             await using var db = await factory.CreateDbContextAsync(stoppingToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(stoppingToken);
             var now = ScadaTime.NowMs();
+            var message = takeover ? TakeoverUnknownMessage : RestartInterruptMessage;
             foreach (var run in await runtime.ControlSequenceRuns.Where(x => x.Status == ControlRunStatus.Running).ToListAsync(stoppingToken))
             {
                 if (_running.ContainsKey(run.Id)) continue;
-                run.Status = ControlRunStatus.Failed; run.EndedTs = now; run.Message = "服务重启，顺控中断；请核对现场状态后重新执行";
+                run.Status = ControlRunStatus.Failed; run.EndedTs = now; run.Message = message;
                 runtime.OperationLogs.Add(Audit(run.StartedByUserId, "system", $"顺控中断 {run.SequenceName}", run.Message, run.Id));
             }
             await db.SaveChangesAsync(stoppingToken);

@@ -8,13 +8,26 @@ namespace Scada.Server.Reports;
 
 public static class ReportExcel
 {
+    public static string CoverageCaption(ReportTable table, Func<string, string>? localize = null)
+    {
+        string L(string text) => localize is null ? text : localize(text);
+        var coverage = table.Coverage;
+        if (coverage is null || coverage.ExpectedHours <= 0) return "";
+        var percent = (coverage.Ratio * 100).ToString("0.0", CultureInfo.InvariantCulture) + "%";
+        var caption = L($"数据覆盖率 {percent}");
+        if (coverage.Incomplete) caption += " · " + L("数据不完整");
+        return caption;
+    }
+
     public static byte[] Render(ReportTable table, string versionLabel, TimeZoneInfo zone, string locale = "zh-CN")
     {
         string L(string text) => Scada.Server.Localization.Localizer.T(text, locale);
         using var workbook = new XLWorkbook();
         var sheet = workbook.Worksheets.Add(L("报表"));
         sheet.Cell(1, 1).Value = table.Title; sheet.Cell(1, 1).Style.Font.Bold = true; sheet.Cell(1, 1).Style.Font.FontSize = 14;
-        sheet.Cell(2, 1).Value = L($"周期 {table.PeriodKey}（{Local(table.From, zone)} ～ {Local(table.To, zone)}） · {versionLabel}");
+        var period = L($"周期 {table.PeriodKey}（{Local(table.From, zone)} ～ {Local(table.To, zone)}） · {versionLabel}");
+        var coverage = CoverageCaption(table, L);
+        sheet.Cell(2, 1).Value = string.IsNullOrEmpty(coverage) ? period : period + " · " + coverage;
         var header = 4;
         sheet.Cell(header, 1).Value = L(table.Period == ReportPeriod.Month ? "日期" : "时段");
         for (var i = 0; i < table.Columns.Count; i++)
@@ -113,7 +126,9 @@ public static class ReportPdf
                 pageNo++;
                 var canvas = document.BeginPage(width, height);
                 canvas.DrawText(table.Title, margin, margin + 12, SKTextAlign.Left, title, ink);
-                canvas.DrawText(L($"周期 {table.PeriodKey}（{ReportExcel.Local(table.From, zone)} ～ {ReportExcel.Local(table.To, zone)}） · {versionLabel}"), margin, margin + 30, SKTextAlign.Left, text, ink);
+                var period = L($"周期 {table.PeriodKey}（{ReportExcel.Local(table.From, zone)} ～ {ReportExcel.Local(table.To, zone)}） · {versionLabel}");
+                var coverage = ReportExcel.CoverageCaption(table, L);
+                canvas.DrawText(string.IsNullOrEmpty(coverage) ? period : period + " · " + coverage, margin, margin + 30, SKTextAlign.Left, text, ink);
                 var y = margin + 46f;
                 var cols = table.Columns.Skip(cs).Take(columnsPerPage).ToList();
                 void Cell(string value, float x, float w, float top, SKFont font, bool right)

@@ -38,7 +38,8 @@ public sealed record HistoryAnalysisResult(
     long From,
     long To,
     string Resolution,
-    IReadOnlyList<HistoryTagAnalysis> Tags);
+    IReadOnlyList<HistoryTagAnalysis> Tags,
+    IReadOnlyList<HistoryGap>? Gaps = null);
 
 public enum HistoryResolution
 {

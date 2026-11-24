@@ -259,3 +259,19 @@ dotnet test tests\Scada.Engine.Tests -c Release --filter Category=Capacity --log
 **该文件不修改任何设备/测点采样频率或死区，也不由启动自动加载**；60 秒须由工程师按现场需要配置。
 对于有抖动的快速模拟量，先验证有效变化率和业务允许的死区，不应为了通过告警一刀切降采样。
 保留默认仍是 6 个月。需要多年原始数据时参考本页容量表，本轮不提供 Timescale。
+
+## Space reclaim
+
+After retention deletes rows, SQLite may keep the free pages on the freelist. `SpaceReclaimService` runs in the daily maintenance window:
+
+- Databases already in `incremental` auto_vacuum mode use `PRAGMA incremental_vacuum` (interruptible).
+- Legacy files still on `auto_vacuum=NONE` are first `quick_check`ed, then given a time-limited exclusive `VACUUM` that also switches them to incremental. Exclusive VACUUM is skipped when history queries are active, when the timeout elapses, or when `quick_check` fails; the maintenance task continues.
+- `/api/health` reports each target's auto_vacuum mode, freelist pages, and the last reclaim result.
+
+This does not change the default history storage backend.
+
+## 拒收与暂存丢弃窗口
+
+写入拒收和暂存丢弃窗口会记入历史目录下的 `history-loss.jsonl`，保留期与原始历史库相同。
+趋势图和分析面板用这些窗口标出缺口；缺失与坏质量仍由历史库本身计算，不会在日志里再记一遍。
+完整备份会打包该日志。系统健康页展示是否已持久化及当前窗口数，不暴露文件系统路径。

@@ -30,6 +30,7 @@ public class AcquisitionChannel
     /// <summary>链路级超时。通道上的设备共用这条物理链路，因此也共用超时。</summary>
     public int TimeoutMs { get; set; } = 3000;
     public bool Enabled { get; set; } = true;
+    public long Revision { get; set; } = 1;
 
     public AcquisitionChannel Clone() => (AcquisitionChannel)MemberwiseClone();
 }

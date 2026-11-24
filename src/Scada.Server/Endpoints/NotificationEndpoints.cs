@@ -7,14 +7,16 @@ using Scada.Core.Security;
 using Scada.Data;
 using Scada.Engine.Notifications;
 using Scada.Server.Auth;
+using Scada.Core.Configuration;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record NotificationChannelRequest(string Name, NotificationChannelType Type, bool Enabled, NotificationChannelSettings? Settings, string? Secret);
+public sealed record NotificationChannelRequest(string Name, NotificationChannelType Type, bool Enabled, NotificationChannelSettings? Settings, string? Secret, long? Revision = null);
 public sealed record DutyShiftRequest(string Name, int StartMinute, int EndMinute, int Days, bool Enabled);
-public sealed record NotificationRouteRequest(string Name, bool Enabled, int ChannelId, int? AreaId, AlarmLevel MinLevel, int? ShiftId, string? Recipients, bool OnRaise, bool OnRecover, int? EscalateAfterMinutes);
+public sealed record NotificationRouteRequest(string Name, bool Enabled, int ChannelId, int? AreaId, AlarmLevel MinLevel, int? ShiftId, string? Recipients, bool OnRaise, bool OnRecover, int? EscalateAfterMinutes, long? Revision = null);
 public sealed record ChannelTestRequest(string? Recipients);
 public sealed record OutboxAcknowledgeRequest(long[]? Ids);
+public sealed record OutboxRetryRequest(long[]? Ids);
 
 // 报警通知配置：通道（含加密凭据）与班次是跨区域对象，需全局配置权限；路由按区域授权，区域管理员只能管理本区域路由。
 public static class NotificationEndpoints
@@ -24,7 +26,7 @@ public static class NotificationEndpoints
     // 对外/审计视图：凭据永不回显，只给出是否已设置。
     public static object View(NotificationChannel c) => new
     {
-        c.Id, c.Name, c.Type, c.Enabled,
+        c.Id, c.Name, c.Type, c.Enabled, c.Revision,
         settings = NotificationChannelSettings.Parse(c.SettingsJson),
         hasSecret = !string.IsNullOrEmpty(c.SecretProtected),
         secret = string.IsNullOrEmpty(c.SecretProtected) ? null : Mask
@@ -69,6 +71,26 @@ public static class NotificationEndpoints
             await dispatcher.RefreshStatsAsync(ct);
             return Results.Ok(new { acknowledged = updated });
         });
+        outbox.MapPost("/retry", async (OutboxRetryRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, AlarmNotificationDispatcher dispatcher, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            if (request.Ids is not { Length: > 0 }) return EndpointHelpers.BadRequest("请指定要重试的发件箱条目");
+            if (request.Ids.Length > FailedLimit) return EndpointHelpers.BadRequest($"单次最多重试 {FailedLimit} 条");
+            var rows = (await FailedAsync(factory, runtime, true, ct, ids: request.Ids)).Rows;
+            var denied = rows.Where(x => !x.Can(access)).Select(x => x.Item.Id).ToArray();
+            if (denied.Length > 0)
+                return await Audit.ForbidAsync(http, "重试通知最终失败", $"无权处理通知：{string.Join(",", denied.Take(20))}", "NotificationOutbox", string.Join(",", denied.Take(20)));
+            var allowed = rows.Where(x => x.Item.Status == NotificationOutboxStatus.Failed).Select(x => x.Item.Id).ToArray();
+            var result = await dispatcher.RetryFailedAsync(allowed, ct);
+            await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtimeDb = await runtime.CreateDbContextAsync(ct);
+            runtimeDb.OperationLogs.Add(Audit.Change(http, "重试通知最终失败", "NotificationOutbox", string.Join(",", allowed.Take(50)), new { retried = 0 }, new { result.Retried, result.Skipped, ids = allowed.Take(50) }));
+            await db.SaveChangesAsync(ct);
+            await runtimeDb.SaveChangesAsync(ct);
+            if (result.Retried > 0) await dispatcher.DrainAsync(ct);
+            else await dispatcher.RefreshStatsAsync(ct);
+            return Results.Ok(new { retried = result.Retried, skipped = result.Skipped, reasons = result.Reasons });
+        });
 
         var channels = app.MapGroup("/api/notification-channels").AddEndpointFilter<AuditFailuresFilter>();
         // 路由编辑需要选通道，区域配置员可读通道列表（凭据已脱敏）。
@@ -85,6 +107,7 @@ public static class NotificationEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             if (await db.NotificationChannels.AnyAsync(x => x.Name == channel.Name, ct)) return EndpointHelpers.BadRequest("通道名称已存在");
+            if (channel.Revision < 1) channel.Revision = ConfigRevision.Initial;
             db.NotificationChannels.Add(channel);
             await db.SaveChangesAsync(ct);
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"创建通知通道：{channel.Name}", "NotificationChannel", channel.Id, null, AuditView(channel)));
@@ -98,8 +121,11 @@ public static class NotificationEndpoints
             await using var runtimeDb = await runtimeFactory.CreateDbContextAsync(ct);
             var channel = await db.NotificationChannels.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (channel is null) return Results.NotFound();
+            if (!ConfigRevision.TryAccept(channel.Revision, request.Revision, out var channelRevisionIssue))
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { channelRevisionIssue!.Value.ToApiIssue() } });
             var before = AuditView(channel);
             if (Apply(channel, request, secrets) is { } error) return EndpointHelpers.BadRequest(error);
+            channel.Revision = ConfigRevision.Next(channel.Revision);
             if (await db.NotificationChannels.AnyAsync(x => x.Id != id && x.Name == channel.Name, ct)) return EndpointHelpers.BadRequest("通道名称已存在");
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改通知通道：{channel.Name}", "NotificationChannel", channel.Id, before, AuditView(channel)));
             await db.SaveChangesAsync(ct);
@@ -226,9 +252,16 @@ public static class NotificationEndpoints
             if (await RequireRouteAreaAsync(http, route.AreaId, $"修改通知路由 #{id}") is { } denied) return denied;
             if (await RequireRouteAreaAsync(http, request.AreaId, $"修改通知路由 #{id}") is { } denied2) return denied2;
             var before = CopyRoute(route);
+            if (!ConfigRevision.TryAccept(route.Revision, request.Revision, out var revisionIssue))
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { revisionIssue!.Value.ToApiIssue() } });
             if (await ApplyAsync(db, route, request, ct) is { } error) return EndpointHelpers.BadRequest(error);
+            route.Revision = ConfigRevision.Next(before.Revision);
             runtimeDb.OperationLogs.Add(Audit.Change(http, $"修改通知路由：{route.Name}", "NotificationRoute", route.Id, before, route));
-            await db.SaveChangesAsync(ct);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage });
+            }
             await runtimeDb.SaveChangesAsync(ct);
             return Results.Ok(route);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -317,7 +350,7 @@ public static class NotificationEndpoints
     private static NotificationRoute CopyRoute(NotificationRoute r) => new()
     {
         Id = r.Id, Name = r.Name, Enabled = r.Enabled, ChannelId = r.ChannelId, AreaId = r.AreaId, MinLevel = r.MinLevel, ShiftId = r.ShiftId,
-        Recipients = r.Recipients, OnRaise = r.OnRaise, OnRecover = r.OnRecover, EscalateAfterMinutes = r.EscalateAfterMinutes
+        Recipients = r.Recipients, OnRaise = r.OnRaise, OnRecover = r.OnRecover, EscalateAfterMinutes = r.EscalateAfterMinutes, Revision = r.Revision
     };
 
     // 报警通知按报警所在区域、报表投递按报表区域判定权限。

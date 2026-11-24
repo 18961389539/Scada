@@ -7,7 +7,7 @@ using Scada.Server.Services;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record AreaRequest(string Name, string? Description);
+public sealed record AreaRequest(string Name, string? Description, long? Revision = null);
 public sealed record AccessRoleRequest(string Name, string? Description, string[] Permissions);
 public sealed record AssignmentItem(int RoleId, int? AreaId);
 public sealed record AssignmentsRequest(AssignmentItem[] Assignments);
@@ -43,7 +43,10 @@ public static class AccessEndpoints
         areas.MapPut("/{id:int}", async (int id, AreaRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AreaCommandService areasCommand, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
-            return MapArea(await areasCommand.UpdateAsync(db, id, request.Name, true, request.Description, true, ct));
+            var updated = await areasCommand.UpdateAsync(db, id, request.Name, true, request.Description, true, ct, request.Revision);
+            if (updated.Error == AreaCommandError.Conflict)
+                return Results.Conflict(new { message = AreaCommandService.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(Scada.Core.Configuration.ConfigRevision.ConflictCode, Scada.Core.Configuration.ConfigRevision.Field, AreaCommandService.ConflictMessage).ToApiIssue() } });
+            return MapArea(updated);
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
         areas.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, AreaCommandService areasCommand, CancellationToken ct) =>
         {
@@ -165,6 +168,7 @@ public static class AccessEndpoints
         return result.Error switch
         {
             AreaCommandError.NotFound => Results.NotFound(),
+            AreaCommandError.Conflict => Results.Conflict(new { message = AreaCommandService.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(Scada.Core.Configuration.ConfigRevision.ConflictCode, Scada.Core.Configuration.ConfigRevision.Field, AreaCommandService.ConflictMessage).ToApiIssue() } }),
             _ => EndpointHelpers.BadRequest(result.Message ?? "区域写入失败")
         };
     }

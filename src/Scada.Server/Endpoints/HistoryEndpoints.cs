@@ -56,7 +56,8 @@ public static class HistoryEndpoints
                 resolution = result.Resolution.ToString(),
                 downsampled = result.Downsampled,
                 pointLimit = result.PointLimit,
-                series = result.Series
+                series = result.Series,
+                gaps = result.Gaps ?? []
             });
         });
 
@@ -128,7 +129,8 @@ public static class HistoryEndpoints
             var tags = ids.Select(id => analyzed.TryGetValue(id, out var item)
                 ? item
                 : new HistoryTagAnalysis(id, 0, 0, toMs - fromMs, 0, 0, null, null, null, 0, [], false)).ToList();
-            return Results.Ok(new HistoryAnalysisResult(fromMs, toMs, nameof(HistoryResolution.Raw), tags));
+            var gaps = HistoryGapFinder.FromSeries(raw, fromMs, toMs, HistoryResolution.Raw);
+            return Results.Ok(new HistoryAnalysisResult(fromMs, toMs, nameof(HistoryResolution.Raw), tags, gaps));
         });
     }
 }

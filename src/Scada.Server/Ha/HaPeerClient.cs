@@ -71,6 +71,38 @@ public sealed class HaPeerClient : IDisposable
         return (await _http.GetFromJsonAsync<HaRuntimeChanges>($"api/ha/peer/runtime-changes?after={after}&limit={_options.RuntimeBatchRows}", HaReplication.Json, cts.Token))!;
     }
 
+
+    public async Task DownloadSecretsAsync(string target, CancellationToken ct)
+    {
+        using var cts = Deadline(ct, 120000);
+        using var response = await _http.GetAsync("api/ha/peer/secrets", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        response.EnsureSuccessStatusCode();
+        await using var file = File.Create(target);
+        await response.Content.CopyToAsync(file, cts.Token);
+    }
+
+    public async Task DownloadSpoolAsync(string targetDirectory, CancellationToken ct)
+    {
+        using var cts = Deadline(ct, 120000);
+        using var response = await _http.GetAsync("api/ha/peer/spool", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        response.EnsureSuccessStatusCode();
+        var zip = targetDirectory + ".zip";
+        Directory.CreateDirectory(Path.GetDirectoryName(zip)!);
+        await using (var file = File.Create(zip))
+            await response.Content.CopyToAsync(file, cts.Token);
+        if (Directory.Exists(targetDirectory)) Directory.Delete(targetDirectory, true);
+        System.IO.Compression.ZipFile.ExtractToDirectory(zip, targetDirectory);
+        try { File.Delete(zip); } catch { }
+    }
+
+    public async Task DownloadHistoryLossAsync(string target, CancellationToken ct)
+    {
+        using var cts = Deadline(ct, 60000);
+        using var response = await _http.GetAsync("api/ha/peer/history-loss", HttpCompletionOption.ResponseHeadersRead, cts.Token);
+        response.EnsureSuccessStatusCode();
+        await using var file = File.Create(target);
+        await response.Content.CopyToAsync(file, cts.Token);
+    }
     public async Task PostAsync(string route, object body, int timeoutMs, CancellationToken ct)
     {
         using var cts = Deadline(ct, timeoutMs);

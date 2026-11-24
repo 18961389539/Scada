@@ -18,6 +18,7 @@ public sealed class MaintenanceService : BackgroundService
     private readonly INodeRole _role;
     private readonly IDbContextFactory<RuntimeDbContext> _runtimeFactory;
     private readonly IDbContextFactory<ConfigDbContext>? _configFactory;
+    private readonly SpaceReclaimService? _reclaim;
 
     public MaintenanceService(
         IOptions<ScadaSettings> settings,
@@ -25,7 +26,8 @@ public sealed class MaintenanceService : BackgroundService
         ILogger<MaintenanceService> logger,
         IDbContextFactory<RuntimeDbContext> runtimeFactory,
         INodeRole? role = null,
-        IDbContextFactory<ConfigDbContext>? configFactory = null)
+        IDbContextFactory<ConfigDbContext>? configFactory = null,
+        SpaceReclaimService? reclaim = null)
     {
         _settings = settings.Value;
         _history = history;
@@ -33,6 +35,7 @@ public sealed class MaintenanceService : BackgroundService
         _runtimeFactory = runtimeFactory;
         _role = role ?? new StandaloneNodeRole();
         _configFactory = configFactory;
+        _reclaim = reclaim;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -159,43 +162,26 @@ public sealed class MaintenanceService : BackgroundService
     }
 
     /// <summary>
-    /// 回收已删除行的磁盘空间。SQLite 删除数据只是把页挂到 freelist，文件不会自动缩小；
-    /// 运行库的报警与操作日志按天清理，长期运行后文件会停在历史峰值大小，拖慢备份、诊断包与恢复演练。
-    ///
-    /// 新库在建库时已设 auto_vacuum=INCREMENTAL（见 SqlitePragmaInterceptor），这里触发增量回收；
-    /// 老库这条 PRAGMA 是 no-op，不报错，但需要人工执行一次 VACUUM 才会切换模式。
+    /// Reclaim free pages via SpaceReclaimService: incremental_vacuum when already incremental;
+    /// time-limited exclusive VACUUM for legacy none-mode files when history queries are idle.
     /// </summary>
     private async Task ReclaimSpaceAsync(CancellationToken cancellationToken)
     {
-        await ReclaimAsync<RuntimeDbContext>("运行库", _runtimeFactory.CreateDbContextAsync(cancellationToken), cancellationToken);
-        if (_configFactory is not null)
-            await ReclaimAsync<ConfigDbContext>("配置库", _configFactory.CreateDbContextAsync(cancellationToken), cancellationToken);
-    }
-
-    private async Task ReclaimAsync<TContext>(string label, Task<TContext> creating, CancellationToken cancellationToken)
-        where TContext : DbContext
-    {
-        try
+        if (_reclaim is null)
         {
-            await using var db = await creating;
-            var connection = (SqliteConnection)db.Database.GetDbConnection();
-            if (connection.State != ConnectionState.Open) await connection.OpenAsync(cancellationToken);
-
-            var before = FileLengthMb(connection.DataSource);
-            // 先 checkpoint 再回收：WAL 里还有未合并的页时，incremental_vacuum 释放的空间
-            // 不会立刻反映到主文件大小，看起来像"没回收"。
-            await ExecuteAsync(connection, "PRAGMA wal_checkpoint(TRUNCATE);", cancellationToken);
-            await ExecuteAsync(connection, "PRAGMA incremental_vacuum;", cancellationToken);
-            var after = FileLengthMb(connection.DataSource);
-
-            if (before - after >= 1)
-                _logger.LogInformation("{Label}空间回收：{Before} MB → {After} MB", label, before, after);
+            _logger.LogDebug("未注册空间回收服务，本轮跳过");
+            return;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        var runs = await _reclaim.ReclaimAsync(cancellationToken, allowVacuum: true);
+        foreach (var run in runs)
         {
-            // 回收是优化动作：锁冲突或库正被占用时跳过本轮即可。
-            // 备份与数据清理已经完成，不能因为收不了空间让整个维护任务判为失败。
-            _logger.LogWarning(ex, "{Label}空间回收失败，本轮跳过", label);
+            if (run.Action == SpaceReclaimService.ActionSkipped)
+                _logger.LogInformation("空间回收跳过 {Target}：{Reason}", run.TargetId, run.Reason);
+            else if (!run.Ok)
+                _logger.LogWarning("空间回收失败 {Target}：{Reason}", run.TargetId, run.Reason);
+            else if (run.BeforeBytes - run.AfterBytes >= 1024 * 1024)
+                _logger.LogInformation("空间回收 {Target}：{Before} → {After}（{Action}）",
+                    run.TargetId, run.BeforeBytes, run.AfterBytes, run.Action);
         }
     }
 

@@ -47,6 +47,7 @@ public static class ScadaSettingsValidation
 
         // 历史与聚合：0 并发或 0 超时会让查询永久排队/立即失败；保留天数为负会让清理任务删错区间。
         Int(nameof(settings.HistoryRetentionMonths), settings.HistoryRetentionMonths, 1, 1200, "原始历史保留月数须在 1～1200 之间");
+        Int(nameof(settings.SpaceReclaimVacuumTimeoutSeconds), settings.SpaceReclaimVacuumTimeoutSeconds, 5, 600, "空间回收 VACUUM 超时须在 5～600 秒之间");
         Int(nameof(settings.HistoryQueryMaxConcurrent), settings.HistoryQueryMaxConcurrent, 1, 64, "历史查询并发须在 1～64 之间");
         Int(nameof(settings.HistoryQueryTimeoutSeconds), settings.HistoryQueryTimeoutSeconds, 1, 3600, "历史查询超时须在 1～3600 秒之间");
         Long(nameof(settings.HistoryQueryMaxReadPoints), settings.HistoryQueryMaxReadPoints, 1, long.MaxValue, "历史单次查询点数上限必须大于 0");

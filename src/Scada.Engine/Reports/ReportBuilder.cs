@@ -11,7 +11,13 @@ namespace Scada.Engine.Reports;
 
 public sealed record ReportColumnHeader(string Key, string Title, string? Unit, int Decimals, ReportColumnKind Kind);
 public sealed record ReportRow(string Label, long From, long To, double?[] Values);
-public sealed record ReportTable(string Title, string PeriodKey, ReportPeriod Period, long From, long To, IReadOnlyList<ReportColumnHeader> Columns, IReadOnlyList<ReportRow> Rows, ReportRow Summary, long GeneratedTs);
+public sealed record ReportColumnCoverage(string Key, double Ratio, bool Incomplete, int ExpectedHours, int CoveredHours);
+public sealed record ReportRowCoverage(string Label, long From, long To, double Ratio, bool Incomplete, int ExpectedHours, int CoveredHours);
+public sealed record ReportCoverage(double Ratio, bool Incomplete, int ExpectedHours, int CoveredHours, IReadOnlyList<ReportColumnCoverage> Columns, IReadOnlyList<ReportRowCoverage> Rows)
+{
+    public static ReportCoverage None { get; } = new(1, false, 0, 0, [], []);
+}
+public sealed record ReportTable(string Title, string PeriodKey, ReportPeriod Period, long From, long To, IReadOnlyList<ReportColumnHeader> Columns, IReadOnlyList<ReportRow> Rows, ReportRow Summary, long GeneratedTs, ReportCoverage? Coverage = null);
 public sealed class ReportTemplateException(string message) : Exception(message);
 
 public static class ReportPeriods
@@ -352,6 +358,50 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         }).ToArray();
         ApplyFormulas(summary);
         var headers = columns.Select(c => new ReportColumnHeader(c.Key, c.Title, c.Unit, c.Decimals, c.Kind)).ToList();
-        return new ReportTable(template.Name, periodKey, template.Period, from, to, headers, result, new ReportRow("合计/汇总", from, to, summary), ScadaTime.NowMs());
+        var coverage = MeasureCoverage(columns, result, from, to, zone, hourly, raw);
+        return new ReportTable(template.Name, periodKey, template.Period, from, to, headers, result, new ReportRow("合计/汇总", from, to, summary), ScadaTime.NowMs(), coverage);
     }
+
+    // 有样本小时数 / 周期小时数。缺测不改均值或积分公式，只把覆盖情况写入结果。
+    internal static ReportCoverage MeasureCoverage(
+        IReadOnlyList<ReportColumn> columns, IReadOnlyList<ReportRow> rows, long from, long to, TimeZoneInfo zone,
+        IReadOnlyList<AggregatePoint> hourly, IReadOnlyDictionary<int, List<HistoryPoint>> raw)
+    {
+        var tagColumns = columns.Where(c => c.TagId is not null && c.Kind is (ReportColumnKind.TagAvg or ReportColumnKind.TagMax or ReportColumnKind.TagMin or ReportColumnKind.TagDiff or ReportColumnKind.TagSum)).ToList();
+        if (tagColumns.Count == 0 || to <= from) return ReportCoverage.None;
+
+        var hours = ReportPeriods.Rows(ReportPeriod.Day, from, to, zone);
+        if (hours.Count == 0) return ReportCoverage.None;
+
+        bool Covered(ReportColumn column, long rf, long rt)
+        {
+            var tagId = column.TagId!.Value;
+            if (column.Kind is ReportColumnKind.TagDiff or ReportColumnKind.TagSum)
+                return (raw.GetValueOrDefault(tagId) ?? []).Any(p => p.Ts >= rf && p.Ts < rt && p.Quality == TagQuality.Good && double.IsFinite(p.Value));
+            return hourly.Any(p => p.TagId == tagId && p.Ts >= rf && p.Ts < rt && p.Count > 0);
+        }
+
+        var columnCover = tagColumns.Select(c =>
+        {
+            var covered = hours.Count(h => Covered(c, h.From, h.To));
+            var expected = hours.Count;
+            var ratio = expected == 0 ? 1 : covered / (double)expected;
+            return new ReportColumnCoverage(c.Key, ratio, covered < expected, expected, covered);
+        }).ToList();
+
+        var rowCover = rows.Select(r =>
+        {
+            var buckets = hours.Where(h => h.From < r.To && h.To > r.From).ToList();
+            var expected = buckets.Count * tagColumns.Count;
+            var covered = buckets.Sum(h => tagColumns.Count(c => Covered(c, h.From, h.To)));
+            var ratio = expected == 0 ? 1 : covered / (double)expected;
+            return new ReportRowCoverage(r.Label, r.From, r.To, ratio, covered < expected, expected, covered);
+        }).ToList();
+
+        var expectedHours = columnCover.Sum(c => c.ExpectedHours);
+        var coveredHours = columnCover.Sum(c => c.CoveredHours);
+        var ratio = expectedHours == 0 ? 1 : coveredHours / (double)expectedHours;
+        return new ReportCoverage(ratio, coveredHours < expectedHours, expectedHours, coveredHours, columnCover, rowCover);
+    }
+
 }

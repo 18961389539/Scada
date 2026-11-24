@@ -122,6 +122,37 @@ public class ReportBuilderHistoryTests
         Assert.Equal(240 - 10 - 10 / 6.0, table.Summary.Values[1]!.Value, 6);
         Assert.Equal(10, table.Summary.Values[2]!.Value, 6);
         Assert.Equal((240 - 10 - 10 / 6.0) / rowsFlow, table.Summary.Values[3]!.Value, 6);
+        // 09 时缺测：覆盖率计入缺口并标记不完整，但不改已有均值/积分。
+        Assert.NotNull(table.Coverage);
+        Assert.True(table.Coverage!.Incomplete);
+        Assert.Equal(24, table.Coverage.Columns.Single(c => c.Key == "avg").ExpectedHours);
+        Assert.Equal(23, table.Coverage.Columns.Single(c => c.Key == "avg").CoveredHours);
+        Assert.True(table.Coverage.Rows[9].Incomplete);
+    }
+
+    [Fact]
+    public async Task SparseHourlyCoverageIsMarkedIncompleteWithoutChangingAverages()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        var store = new FakeHistory();
+        // 一天 24 小时里只有 08:00 这一小时有数。
+        for (var t = Day + 8 * H; t < Day + 9 * H; t += 600_000) store.Add(2, P(t, 12));
+        var builder = new ReportBuilder(new ReportService(store), factory,
+            new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [], [], 0))), runtime);
+        var columns = new ReportColumn[] { new() { Key = "avg", Title = "功率均值", Kind = ReportColumnKind.TagAvg, TagId = 2, Decimals = 2 } };
+        var template = new ReportTemplate { Name = "日报", Period = ReportPeriod.Day, ColumnsJson = System.Text.Json.JsonSerializer.Serialize(columns, ReportTemplates.Json) };
+        var table = await builder.BuildAsync(template, "2026-10-01", Day, Day + 24 * H, Utc, default);
+        Assert.Equal(24, table.Rows.Count);
+        Assert.Equal(12, table.Rows[8].Values[0]);
+        Assert.Equal(12, table.Summary.Values[0]); // 均值仍按有样本小时加权，不被缺测小时稀释
+        Assert.True(table.Rows.Count(r => r.Values[0] is null) == 23);
+        Assert.True(table.Coverage!.Incomplete);
+        Assert.Equal(1, table.Coverage.CoveredHours);
+        Assert.Equal(24, table.Coverage.ExpectedHours);
+        Assert.Equal(1 / 24.0, table.Coverage.Ratio, 6);
     }
 
     private sealed class Factory(Microsoft.Data.Sqlite.SqliteConnection connection) : Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>

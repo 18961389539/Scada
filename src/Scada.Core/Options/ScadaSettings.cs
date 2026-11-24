@@ -89,7 +89,11 @@ public sealed class ScadaSettings
     // 旧明文包在设置口令后仍可校验与还原，不会被拒。
     [Sensitive]
     public string? BackupPassword { get; set; }
+    /// <summary>口令轮换后仅用于打开旧加密包，不作新备份。</summary>
+    public string? BackupPasswordPrevious { get; set; }
     public List<BackupTargetOptions> BackupTargets { get; set; } = [];
+    // 一次性 VACUUM 的命令超时（秒）。维护任务在历史查询空闲时对尚未 incremental 的老库执行；超时或锁冲突则跳过。
+    public int SpaceReclaimVacuumTimeoutSeconds { get; set; } = 60;
     // Prometheus 抓取令牌（Authorization: Bearer）。未配置时 /metrics 只接受有系统权限的登录令牌。
     [Sensitive]
     public string? MetricsToken { get; set; }

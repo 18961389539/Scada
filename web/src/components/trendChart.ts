@@ -1,5 +1,5 @@
 import type { EChartsOption, GridComponentOption, LineSeriesOption, XAXisComponentOption, YAXisComponentOption } from 'echarts'
-import type { HistorySeries } from '../types'
+import type { HistoryGap, HistorySeries } from '../types'
 import type { ChartPalette } from '../theme'
 
 export interface TrendTrace extends HistorySeries {
@@ -42,6 +42,7 @@ export function buildTrendChart(traces: TrendTrace[], options: {
   palette: ChartPalette
   labels: TrendChartLabels
   marks?: TrendAlarmMark[]
+  gaps?: HistoryGap[]
 }) {
   const { from, to, palette, labels } = options
   const aggregated = options.resolution !== 'Raw'
@@ -96,7 +97,8 @@ export function buildTrendChart(traces: TrendTrace[], options: {
         lineStyle: { width: 1.6 }, itemStyle: { color: trace.color },
         tooltip: { valueFormatter: value => formatTrendValue(Number(Array.isArray(value) ? value[1] : value), trace, aggregated, labels) },
         data: trace.points.map(point => [point.ts, point.value]),
-        markPoint: markPoint(trace.tagId, options.marks ?? [])
+        markPoint: markPoint(trace.tagId, options.marks ?? []),
+        markArea: gapAreas(trace.tagId, options.gaps ?? [], palette)
       })
     }
     top += height + 44
@@ -115,6 +117,23 @@ export function buildTrendChart(traces: TrendTrace[], options: {
     ]
   }
   return { tracks, height, option }
+}
+
+
+function gapAreas(tagId: number, gaps: HistoryGap[], palette: ChartPalette): LineSeriesOption['markArea'] {
+  const items = gaps.filter(gap => gap.tagId == null || gap.tagId === tagId)
+  if (!items.length) return undefined
+  const color = (kind: HistoryGap['kind']) => kind === 'BadQuality' ? 'rgba(200, 80, 80, 0.18)'
+    : kind === 'Rejected' ? 'rgba(180, 120, 0, 0.22)'
+    : kind === 'SpoolDropped' ? 'rgba(160, 60, 160, 0.18)'
+    : 'rgba(120, 120, 120, 0.16)'
+  return {
+    silent: true,
+    data: items.map(gap => [
+      { xAxis: gap.from, itemStyle: { color: color(gap.kind) }, name: gap.kind },
+      { xAxis: gap.to }
+    ])
+  }
 }
 
 function markPoint(tagId: number, marks: TrendAlarmMark[]): LineSeriesOption['markPoint'] {

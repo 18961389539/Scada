@@ -45,7 +45,7 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
 
     /// <summary>按 <paramref name="updated"/> 覆盖可编辑字段；<c>Id</c>/<c>Kind</c> 与计算字段不参与合并。</summary>
     public async Task<TagCommandResult> UpdateAsync(
-        ConfigDbContext db, Tag tag, Tag updated, Device device, CancellationToken cancellationToken)
+        ConfigDbContext db, Tag tag, Tag updated, Device device, CancellationToken cancellationToken, long? expectedRevision = null)
     {
         if (tag.Kind != TagKind.Physical)
             return TagCommandResult.Failed(TagCommandError.NotPhysical,
@@ -55,7 +55,10 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         if (error != TagCommandError.None) return TagCommandResult.Failed(error, issues);
 
         var before = tag.Clone();
+        if (!Scada.Core.Configuration.ConfigRevision.TryAccept(tag.CalculationRevision, expectedRevision, out var revisionIssue))
+            return TagCommandResult.Failed(TagCommandError.Conflict, [revisionIssue!.Value]);
         tag.ApplyEditableFrom(updated);
+        tag.CalculationRevision = Scada.Core.Configuration.ConfigRevision.Next(tag.CalculationRevision);
         try
         {
             await db.SaveChangesAsync(cancellationToken);

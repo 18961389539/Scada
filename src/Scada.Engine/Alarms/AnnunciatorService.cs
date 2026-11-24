@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Scada.Core.Configuration;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -30,7 +31,8 @@ public sealed record AnnunciatorStatusDto(
 public sealed record AnnunciatorPanelInput(
     string Name, int? AreaId, bool Enabled, AnnunciatorLatchMode LatchMode, int SilenceMinutes,
     int FlashOnMs, int FlashOffMs, int CriticalFlashOnMs, int CriticalFlashOffMs, bool BrowserSound,
-    IReadOnlyList<AnnunciatorOutputInput>? Outputs, IReadOnlyList<AnnunciatorLevelMapInput>? Levels);
+    IReadOnlyList<AnnunciatorOutputInput>? Outputs, IReadOnlyList<AnnunciatorLevelMapInput>? Levels,
+    long? Revision = null);
 
 public sealed record AnnunciatorOutputInput(AnnunciatorChannelKind Kind, int TagId, double ActiveValue, double InactiveValue, bool Enabled);
 public sealed record AnnunciatorLevelMapInput(AlarmLevel Level, bool Horn, bool Beacon, bool TowerRed, bool TowerYellow, bool TowerBlue, bool TowerGreen, bool Flash, string? SoundKey);
@@ -228,7 +230,9 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         if (id is int existingId)
         {
             panel = await db.AnnunciatorPanels.SingleOrDefaultAsync(x => x.Id == existingId, ct) ?? throw new InvalidOperationException("not found");
-            panel.Revision++;
+            if (!ConfigRevision.TryAccept(panel.Revision, input.Revision, out _))
+                return (null, ConfigRevision.ConflictMessage);
+            panel.Revision = ConfigRevision.Next(panel.Revision);
             db.AnnunciatorOutputs.RemoveRange(db.AnnunciatorOutputs.Where(x => x.PanelId == panel.Id));
             db.AnnunciatorLevelMaps.RemoveRange(db.AnnunciatorLevelMaps.Where(x => x.PanelId == panel.Id));
         }

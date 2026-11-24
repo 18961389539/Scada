@@ -87,6 +87,7 @@
     </div>
 
     <div class="panel" data-test="backup-panel">
+      <el-alert type="info" show-icon :closable="false" :title="$t('opsView.fullBackupHint')" data-test="backup-kind-hint" style="margin-bottom: 8px" />
       <div class="toolbar">
         <h3>{{ $t('opsView.k3199f6') }}</h3>
         <span class="hint">{{ $t('opsView.ka93a8d', [targets.length ? targets.map(t => $t('opsView.k86a85f', [t.name, targetKind(t.kind), t.keepLatest])).join('、') : $t('opsView.k63595e')]) }}</span>

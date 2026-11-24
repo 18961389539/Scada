@@ -353,7 +353,7 @@ const corrRules = computed<FormRules>(() => ({
   reason: textRule(t('oee.reasonRequired'))
 }))
 
-type LineForm = Omit<ProductionLine, 'id' | 'areaId' | 'revision' | 'updatedTs' | 'updatedBy'> & { areaId?: number }
+type LineForm = Omit<ProductionLine, 'id' | 'areaId' | 'updatedTs' | 'updatedBy'> & { areaId?: number; revision?: number }
 const lineDlg = ref(false), lineForm = ref<LineForm>({ name: '', areaId: configurableAreas.value[0]?.id, idealCycleSec: 60, enabled: true, stateMapJson: '{}' }), lineIdEdit = ref<number | null>(null)
 function editLine(row?: ProductionLine) {
   if (disposed || saving.value || thOpening.value) return
@@ -364,12 +364,12 @@ function editLine(row?: ProductionLine) {
 }
 async function saveLine(): Promise<void> {
   if (disposed || !lineDlg.value) return
-  if (await saveWith(lineFormRef.value, () => oeeApi.saveLine(lineIdEdit.value, { ...lineForm.value } as Omit<ProductionLine, 'id' | 'revision' | 'updatedTs' | 'updatedBy'>), refreshMeta)) lineDlg.value = false
+  if (await saveWith(lineFormRef.value, () => oeeApi.saveLine(lineIdEdit.value, { ...lineForm.value } as Omit<ProductionLine, 'id' | 'updatedTs' | 'updatedBy'>), refreshMeta)) lineDlg.value = false
 }
 
 async function removeLine(id: number) { await confirmRemove(() => oeeApi.removeLine(id), refreshMeta) }
 
-type ProductForm = Omit<ProductionProduct, 'id' | 'revision'>
+type ProductForm = Omit<ProductionProduct, 'id'> & { revision?: number }
 const productDlg = ref(false), productForm = ref<ProductForm>({ name: '', code: '', areaId: defaultAreaId(), idealCycleSec: 60 }), productIdEdit = ref<number | null>(null)
 function defaultAreaId(): number | null {
   if (canGlobal(auth.user, 'Configure')) return null
@@ -388,7 +388,7 @@ async function saveProduct(): Promise<void> {
 }
 async function removeProduct(id: number) { await confirmRemove(() => oeeApi.removeProduct(id), refreshMeta) }
 
-type ShiftForm = Omit<ProductionShift, 'id' | 'revision' | 'areaId'> & { areaId?: number | null }
+type ShiftForm = Omit<ProductionShift, 'id' | 'areaId'> & { areaId?: number | null; revision?: number }
 const shiftDlg = ref(false), shiftForm = ref<ShiftForm>({ name: '', areaId: configurableAreas.value[0]?.id ?? null, startMinute: 480, endMinute: 1200, days: 127, enabled: true }), shiftIdEdit = ref<number | null>(null)
 function editShift(row?: ProductionShift) {
   if (disposed || saving.value || thOpening.value) return
@@ -403,7 +403,7 @@ async function saveShift(): Promise<void> {
 }
 async function removeShift(id: number) { await confirmRemove(() => oeeApi.removeShift(id), refreshMeta) }
 
-type ReasonForm = Omit<DowntimeReason, 'id' | 'revision'>
+type ReasonForm = Omit<DowntimeReason, 'id'> & { revision?: number }
 const reasonDlg = ref(false), reasonForm = ref<ReasonForm>({ code: '', name: '', category: 'Availability', isPlanned: false, enabled: true, areaId: defaultAreaId() }), reasonIdEdit = ref<number | null>(null)
 function editReason(row?: DowntimeReason) {
   if (disposed || saving.value || thOpening.value) return

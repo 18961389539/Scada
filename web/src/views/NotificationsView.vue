@@ -85,20 +85,22 @@
           </el-table>
         </el-tab-pane>
         <el-tab-pane :label="$t('notificationsView.kae95e7', [failedRows.length ? ` (${failedRows.length})` : ''])" name="failed">
-          <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }}</span>
+          <div class="toolbar"><span class="tiny muted">{{ $t('notificationsView.k5882d5') }} {{ $t('designReview.retryOutboxHint') }}</span>
             <span v-if="failedMore" class="tiny" data-test="outbox-failed-limit">{{ $t('designReview.failedLimit', [FAILED_LIMIT]) }}</span>
             <el-button v-if="failedMore" :loading="failedLoadingOlder" data-test="outbox-failed-older" @click="loadOlderFailed">{{ $t('designReview2.loadOlder') }}</el-button><span class="spacer" />
             <el-button @click="loadFailed">{{ $t('notificationsView.k38108e') }}</el-button>
-            <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">{{ $t('notificationsView.k9b1c0d') }}</el-button></div>
+            <el-button type="warning" :disabled="!failedRows.length" data-test="outbox-ack-all" @click="acknowledge(null)">{{ $t('notificationsView.k9b1c0d') }}</el-button>
+            <el-button type="primary" :disabled="!failedRows.length" :loading="retrying" data-test="outbox-retry-all" @click="retry(null)">{{ $t('designReview.retryOutboxAll') }}</el-button></div>
           <el-alert v-if="failedError" :title="failedError" type="error" :closable="false" show-icon data-test="notifications-failed-error" />
           <el-alert v-if="ackError" :title="ackError" type="error" :closable="false" show-icon data-test="notifications-ack-error" />
+          <el-alert v-if="retryError" :title="retryError" type="error" :closable="false" show-icon data-test="notifications-retry-error" />
           <el-table :data="failedRows" :empty-text="failedError && !failedRows.length ? failedError : $t('notificationsView.kca08f2')" data-test="outbox-failed-table">
             <el-table-column :label="$t('notificationsView.k9f45b3')" min-width="200" show-overflow-tooltip><template #default="{ row }">#{{ row.alarmEventId }} {{ row.alarmMessage }}</template></el-table-column>
             <el-table-column prop="action" :label="$t('notificationsView.kd9d982')" width="90" show-overflow-tooltip />
             <el-table-column prop="attempts" :label="$t('notificationsView.kd4a97e')" width="70" show-overflow-tooltip />
             <el-table-column prop="lastError" :label="$t('notificationsView.k03af10')" min-width="220" show-overflow-tooltip />
             <el-table-column :label="$t('notificationsView.k09e8b7')" width="170" show-overflow-tooltip><template #default="{ row }">{{ row.finishedTs ? formatTime(row.finishedTs) : '--' }}</template></el-table-column>
-            <el-table-column :label="$t('notificationsView.kf3ea6d')" width="100"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">{{ $t('notificationsView.kfa4d47') }}</el-button></template></el-table-column>
+            <el-table-column :label="$t('notificationsView.kf3ea6d')" width="160"><template #default="{ row }"><el-button link type="warning" @click="acknowledge([row.id])">{{ $t('notificationsView.kfa4d47') }}</el-button><el-button link type="primary" data-test="outbox-retry-one" @click="retry([row.id])">{{ $t('designReview.retryOutbox') }}</el-button></template></el-table-column>
           </el-table>
         </el-tab-pane>
       </el-tabs>
@@ -237,7 +239,7 @@ const areasError = ref('')
 const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 
 const routeDialog = reactive({ visible: false, id: 0 })
-const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: true, channelId: 0, areaId: null, minLevel: 'Warning', shiftId: null, recipients: '', onRaise: true, onRecover: false, escalateAfterMinutes: null })
+const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: true, channelId: 0, areaId: null, minLevel: 'Warning', shiftId: null, recipients: '', onRaise: true, onRecover: false, escalateAfterMinutes: null, revision: undefined })
 const routeForm = reactive(emptyRoute())
 const routeEscalate = ref(false)
 const routeEscalateMinutes = ref(15)
@@ -245,7 +247,7 @@ const routeEscalateMinutes = ref(15)
 const routeChannelType = computed(() => channels.value.find(c => c.id === routeForm.channelId)?.type ?? '')
 
 const channelDialog = reactive({ visible: false, id: 0, hasSecret: false, clearSecret: false })
-const emptyChannel = (): NotificationChannelInput => ({ name: '', type: 'Webhook', enabled: true, settings: { port: 25, useSsl: false, timeoutMs: 5000, url: '', host: '', from: '', userName: '', headerName: '' }, secret: '' })
+const emptyChannel = (): NotificationChannelInput => ({ name: '', type: 'Webhook', enabled: true, settings: { port: 25, useSsl: false, timeoutMs: 5000, url: '', host: '', from: '', userName: '', headerName: '' }, secret: '', revision: undefined })
 const channelForm = reactive<NotificationChannelInput>(emptyChannel())
 
 const shiftDialog = reactive({ visible: false, id: 0 })
@@ -344,7 +346,7 @@ function openChannel(channel?: NotificationChannel): void {
   channelDialog.hasSecret = !!channel?.hasSecret
   channelDialog.clearSecret = false
   const base = emptyChannel()
-  Object.assign(channelForm, channel ? { name: channel.name, type: channel.type, enabled: channel.enabled, settings: { ...base.settings, ...channel.settings }, secret: '' } : base)
+  Object.assign(channelForm, channel ? { name: channel.name, type: channel.type, enabled: channel.enabled, settings: { ...base.settings, ...channel.settings }, secret: '', revision: channel.revision } : base)
   channelError.value = ''
   channelDialog.visible = true
 }
@@ -441,7 +443,8 @@ async function removeShift(id: number): Promise<void> {
 }
 
 const failedRows = ref<OutboxFailure[]>([])
-const failedError = ref(''), ackError = ref('')
+const failedError = ref(''), ackError = ref(''), retryError = ref('')
+const retrying = ref(false)
 const failedMore = ref(false), failedNext = ref<number | null>(null), failedLoadingOlder = ref(false)
 async function applyFailed(page: Awaited<ReturnType<typeof notificationApi.failed>>, append: boolean): Promise<void> {
   const ids = new Set(failedRows.value.map(row => row.id))
@@ -478,6 +481,26 @@ async function acknowledge(ids: number[] | null): Promise<void> {
     ackError.value = ''
     ElMessage.success(tr('notificationsView.k76339f', [acknowledged])); await loadFailed()
   } catch (e) { ackError.value = errorMessage(e, tr('notificationsView.k09e424')) }
+}
+async function retry(ids: number[] | null): Promise<void> {
+  const targets = ids ?? failedRows.value.map(x => x.id)
+  if (!targets.length) return
+  if (ids === null) {
+    const message = tr('designReview.retryOutboxConfirm', [targets.length]) + (failedMore.value ? tr('designReview.ackAllMore') : '')
+    try { await ElMessageBox.confirm(message, { type: 'warning' }) } catch { return }
+  }
+  retryError.value = ''
+  retrying.value = true
+  try {
+    let retried = 0, skipped = 0
+    for (let index = 0; index < targets.length; index += FAILED_LIMIT) {
+      const result = await notificationApi.retry(targets.slice(index, index + FAILED_LIMIT))
+      retried += result.retried
+      skipped += result.skipped
+    }
+    ElMessage.success(tr('designReview.retryOutboxSuccess', [retried, skipped])); await loadFailed()
+  } catch (e) { retryError.value = errorMessage(e, tr('designReview.retryOutboxAll')) }
+  finally { retrying.value = false }
 }
 onMounted(() => { void load(); void loadFailed() })
 </script>

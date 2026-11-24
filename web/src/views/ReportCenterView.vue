@@ -76,6 +76,7 @@
   <el-dialog v-model="viewer" :title="table?.title ?? $t('reportCenterView.kca53e6')" width="960px">
     <div v-if="previewLoading" v-loading="true" style="min-height: 100px" data-test="report-preview-loading" />
     <el-alert v-if="previewError" :title="previewError" type="error" :closable="false" show-icon data-test="report-preview-error" />
+    <el-alert v-if="table?.coverage?.incomplete" :title="coverageCaption(table)" type="warning" :closable="false" show-icon data-test="report-preview-incomplete" style="margin-bottom: 8px" />
     <el-table v-if="table" :data="[...table.rows, { ...table.summary, label: $t('designReview2.reportSummary'), summary: true }]" size="small" max-height="520"
       :row-class-name="summaryRowClass" data-test="report-preview">
       <el-table-column prop="label" :label="$t('reportCenterView.kf453a4')" width="140" fixed show-overflow-tooltip />
@@ -266,6 +267,11 @@ const canAddBatchColumns = computed(() => batchColumnForm.tagIds.length > 0 && b
 const emailChannels = computed(() => channels.value.filter(c => c.type === 'Email'))
 const areaName = (id: number) => areas.value.find(a => a.id === id)?.name ?? tr('reportCenterView.k90f301', [id])
 const summaryRowClass = ({ row }: { row: { summary?: boolean } }) => row.summary ? 'report-summary-row' : ''
+function coverageCaption(current: ReportTableData): string {
+  const ratio = current.coverage?.ratio ?? 0
+  const percent = `${(ratio * 100).toFixed(1)}%`
+  return `${tr('reportCenterView.coverage', [percent])} · ${tr('reportCenterView.dataIncomplete')}`
+}
 function reportCell(value: number | string | null | undefined, decimals: number): string {
   if (value == null || value === '') return '--'
   if (typeof value === 'string') return value

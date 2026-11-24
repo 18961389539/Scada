@@ -1465,5 +1465,7 @@
   "设备离线：{0}（网关：{1}）：{2}": "Device offline: {0} (gateway: {1}): {2}",
   "请配置有效的网关编号与密钥": "Configure a valid gateway ID and key",
   "远程设备必须由指定网关执行采集": "Remote devices must be acquired by the assigned gateway",
-  "配置版本尚未下发给此网关": "The configuration version has not been delivered to this gateway yet"
+  "配置版本尚未下发给此网关": "The configuration version has not been delivered to this gateway yet",
+  "数据覆盖率 {0}": "Data coverage {0}",
+  "数据不完整": "Incomplete data"
 }

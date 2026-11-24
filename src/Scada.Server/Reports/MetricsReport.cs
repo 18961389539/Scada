@@ -55,6 +55,7 @@ public sealed class MetricsReport(
         w.Counter("scada_ha_role_changes_total", "本进程内角色变化次数", status.Generation);
         w.Gauge("scada_ha_replication_age_seconds", "备机距上次成功配置复制的秒数（主机为 0）", ha.IsActive || status.ConfigSyncTs == 0 ? 0 : (now - status.ConfigSyncTs) / 1000.0);
         w.Gauge("scada_ha_history_rows_behind", "备机历史复制落后行数", ha.IsActive ? 0 : status.HistoryRowsBehind);
+        w.Gauge("scada_ha_runtime_rows_behind", "备机运行库复制落后行数", ha.IsActive ? 0 : status.RuntimeRowsBehind);
 
         var devices = collector.GetStatuses();
         w.Help("scada_device_online", "设备在线（1/0）", "gauge");
@@ -86,7 +87,9 @@ public sealed class MetricsReport(
         w.Counter("scada_history_spool_rejected_batches_total", "暂存拒收的批次（丢数）", spool.DroppedBatches);
         w.Counter("scada_history_spool_corrupt_lines_total", "暂存损坏行", spool.CorruptLines);
         w.Gauge("scada_bus_backlog", "实时总线积压", bus.Backlog);
-        w.Counter("scada_bus_dropped_total", "实时总线丢弃", bus.DroppedTotal);
+        w.Counter("scada_bus_dropped_total", "实时总线界面订阅丢弃", bus.DroppedTotal);
+        w.Counter("scada_bus_history_rejected_total", "实时总线历史订阅拒收", bus.HistoryRejected);
+        w.Counter("scada_bus_history_gap_rejected_total", "实时总线历史缺口标记队列溢出", bus.HistoryGapRejected);
 
         var configPath = Path.GetFullPath(settings.ConfigDbPath);
         try

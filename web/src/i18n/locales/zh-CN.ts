@@ -484,7 +484,8 @@ export default {
     network: '网络连接失败，请检查网络或服务是否正在运行',
     timeout: '请求超时，服务可能繁忙，请稍后重试',
     status: '（HTTP {0}）',
-    withTrace: '（追踪号：{0}）'
+    withTrace: '（追踪号：{0}）',
+    revisionConflict: '配置已被其他用户修改，请重新打开并合并'
   },
   shortcuts: {
     title: '键盘快捷键',
@@ -529,7 +530,7 @@ export default {
     selectAllMatching: '选择全部匹配项',
     selectAllFailed: '选择全部匹配项失败',
     exportAllConfirm: '导出将包含全部测点，不会仅导出当前页。确定导出？',
-    exportAllFilteredConfirm: '当前列表已筛选，但导出接口仍会导出全部测点，不会跟随设备或搜索条件。确定导出全部测点？'
+    exportAllFilteredConfirm: '将按当前列表筛选导出匹配的测点，而不是仅导出当前页。确定导出？'
   },
   workspaceAlarms: {
     incomplete: '未确认报警列表可能不完整',
@@ -580,7 +581,14 @@ export default {
   designReview: {
     importPlanDetail: '（冲突处理：{0}；新增 {1}、覆盖 {2}、改名 {3}、删除 {4}）',
     busBacklogSub: '当前排队条数，持续升高说明处理跟不上',
-    busDropped: '启动以来已丢弃 {0} 条采集值',
+    busDropped: '启动以来界面订阅已丢弃 {0} 条采集值',
+    busHistoryRejected: '启动以来历史订阅已拒收 {0} 条',
+    busHistoryGapRejected: '启动以来历史缺口标记队列溢出 {0} 条',
+    retryOutbox: '重试',
+    retryOutboxAll: '重试列表中的失败',
+    retryOutboxHint: '重试按至少一次投递：通道恢复后可能再次收到同一条通知。知悉只表示不再作为健康缺口，不会阻止重试。',
+    retryOutboxConfirm: '将重试列表中的 {0} 条失败通知。通道恢复后可能重复投递同一条通知。已确认或已恢复的升级通知会被跳过。',
+    retryOutboxSuccess: '已重新入队 {0} 条，跳过 {1} 条',
     diskUnknown: '未知（读取失败）',
     logDefaultRange: '未选时间时查询最近 7 天',
     passwordRevokes: '重置后该用户所有已登录的画面会立即退出，需要用新密码重新登录。',
@@ -599,6 +607,7 @@ export default {
     annTestNoOutputs: '「{0}」没有启用的输出，试验不会驱动任何现场设备。继续？'
   },
   designReview2: {
+    deadLetterPreview: '预览回放', deadLetterReplay: '回放', deadLetterReplayConfirm: '将按原序号幂等写入历史（已存在的同一时标会跳过），不会回退处理进度。确定回放？', deadLetterReplayOk: '回放完成：写入 {0} 条，跳过 {1} 条', deadLetterAlready: '该死信已经回放过', deadLetterCannot: '不能回放：{0}',
     reportSummary: '合计',
     archiveLimit: '已列出最近 {0} 份。更早的归档还在，可以继续加载。',
     loadOlder: '加载更早的记录',

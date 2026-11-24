@@ -201,6 +201,10 @@ export function errorMessage(error: unknown, fallback = tr('http.k09e424')): str
   const err = error as RequestError
   const data = err.response?.data as { traceId?: string } | undefined
   const server = serverMessage(data)
+  const body = data as { issues?: { code?: string }[] } | undefined
+  if (err.response?.status === 409 && body?.issues?.some(issue => issue.code === 'config.revision.conflict')) {
+    return tr('requestErrors.revisionConflict')
+  }
   // 兜底异常会在错误体里带追踪号，便于对着服务端日志定位。
   if (server) return data?.traceId ? server + tr('requestErrors.withTrace', [data.traceId]) : server
   // 服务端没有给出提示时补上状态码；axios 的英文兜底（Request failed with status code N）不直接展示。

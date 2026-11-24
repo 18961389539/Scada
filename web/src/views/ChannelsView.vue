@@ -201,7 +201,7 @@ function openEdit(row: ChannelInfo): void {
     name: row.name, protocol: row.protocol, description: row.description,
     host: row.host, port: row.port, serialPort: row.serialPort,
     baudRate: row.baudRate, dataBits: row.dataBits, parity: row.parity, stopBits: row.stopBits,
-    timeoutMs: row.timeoutMs, enabled: row.enabled
+    timeoutMs: row.timeoutMs, enabled: row.enabled, revision: row.revision
   })
   formError.value = ''
   dialogVisible.value = true

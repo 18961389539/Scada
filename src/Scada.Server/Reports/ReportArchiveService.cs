@@ -6,6 +6,7 @@ using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Engine.Maintenance;
 using Scada.Data;
 using Scada.Engine.Calculations;
 using Scada.Engine.Notifications;
@@ -63,7 +64,7 @@ public sealed class ReportArchiveService(
                 TemplateId = template.Id, TemplateRevision = template.Revision, TemplateName = template.Name, AreaId = template.AreaId,
                 PeriodKey = key, FromTs = from, ToTs = to, Version = version, Trigger = trigger, GeneratedBy = userName, GeneratedTs = ScadaTime.NowMs(),
                 TemplateJson = JsonSerializer.Serialize(template, ReportTemplates.Json), DataJson = JsonSerializer.Serialize(table, ReportTemplates.Json),
-                XlsxPath = xlsx, XlsxSha256 = xlsxHash, PdfPath = pdf, PdfSha256 = pdfHash,
+                XlsxPath = ReportArchivePaths.Relativize(Root, xlsx), XlsxSha256 = xlsxHash, PdfPath = ReportArchivePaths.Relativize(Root, pdf), PdfSha256 = pdfHash,
                 XlsxSignature = xlsxSig, PdfSignature = pdfSig, SignerThumbprint = thumbprint, SignerSubject = subject, SignedTs = signedTs, SignatureError = signError
             };
             runtime.ReportRuns.Add(run);
@@ -100,7 +101,10 @@ public sealed class ReportArchiveService(
     // 读取并同时校验哈希与数字签名。Bytes 仅在哈希一致且（已签名时）签名有效时返回。
     public async Task<(byte[]? Bytes, bool Exists, bool HashOk, SignatureCheck Signature)> ReadCheckedAsync(ReportRun run, string format, CancellationToken ct)
     {
-        var (path, hash, signature) = format == "pdf" ? (run.PdfPath, run.PdfSha256, run.PdfSignature) : (run.XlsxPath, run.XlsxSha256, run.XlsxSignature);
+        var stored = format == "pdf" ? run.PdfPath : run.XlsxPath;
+        var path = Resolve(stored);
+        var hash = format == "pdf" ? run.PdfSha256 : run.XlsxSha256;
+        var signature = format == "pdf" ? run.PdfSignature : run.XlsxSignature;
         if (run.PurgedTs is not null || !File.Exists(path)) return (null, false, false, new(signature is not null, false, "归档文件不存在", null, null, null, false, false, false));
         var bytes = await File.ReadAllBytesAsync(path, ct);
         var hashOk = string.Equals(Convert.ToHexString(SHA256.HashData(bytes)), hash, StringComparison.OrdinalIgnoreCase);
@@ -119,7 +123,7 @@ public sealed class ReportArchiveService(
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var expired = await runtime.ReportRuns.Where(x => x.PurgedTs == null && x.GeneratedTs < cutoff).OrderBy(x => x.Id).Take(500).ToListAsync(ct);
         if (expired.Count == 0) return 0;
-        foreach (var run in expired) { TryDelete(run.XlsxPath); TryDelete(run.PdfPath); run.PurgedTs = now; }
+        foreach (var run in expired) { TryDelete(Resolve(run.XlsxPath)); TryDelete(Resolve(run.PdfPath)); run.PurgedTs = now; }
         runtime.OperationLogs.Add(new OperationLog
         {
             UserName = "system", Ts = now, Action = $"报表归档保留期清理：删除 {expired.Count} 份报表文件", Result = "成功", TargetType = "ReportRun",
@@ -142,6 +146,11 @@ public sealed class ReportArchiveService(
     {
         try { if (File.Exists(path)) { File.SetAttributes(path, FileAttributes.Normal); File.Delete(path); } } catch (Exception) { }
     }
+
+
+    public string Resolve(string stored) => ReportArchivePaths.Resolve(Root, stored);
+
+    public static string Resolve(string reportsRoot, string stored) => ReportArchivePaths.Resolve(reportsRoot, stored);
 
     private static string Sanitize(string key) => new(key.Select(c => char.IsLetterOrDigit(c) || c == '-' ? c : '_').ToArray());
 }

@@ -296,6 +296,8 @@ again and reloads the target. It does not automatically switch back. Prefer a st
 VIP/hostname in production; origin-scoped preferences such as monitor mappings are lost
 across a switch.
 
+See [high availability](high-availability.md) for Data Protection key-ring and OPC PKI sharing, alarm and control takeover, runtime-lag health, and history spool handling. The key ring is synchronized only over the authenticated `Ha:SharedKey` peer channel (`/api/ha/peer/secrets`); prefer HTTPS, because the shared key authenticates the peer but does not encrypt HTTP. Do not upload keys on an unauthenticated channel. There is no online re-encryption product and no external KMS.
+
 ## Site Identity, Login and First Setup
 
 Merge the following into the existing site settings; keep its signing key,
@@ -372,8 +374,12 @@ on the application's active/standby role management.
 ## Encrypted Backups
 
 A full backup bundle contains the configuration database (including every user
-password hash), the runtime database, the history files, the OPC PKI and the
-ASP.NET Data Protection key ring under `keys/`. Whoever can read the bundle can
+password hash), the runtime database, the history files, unpurged report archives
+under `ReportsRoot`, the OPC PKI and the ASP.NET Data Protection key ring under
+`keys/` (including `report-signing.pfx`). Report run paths are stored relative to
+`ReportsRoot` and rewritten on restore; SHA-256 mismatches or missing archive
+files fail verification and restore. Old files are not re-signed, and there is
+no online one-click restore HTTP API. Whoever can read the bundle can
 forge authentication cookies and decrypt device passwords, so the archive must
 be treated as a credential, not as a report.
 
@@ -388,8 +394,11 @@ Set `Scada:BackupPassword` to store new bundles as `full_*.zip.enc`:
 - `Scada.BackupTool` accepts `--password`, or `SCADA_BACKUP_PASSWORD` so the
   password does not land in shell history. A plain bundle needs no password.
 
-Rotating the password only affects new bundles; old bundles need the password
-that was active when they were written. Record it with the same care as the JWT
+Rotating the password is an offline, site-side procedure (`Set-BackupPassword.ps1`).
+New bundles use `Scada:BackupPassword`. Old encrypted bundles can still be opened with
+`Scada:BackupPasswordPrevious` after a rotation, or they can be rewritten beside the
+original with `Scada.BackupTool reencrypt`. Plain historical `full_*.zip` packs are not
+rewritten and must be recreated through the normal backup pipeline. Record it with the same care as the JWT
 signing key, and store offsite copies on media that is not shared with the site.
 
 `Scada.BackupTool reencrypt` rewrites one encrypted bundle beside the original,
@@ -540,10 +549,14 @@ It prompts twice without echo, accepts at least 12 characters, preserves unrelat
 copies the existing file ACL onto the temporary file before writing. Replacement is atomic. Use
 the server-generated JSON file, coordinate with other configuration editors, and restrict its ACL
 to the service account and trusted administrators: like `Jwt:Key`, this value is a credential.
-The script refuses to rotate an existing password. It never changes running settings; restart is
-required, and environment/command-line overrides still win. No web password-setting endpoint is
-exposed: this repository has no general authenticated secret-bearing site-file writer, and adding
-one casually would expand the credential attack surface. Keep a separate, access-controlled
+When a password is already set, the same script rotates it in a stopped-server window: it verifies
+the current password, writes `Scada:BackupPasswordPrevious` for restore only, and writes the new
+`Scada:BackupPassword`. It lists recent `full_*.zip.enc` packs so they can be reencrypted with
+`Scada.BackupTool reencrypt --prompt-password --prompt-new-password` (never pass the password as an
+argument). Plain historical zip files still need a new backup after restart. Restart the server and
+run a restore drill. It never changes running settings; environment/command-line overrides still win.
+No HTTP password-change endpoint is exposed: this repository has no general authenticated
+secret-bearing site-file writer, and adding one casually would expand the credential attack surface. Keep a separate, access-controlled
 recovery copy of the password, NOT solely inside the backup it unlocks. Do not log it or pass it
 in command-line arguments.
 
@@ -562,3 +575,19 @@ local/share/S3/vendor copies, create and verify replacement encrypted bundles, o
 approval, then remove the old copies in a separate controlled operation. Never remove the last
 known-good restore point merely to clear a warning. This change performs no migration/deletion
 of existing site data or backups.
+
+## Offline Restore Runbook
+
+The published self-contained Windows package includes `tools/Scada.BackupTool.exe` (added by `tools/deployment/Publish-BackupTool.ps1` after `dotnet publish`). Use it together with the service restore scripts; do **not** expose a one-click restore HTTP API.
+
+- Windows: `tools/deployment/server/Restore-ScadaService.ps1`
+- Linux systemd: `tools/deployment/server/restore.sh`
+
+The runbook is: stop the service, restore into an empty staging directory, verify the archive, swap the data directory (keeping `appsettings.Site.json` and logs), start and health-check, and on failure swap back.
+
+Two backup kinds are not interchangeable:
+
+- **Full backup packages** produced by BackupTool / `/api/maintenance/backups` (`full_*.zip` or `.zip.enc`) contain the configuration database, runtime database, history shards, unpurged report archives, OPC PKI and keys. This is what the restore scripts accept. Restore rewrites report paths to the new `ReportsRoot` and refuses the pack when a packed report is missing or its SHA-256 does not match; `PurgedTs` is never set as a substitute for a missing file.
+- **Configuration copies** left by the daily maintenance task (`scada_*.db`) are SQLite copies of the configuration database only. They are not a complete site restore and must not be fed to the full restore runbook as if they were.
+
+The restore scripts write only to an empty staging directory and never overwrite a running instance in place.

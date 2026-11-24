@@ -7,6 +7,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Endpoints;
+using Scada.Core.Configuration;
 
 namespace Scada.Server.Services;
 
@@ -167,6 +168,7 @@ public sealed class AlarmRuleExcelService
                     var before = JsonSerializer.Serialize(existing);
                     rule.Id = existing.Id;
                     rule.Key = existing.Key;
+                    rule.Revision = ConfigRevision.Next(existing.Revision);
                     db.Entry(existing).CurrentValues.SetValues(rule);
                     changes.Add((existing, before, "修改"));
                     updated++;

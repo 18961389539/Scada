@@ -124,7 +124,8 @@ public sealed class Iec104ServerHost(
         }
 
         var commonAddress = opt.CommonAddresses is { Length: > 0 } ? opt.CommonAddresses[0] : 1;
-        await using var session = new Iec104ServerSession(client.GetStream(), opt, map, router, logger, remoteIp, commonAddress);
+        await using var session = new Iec104ServerSession(client.GetStream(), opt, map, router, logger, remoteIp, commonAddress,
+            () => (options.CurrentValue.ModbusSlave, options.CurrentValue.Iec104Server));
         var id = Guid.NewGuid();
         _sessions[id] = session;
         try

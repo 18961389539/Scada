@@ -20,6 +20,8 @@ public class AlarmRule : IAuditedEntity
     public AlarmConsequence Consequence { get; set; } = AlarmConsequence.Major;
     public int ResponseTimeSec { get; set; } = 600;
     public bool AutoPriority { get; set; }
+    // 组态并发令牌。省略修订号的旧客户端仍可保存；带上则必须与当前值一致。
+    public long Revision { get; set; } = 1;
     public int DelaySec { get; set; }
     public double RecoverDeadband { get; set; }
     public bool Enabled { get; set; } = true;

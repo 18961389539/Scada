@@ -1,3 +1,5 @@
+using System.IO.Compression;
+using Scada.Engine.History;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Options;
@@ -39,7 +41,8 @@ public static class HaEndpoints
             var (_, sha, bytes) = await replication.ConfigSnapshotAsync(ha.StateDir, ct);
             var self = ha.Self();
             // 清单不再对运行库做整库快照：日常同步只带变更水位。整库快照仅由 /runtime 在强制切换时提供。
-            return Results.Ok(new HaManifest(self.NodeId, self.Role, self.Term, await replication.SchemaAsync(ct), sha, bytes, replication.HistoryCursors(), RuntimeWatermark: replication.RuntimeWatermark()));
+            var secrets = replication.SecretsSnapshot(ha.StateDir);
+            return Results.Ok(new HaManifest(self.NodeId, self.Role, self.Term, await replication.SchemaAsync(ct), sha, bytes, replication.HistoryCursors(), RuntimeWatermark: replication.RuntimeWatermark(), SecretsSha: secrets?.Sha, SecretsBytes: secrets?.Bytes ?? 0, Spool: replication.AdvertiseSpool(), HistoryLossSha: replication.HistoryLossSha()));
         });
         peer.MapGet("/runtime", async (HaCoordinator ha, HaReplication replication, CancellationToken ct) =>
         {
@@ -64,6 +67,40 @@ public static class HaEndpoints
         {
             try { return Results.Ok(replication.ReadRuntimeChanges(after, limit ?? 2000)); }
             catch (HaException ex) { return Results.Json(new { message = ex.Message }, statusCode: ex.Status); }
+        });
+        peer.MapGet("/secrets", (HaCoordinator ha, HaReplication replication) =>
+        {
+            var snapshot = replication.SecretsSnapshot(ha.StateDir);
+            if (snapshot is null) return Results.NotFound();
+            var bytes = File.ReadAllBytes(snapshot.Value.Path);
+            return Results.File(bytes, "application/zip", "secrets.zip");
+        });
+        peer.MapGet("/spool", async (HaReplication replication, HistorySpool spool, CancellationToken ct) =>
+        {
+            var pending = spool.DescribePending();
+            if (pending.Segments == 0 && pending.Bytes == 0) return Results.NotFound();
+            var staging = Path.Combine(Path.GetTempPath(), "ha-spool-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var copied = await spool.CopyDirectoryToAsync(staging, ct);
+                if (copied.Count == 0) return Results.NotFound();
+                var zip = staging + ".zip";
+                System.IO.Compression.ZipFile.CreateFromDirectory(staging, zip, System.IO.Compression.CompressionLevel.Fastest, includeBaseDirectory: false);
+                var bytes = await File.ReadAllBytesAsync(zip, ct);
+                return Results.File(bytes, "application/zip", "spool.zip");
+            }
+            finally
+            {
+                try { if (Directory.Exists(staging)) Directory.Delete(staging, true); } catch { }
+                try { File.Delete(staging + ".zip"); } catch { }
+            }
+        });
+        peer.MapGet("/history-loss", (HaReplication replication) =>
+        {
+            var path = replication.HistoryLossPath();
+            if (!File.Exists(path)) return Results.NotFound();
+            var bytes = File.ReadAllBytes(path);
+            return Results.File(bytes, "application/x-ndjson", HistoryLossLog.FileName);
         });
         peer.MapPost("/handover", async (HaHandoverRequest request, HaCoordinator ha, CancellationToken ct) =>
         {

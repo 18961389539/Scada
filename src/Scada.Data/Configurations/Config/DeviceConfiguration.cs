@@ -32,5 +32,6 @@ public sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         entity.Property(x => x.ProtocolOptions).HasMaxLength(16000).HasDefaultValue("");
         entity.Property(x => x.SimulationOptions).HasMaxLength(16000).HasDefaultValue("");
         entity.HasIndex(x => x.ChannelId);
+        entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
     }
 }

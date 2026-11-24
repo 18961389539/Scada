@@ -40,6 +40,8 @@ public class Device : IAuditedEntity
     // 仿真设备不连接现场，读写都落在仿真运行时；参数为 SimulationDeviceOptions JSON。
     public bool SimulationEnabled { get; set; }
     public string SimulationOptions { get; set; } = "";
+    // 组态并发令牌。省略修订号的旧客户端仍可保存；带上则必须与当前值一致。
+    public long Revision { get; set; } = 1;
     public bool HasOpcPassword => !string.IsNullOrEmpty(OpcPasswordProtected);
 
     public Device Clone() => (Device)MemberwiseClone();

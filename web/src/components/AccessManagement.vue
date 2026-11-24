@@ -105,7 +105,7 @@ const roleError = ref('')
 const allPermissions: Permission[] = ['View', 'Control', 'AckAlarm', 'Configure', 'ManageUsers', 'System']
 
 const areaDialog = ref(false)
-const areaForm = reactive<{ id: number | null; name: string; description: string }>({ id: null, name: '', description: '' })
+const areaForm = reactive<{ id: number | null; name: string; description: string; revision?: number }>({ id: null, name: '', description: '', revision: undefined })
 const roleDialog = ref(false)
 const roleForm = reactive<{ id: number | null; name: string; description: string; permissions: Permission[] }>({ id: null, name: '', description: '', permissions: [] })
 
@@ -119,14 +119,14 @@ async function loadRoles(): Promise<void> {
   catch (e) { rolesError.value = errorMessage(e, tr('accessManagement.rolesLoadFailed')) }
 }
 function openArea(area?: Area): void {
-  areaForm.id = area?.id ?? null; areaForm.name = area?.name ?? ''; areaForm.description = area?.description ?? ''
+  areaForm.id = area?.id ?? null; areaForm.name = area?.name ?? ''; areaForm.description = area?.description ?? ''; areaForm.revision = area?.revision
   areaError.value = ''
   areaDialog.value = true
 }
 async function saveArea(): Promise<void> {
   areaError.value = ''
   try {
-    const input = { name: areaForm.name, description: areaForm.description || null }
+    const input = { name: areaForm.name, description: areaForm.description || null, revision: areaForm.id ? areaForm.revision : undefined }
     if (areaForm.id) await areaApi.update(areaForm.id, input)
     else await areaApi.create(input)
     areaError.value = ''

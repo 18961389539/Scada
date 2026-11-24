@@ -7,6 +7,9 @@ using Scada.Core.Entities;
 using Scada.Core.Models;
 using Scada.Data;
 using Scada.Server.Reports;
+using Scada.Engine.Maintenance;
+using Microsoft.Extensions.Options;
+using Scada.Core.Options;
 
 namespace Scada.Server.Tests;
 
@@ -18,6 +21,8 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
     public ReportApiTests(AuthorizationTests.Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Factory() => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
     private IDbContextFactory<RuntimeDbContext> Runtime() => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+    private string ArchiveFile(string stored) =>
+        ReportArchivePaths.Resolve(_site.Services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportsRoot, stored);
 
     private object Body(string name, int area, int tag, long revision = 0, bool schedule = false) => new
     {
@@ -122,8 +127,8 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
         await using (var db = await Factory().CreateDbContextAsync())
         {
             var run = await runtime.ReportRuns.AsNoTracking().SingleAsync(x => x.Id == runId);
-            File.SetAttributes(run.XlsxPath, FileAttributes.Normal);
-            await File.AppendAllTextAsync(run.XlsxPath, "x");
+            File.SetAttributes(ArchiveFile(run.XlsxPath), FileAttributes.Normal);
+            await File.AppendAllTextAsync(ArchiveFile(run.XlsxPath), "x");
         }
         Assert.Equal(HttpStatusCode.Conflict, (await op.GetAsync($"/api/report-runs/{runId}/download?format=xlsx")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await op.GetAsync($"/api/report-runs/{v2.GetProperty("id").GetInt64()}/download?format=xlsx")).StatusCode);
@@ -194,7 +199,7 @@ public sealed class ReportApiTests : IClassFixture<AuthorizationTests.Site>
         settings.ReportArchiveRetentionDays = 30;
         try { Assert.True(await archive.PurgeExpiredAsync(ScadaTime.NowMs(), CancellationToken.None) >= 1); }
         finally { settings.ReportArchiveRetentionDays = 0; }
-        Assert.False(File.Exists(oldPath));
+        Assert.False(File.Exists(ArchiveFile(oldPath)));
         Assert.Equal(HttpStatusCode.Gone, (await op.GetAsync($"/api/report-runs/{oldRun}/download?format=pdf")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await op.GetAsync($"/api/report-runs/{newRun}/download?format=pdf")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await op.GetAsync($"/api/report-runs/{oldRun}")).StatusCode); // 记录与数据快照仍在

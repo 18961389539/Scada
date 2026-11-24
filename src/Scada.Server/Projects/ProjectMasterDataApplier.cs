@@ -71,7 +71,7 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             }
             if (ConfigurationValidator.Channel(incoming, Settings) is string error) { Error(entry, error); continue; }
             if (existing is null) Db.Channels.Add(incoming);
-            else { incoming.Id = existing.Id; Db.Entry(existing).CurrentValues.SetValues(incoming); }
+            else { incoming.Id = existing.Id; incoming.Revision = Scada.Core.Configuration.ConfigRevision.Next(existing.Revision); Db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct); await LoadAsync(ct);
     }
@@ -120,6 +120,7 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             {
                 incoming.OpcPasswordProtected = existing.OpcPasswordProtected;
                 incoming.DisabledSinceTs = incoming.Enabled ? 0 : existing.Enabled ? Now : existing.DisabledSinceTs;
+                incoming.Revision = Scada.Core.Configuration.ConfigRevision.Next(existing.Revision);
                 Db.Entry(existing).CurrentValues.SetValues(incoming);
             }
             // 同一包内后一条设备的站号/串口检查要能看到本条已接受的写入；失败时由外层事务回滚。
@@ -150,7 +151,7 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             {
                 var engineeringChanged = existing.Kind != TagKind.Calculated
                     && (existing.Scale != incoming.Scale || existing.Offset != incoming.Offset || existing.Deadband != incoming.Deadband);
-                incoming.Id = existing.Id; incoming.CalculationRevision = existing.CalculationRevision + (existing.Kind == TagKind.Calculated || engineeringChanged ? 1 : 0);
+                incoming.Id = existing.Id; incoming.CalculationRevision = Scada.Core.Configuration.ConfigRevision.Next(existing.CalculationRevision);
                 incoming.Expression = existing.Expression;
                 Db.Entry(existing).CurrentValues.SetValues(incoming); target = existing;
             }

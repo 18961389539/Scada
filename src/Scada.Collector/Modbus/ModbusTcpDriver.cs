@@ -1,6 +1,6 @@
-using System.Net.Sockets;
 using Microsoft.Extensions.Logging;
 using NModbus;
+using Scada.Collector.Common;
 using Scada.Core.Entities;
 using Scada.Core.Protocols;
 
@@ -10,17 +10,19 @@ namespace Scada.Collector.Modbus;
 // Retries=0 保证写入失败不会被库自动重发（见 ModbusMasterDriver）。
 public sealed class ModbusTcpDriver(ILogger<ModbusTcpDriver> logger) : ModbusMasterDriver
 {
-    protected override IModbusMaster Create(Device device)
+    protected override async Task<IModbusMaster> CreateAsync(Device device, CancellationToken cancellationToken)
     {
-        var client = new TcpClient { NoDelay = true };
         var link = DeviceLink.From(device);
-        try { client.Connect(link.Host, link.Port); }
+        try
+        {
+            var client = await TcpConnect.ConnectAsync(link.Host, link.Port, device.TimeoutMs, cancellationToken);
+            return Factory.CreateMaster(client);
+        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            client.Dispose();
             logger.LogWarning("Modbus TCP 连接失败：{Host}:{Port}", link.Host, link.Port);
             throw new IOException($"Modbus TCP 连接失败 {link.Host}:{link.Port}：{ex.Message}", ex);
         }
-        return Factory.CreateMaster(client);
     }
 }

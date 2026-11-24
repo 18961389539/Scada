@@ -81,6 +81,13 @@ public partial class SqliteHistoryBackend
             if (!CopyDatabase(source, copy)) continue;
             packed.Add(copy);
         }
+        var loss = Path.Combine(HistoryRoot, HistoryLossLog.FileName);
+        if (File.Exists(loss))
+        {
+            var copy = Path.Combine(stagingHistoryDirectory, HistoryLossLog.FileName);
+            File.Copy(loss, copy, true);
+            packed.Add(copy);
+        }
         return packed;
     }
 

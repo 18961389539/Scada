@@ -10,6 +10,7 @@ const args = process.argv.slice(2)
 function argument(name) { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1] }
 if (!argument('--package')) throw new Error('Usage: node test-server-package.mjs --package <directory> [--previous-package <directory>]')
 const packagePath = resolve(argument('--package'))
+assert.ok(existsSync(join(packagePath, 'tools', 'Scada.BackupTool.exe')), 'green package must include tools/Scada.BackupTool.exe')
 const previous = argument('--previous-package') ? resolve(argument('--previous-package')) : packagePath
 const root = mkdtempSync(join(tmpdir(), 'scada-package-test-'))
 const probe = createServer()
@@ -86,7 +87,9 @@ try {
   await stop()
   const restored = join(root, 'restored')
   const settings = JSON.parse(readFileSync(join(data, 'appsettings.Site.json'), 'utf8'))
-  execFileSync('dotnet', [resolve('tools/Scada.BackupTool/bin/Release/net10.0/Scada.BackupTool.dll'), 'restore',
+  const packagedTool = join(packagePath, 'tools', 'Scada.BackupTool.exe')
+  const tool = existsSync(packagedTool) ? [packagedTool] : ['dotnet', resolve('tools/Scada.BackupTool/bin/Release/net10.0/Scada.BackupTool.dll')]
+  execFileSync(tool[0], [...tool.slice(1), 'restore',
     '--backup', join(settings.Scada.BackupRoot, backup.fileName), '--target', restored], { stdio: 'pipe' })
   await start(previous, restored)
   token = await login()

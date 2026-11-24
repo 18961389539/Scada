@@ -450,6 +450,7 @@ function toDeviceInput(device: Device, patch: Partial<DeviceInput> = {}): Device
     protocolOptions: device.protocolOptions,
     simulationEnabled: device.simulationEnabled ?? false,
     simulationOptions: device.simulationOptions ?? '',
+    revision: device.revision,
     ...patch
   }
 }

@@ -131,7 +131,7 @@ internal sealed class ProjectCalcApplier(ProjectApplyContext context) : ProjectS
             if (await EndpointHelpers.ValidateAlarmRuleTargetAsync(Db, incoming, existing?.Id, ct) is string targetError) { Error(entry, targetError); continue; }
             if (incoming.Key.Length is 0 or > 64) { Error(entry, "报警规则稳定键须为 1～64 个字符"); continue; }
             if (existing is null) Db.AlarmRules.Add(incoming);
-            else { incoming.Id = existing.Id; incoming.OutOfService = existing.OutOfService; incoming.OutOfServiceReason = existing.OutOfServiceReason; Db.Entry(existing).CurrentValues.SetValues(incoming); }
+            else { incoming.Id = existing.Id; incoming.OutOfService = existing.OutOfService; incoming.OutOfServiceReason = existing.OutOfServiceReason; incoming.Revision = Scada.Core.Configuration.ConfigRevision.Next(existing.Revision); Db.Entry(existing).CurrentValues.SetValues(incoming); }
         }
         await SaveAsync(ct);
     }

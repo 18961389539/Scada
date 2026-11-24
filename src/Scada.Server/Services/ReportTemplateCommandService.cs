@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core;
+using Scada.Core.Configuration;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
@@ -49,7 +50,7 @@ public sealed class ReportTemplateCommandService
     public const string AreaMissingMessage = "区域不存在";
     public const string EmailChannelMessage = "报表投递须选择邮件通道";
     public const string DuplicateNameMessage = "模板名称已存在";
-    public const string ConflictMessage = "模板已被修改，请重新读取后核对";
+    public const string ConflictMessage = ConfigRevision.ConflictMessage;
 
     public async Task<ReportTemplateCommandResult> SaveAsync(
         ConfigDbContext db, RuntimeDbContext runtime, int? templateId, string? name, ReportPeriod period, int areaId,
@@ -101,7 +102,7 @@ public sealed class ReportTemplateCommandService
         var row = templateId is int id ? await db.ReportTemplates.SingleOrDefaultAsync(x => x.Id == id, cancellationToken) : null;
         if (templateId is not null && row is null)
             return ReportTemplateCommandResult.Failed(ReportTemplateCommandError.NotFound, "Report template does not exist.");
-        if (row is not null && row.Revision != revision)
+        if (row is not null && !ConfigRevision.TryAccept(row.Revision, revision, out _))
             return ReportTemplateCommandResult.Failed(ReportTemplateCommandError.Conflict, ConflictMessage, row);
         if (await db.ReportTemplates.AnyAsync(x => x.Name == candidate.Name && x.Id != (templateId ?? 0), cancellationToken))
             return ReportTemplateCommandResult.Failed(ReportTemplateCommandError.DuplicateName, DuplicateNameMessage, row);

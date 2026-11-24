@@ -17,5 +17,6 @@ public sealed class NotificationChannelConfiguration : IEntityTypeConfiguration<
         entity.Property(x => x.Name).IsRequired().HasMaxLength(100);
         entity.HasIndex(x => x.Name).IsUnique();
         entity.Property(x => x.SettingsJson).IsRequired().HasMaxLength(4000);
+        entity.Property(x => x.Revision).IsRequired().HasDefaultValue(1L);
     }
 }

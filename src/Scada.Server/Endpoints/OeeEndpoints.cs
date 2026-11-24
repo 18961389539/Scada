@@ -12,6 +12,8 @@ using Scada.Server.Reports;
 
 using Scada.Server.Services;
 
+using Scada.Core.Configuration;
+
 namespace Scada.Server.Endpoints;
 
 public sealed record OeeThresholdsRequest(OeeThresholds Thresholds, long Revision = 0);
@@ -289,7 +291,7 @@ public static class OeeEndpoints
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var row = await db.OeeConfigs.FirstOrDefaultAsync(x => x.Id == 1, ct);
             if (row is null) { row = new OeeConfig { Id = 1 }; db.OeeConfigs.Add(row); }
-            if (req.Revision != 0 && row.Revision != req.Revision) return Results.Conflict(new { message = "阈值已被他人修改", revision = row.Revision });
+            if (req.Revision != 0 && row.Revision != req.Revision) return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(ConfigRevision.ConflictCode, ConfigRevision.Field, ConfigRevision.ConflictMessage).ToApiIssue() }, revision = row.Revision });
             var before = oee.Parse(row.ThresholdsJson);
             row.ThresholdsJson = OeeService.Serialize(req.Thresholds);
             row.Revision++; row.UpdatedTs = ScadaTime.NowMs(); row.UpdatedBy = http.User.GetUserName();
@@ -350,7 +352,7 @@ public static class OeeEndpoints
         if (row is not null && row.AreaId != r.AreaId && !access.Has(Permission.Configure, row.AreaId))
             return await Audit.ForbidAsync(http, action, "无原区域的配置权限", "ProductionLine", id);
         if (await RequireTagConfigureAsync(http, db, action, [r.StateTagId, r.GoodCountTagId, r.RejectCountTagId, r.TotalCountTagId]) is { } tagDenied) return tagDenied;
-        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "产线已被他人修改", revision = row.Revision });
+        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(ConfigRevision.ConflictCode, ConfigRevision.Field, ConfigRevision.ConflictMessage).ToApiIssue() }, revision = row.Revision });
         if (await db.ProductionLines.AnyAsync(x => x.Name == r.Name.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("产线名称已存在");
         row ??= db.ProductionLines.Add(new ProductionLine()).Entity;
         row.Name = r.Name.Trim(); row.AreaId = r.AreaId; row.Description = Trunc(r.Description, 500);
@@ -376,7 +378,7 @@ public static class OeeEndpoints
         if (id is not null && row is null) return Results.NotFound();
         if (row is not null && row.AreaId != r.AreaId && row.AreaId is int original && !access.Has(Permission.Configure, original))
             return await Audit.ForbidAsync(http, "保存产品", "无原区域的配置权限", "ProductionProduct", id);
-        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "产品已被他人修改", revision = row.Revision });
+        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(ConfigRevision.ConflictCode, ConfigRevision.Field, ConfigRevision.ConflictMessage).ToApiIssue() }, revision = row.Revision });
         if (await db.ProductionProducts.AnyAsync(x => x.Name == r.Name.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("产品名称已存在");
         row ??= db.ProductionProducts.Add(new ProductionProduct()).Entity;
         row.Name = r.Name.Trim(); row.Code = Trunc(r.Code, 60); row.AreaId = r.AreaId;
@@ -397,7 +399,7 @@ public static class OeeEndpoints
         if (id is not null && row is null) return Results.NotFound();
         if (row is not null && row.AreaId != r.AreaId && !(await http.GetAccessAsync()).Has(Permission.Configure, row.AreaId))
             return await Audit.ForbidAsync(http, "保存班次", "无原区域的配置权限", "ProductionShift", id);
-        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "班次已被他人修改", revision = row.Revision });
+        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(ConfigRevision.ConflictCode, ConfigRevision.Field, ConfigRevision.ConflictMessage).ToApiIssue() }, revision = row.Revision });
         if (await db.ProductionShifts.AnyAsync(x => x.AreaId == r.AreaId && x.Name == r.Name.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("同区域班次名称已存在");
         row ??= db.ProductionShifts.Add(new ProductionShift()).Entity;
         row.Name = r.Name.Trim(); row.AreaId = r.AreaId; row.StartMinute = r.StartMinute; row.EndMinute = r.EndMinute; row.Days = r.Days; row.Enabled = r.Enabled;
@@ -417,7 +419,7 @@ public static class OeeEndpoints
         if (id is not null && row is null) return Results.NotFound();
         if (row is not null && row.AreaId != r.AreaId && row.AreaId is int original && !access.Has(Permission.Configure, original))
             return await Audit.ForbidAsync(http, "保存停机原因", "无原区域的配置权限", "DowntimeReason", id);
-        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = "原因已被他人修改", revision = row.Revision });
+        if (row is not null && r.Revision != 0 && row.Revision != r.Revision) return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { new Scada.Core.Models.ValidationIssue(ConfigRevision.ConflictCode, ConfigRevision.Field, ConfigRevision.ConflictMessage).ToApiIssue() }, revision = row.Revision });
         if (await db.DowntimeReasons.AnyAsync(x => x.Code == r.Code.Trim() && x.Id != (id ?? 0), ct)) return EndpointHelpers.BadRequest("原因代码已存在");
         row ??= db.DowntimeReasons.Add(new DowntimeReason()).Entity;
         row.Code = r.Code.Trim(); row.Name = r.Name.Trim(); row.AreaId = r.AreaId; row.Category = r.Category; row.IsPlanned = r.IsPlanned; row.Enabled = r.Enabled;

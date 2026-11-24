@@ -42,6 +42,7 @@ export function showsTiming(type: AlarmRule['type'], activeWhen?: AlarmRule['act
 
 export function toAlarmRuleInput(rule: AlarmRule, patch: Partial<AlarmRuleInput> = {}): AlarmRuleInput {
   return {
+    revision: rule.revision,
     tagId: rule.tagId,
     type: rule.type,
     activeWhen: rule.type === 'StateChange' ? 'Change' : rule.activeWhen ?? 'On',

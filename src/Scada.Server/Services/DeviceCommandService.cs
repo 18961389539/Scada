@@ -47,6 +47,7 @@ public sealed class DeviceCommandService(
             return DeviceCommandResult.Failed(DeviceCommandError.Validation, issues);
 
         db.Devices.Add(device);
+        if (device.Revision < 1) device.Revision = Scada.Core.Configuration.ConfigRevision.Initial;
         try
         {
             await db.SaveChangesAsync(cancellationToken);
@@ -66,7 +67,7 @@ public sealed class DeviceCommandService(
     /// 本方法只做「通道下发 → 校验 → 已有测点重校验（含采集档位预算） → 落盘」。
     /// </summary>
     public async Task<DeviceCommandResult> UpdateAsync(
-        ConfigDbContext db, Device device, CancellationToken cancellationToken)
+        ConfigDbContext db, Device device, CancellationToken cancellationToken, long? expectedRevision = null)
     {
         SoftElementByteOrder.Normalize(device);
         var channelIssues = await ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);

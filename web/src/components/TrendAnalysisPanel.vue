@@ -39,6 +39,18 @@
         </el-table-column>
       </el-table>
 
+      <div v-if="gaps.length" class="analysis-gaps" data-test="analysis-gaps">
+        <div class="tiny muted">{{ $t('trendsView.analysisGaps') }}</div>
+        <ul>
+          <li v-for="(gap, index) in gaps" :key="index">
+            {{ gapKindLabel(gap.kind) }}
+            <span class="mono">{{ formatTime(gap.from) }} ~ {{ formatTime(gap.to) }}</span>
+            <span v-if="gap.detail" class="tiny muted">{{ gap.detail }}</span>
+          </li>
+        </ul>
+        <p class="tiny muted">{{ $t('trendsView.lossGapsHint') }}</p>
+      </div>
+
       <template v-if="rows.length">
         <div class="quality-legend-line">
           <span v-for="item in qualities" :key="item"><i class="quality-swatch" :class="`q-${item}`" />{{ qualityLabels[item] }}</span>
@@ -65,8 +77,10 @@
 </template>
 
 <script setup lang="ts">
-import type { TagQuality } from '../types'
+import { computed } from 'vue'
+import type { HistoryGap, TagQuality } from '../types'
 import { formatTime, formatValue, qualityLabels } from '../utils'
+import { tr } from '../i18n'
 
 export interface TrendAnalysisRow {
   tagId: number
@@ -93,8 +107,14 @@ const props = defineProps<{
   rows: TrendAnalysisRow[]
   displayFrom: number
   displayTo: number
+  gaps?: HistoryGap[]
 }>()
 
+const gaps = computed(() => props.gaps ?? [])
+function gapKindLabel(kind: HistoryGap['kind']): string {
+  const key = ({ BadQuality: 'trendsView.gapBadQuality', Missing: 'trendsView.gapMissing', Rejected: 'trendsView.gapRejected', SpoolDropped: 'trendsView.gapSpoolDropped' } as const)[kind]
+  return key ? tr(key) : kind
+}
 function percent(ts: number): string {
   if (props.displayTo <= props.displayFrom) return '0%'
   return `${Math.min(100, Math.max(0, ((ts - props.displayFrom) / (props.displayTo - props.displayFrom)) * 100))}%`

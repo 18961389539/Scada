@@ -103,6 +103,7 @@ public static class AlarmEndpoints
             AlarmCategory? category,
             string? keyword,
             int? tagId,
+            string? tagIds,
             int? offset,
             int? limit,
             HttpContext http,
@@ -131,6 +132,21 @@ public static class AlarmEndpoints
                 return EndpointHelpers.BadRequest($"报警类别筛选无效：{category}（可选 {categoryOptions}）");
             }
             if (tagId is <= 0) return EndpointHelpers.BadRequest("测点 ID 必须大于 0");
+            int[]? markerTags = null;
+            if (!string.IsNullOrWhiteSpace(tagIds))
+            {
+                var parts = tagIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var parsed = new List<int>();
+                foreach (var part in parts)
+                {
+                    if (!int.TryParse(part, out var id) || id <= 0)
+                        return EndpointHelpers.BadRequest($"测点 ID 无效：{part}");
+                    parsed.Add(id);
+                }
+                markerTags = parsed.Distinct().ToArray();
+            }
+            if (tagId is int single && single > 0)
+                markerTags = (markerTags ?? []).Append(single).Distinct().ToArray();
             var defaultTo = EndpointHelpers.ParseTime(to, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             long? toMs = live == true && string.IsNullOrWhiteSpace(to) ? null : defaultTo;
             long? fromMs = live == true && string.IsNullOrWhiteSpace(from) ? null
@@ -138,7 +154,7 @@ public static class AlarmEndpoints
             if (fromMs > toMs) return EndpointHelpers.BadRequest("结束时间不能早于开始时间");
             var pageSize = Math.Clamp(limit ?? 100, 1, 500);
             var skip = Math.Max(offset ?? 0, 0);
-            var filter = VisibilityFilter(access, Permission.View) with { State = listState, Level = level, Category = category, Keyword = keyword, TagId = tagId };
+            var filter = VisibilityFilter(access, Permission.View) with { State = listState, Level = level, Category = category, Keyword = keyword, TagIds = markerTags };
             var total = await alarmService.CountAsync(fromMs, toMs, cancellationToken: cancellationToken, liveOnly: live == true, filter: filter);
             var items = await alarmService.QueryAsync(fromMs, toMs, false, pageSize, cancellationToken,
                 liveOnly: live == true, priorityFirst: live == true && priorityFirst != false, skip: skip, filter: filter);

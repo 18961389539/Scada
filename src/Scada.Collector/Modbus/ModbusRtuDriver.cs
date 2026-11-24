@@ -1,8 +1,8 @@
 using System.IO.Ports;
-using System.Net.Sockets;
 using NModbus;
 using NModbus.IO;
 using NModbus.Serial;
+using Scada.Collector.Common;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Protocols;
@@ -18,7 +18,10 @@ public abstract class SerialModbusDriver : ModbusMasterDriver
 
     protected abstract IModbusMaster CreateMaster(SerialPort port);
 
-    protected override IModbusMaster Create(Device device)
+    protected override Task<IModbusMaster> CreateAsync(Device device, CancellationToken cancellationToken)
+        => Task.Run(() => OpenSerial(device), cancellationToken);
+
+    private IModbusMaster OpenSerial(Device device)
     {
         var link = DeviceLink.From(device);
         var portName = link.SerialPort.Trim();
@@ -75,12 +78,15 @@ public sealed class ModbusAsciiDriver : SerialModbusDriver
 // Modbus RTU over TCP：RTU 帧直接跑在 TCP 上，不带 MBAP 头（常见于串口服务器的透明传输）。
 public sealed class ModbusRtuOverTcpDriver : ModbusMasterDriver
 {
-    protected override IModbusMaster Create(Device device)
+    protected override async Task<IModbusMaster> CreateAsync(Device device, CancellationToken cancellationToken)
     {
-        var client = new TcpClient { NoDelay = true };
         var link = DeviceLink.From(device);
-        try { client.Connect(link.Host, link.Port); }
-        catch (Exception ex) { client.Dispose(); throw new IOException($"Modbus RTU over TCP 连接失败 {link.Host}:{link.Port}：{ex.Message}", ex); }
-        return Factory.CreateRtuMaster(new TcpClientAdapter(client));
+        try
+        {
+            var client = await TcpConnect.ConnectAsync(link.Host, link.Port, device.TimeoutMs, cancellationToken);
+            return Factory.CreateRtuMaster(new TcpClientAdapter(client));
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex) { throw new IOException($"Modbus RTU over TCP 连接失败 {link.Host}:{link.Port}：{ex.Message}", ex); }
     }
 }

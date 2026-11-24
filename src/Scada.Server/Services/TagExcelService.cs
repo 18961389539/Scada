@@ -7,6 +7,7 @@ using Scada.Core.Models;
 using System.Text.RegularExpressions;
 using Scada.Data;
 using Scada.Server.Endpoints;
+using Scada.Core.Configuration;
 
 namespace Scada.Server.Services;
 
@@ -323,7 +324,7 @@ public sealed class TagExcelService
             var expression = tag.Expression; string? before = null;
             if (existing.TryGetValue(name, out var original))
             {
-                before = System.Text.Json.JsonSerializer.Serialize(original); tag.Id = original.Id; tag.CalculationRevision = checked(original.CalculationRevision + 1);
+                before = System.Text.Json.JsonSerializer.Serialize(original); tag.Id = original.Id; tag.CalculationRevision = ConfigRevision.Next(original.CalculationRevision);
                 db.Entry(original).CurrentValues.SetValues(tag); tag = original; updated++;
             }
             else { db.Tags.Add(tag); created++; }

@@ -90,6 +90,12 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("Protocol")
                         .HasColumnType("INTEGER");
 
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.Property<string>("SerialPort")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -295,6 +301,12 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<int>("ResponseTimeSec")
                         .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SuppressMode")
                         .HasColumnType("INTEGER");
@@ -510,6 +522,11 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.HasKey("Id");
 
                     b.HasIndex("Name")
@@ -522,7 +539,8 @@ namespace Scada.Data.Migrations.Config
                         {
                             Id = 1,
                             Description = "升级前的设备与未指定区域的设备",
-                            Name = "默认区域"
+                            Name = "默认区域",
+                            Revision = 1L
                         });
                 });
 
@@ -795,7 +813,10 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("INTEGER");
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int?>("RunAsUserId")
                         .HasColumnType("INTEGER");
@@ -960,7 +981,7 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasIndex("CreatedTs");
 
-                    b.ToTable("ConfigVersions", (string)null);
+                    b.ToTable("ConfigVersions");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ControlPoint", b =>
@@ -1017,7 +1038,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("TagId")
                         .IsUnique();
 
-                    b.ToTable("ControlPoints", (string)null);
+                    b.ToTable("ControlPoints");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ControlSequence", b =>
@@ -1061,7 +1082,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("ControlSequences", (string)null);
+                    b.ToTable("ControlSequences");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.Device", b =>
@@ -1160,6 +1181,12 @@ namespace Scada.Data.Migrations.Config
 
                     b.Property<short>("Rack")
                         .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SerialPort")
                         .IsRequired()
@@ -1833,6 +1860,11 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<long>("Revision")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
+
                     b.Property<string>("SecretProtected")
                         .HasColumnType("TEXT");
 
@@ -1888,6 +1920,12 @@ namespace Scada.Data.Migrations.Config
                         .IsRequired()
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int?>("ShiftId")
                         .HasColumnType("INTEGER");
@@ -2285,7 +2323,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("TemplateId", "Name")
                         .IsUnique();
 
-                    b.ToTable("Recipes", (string)null);
+                    b.ToTable("Recipes");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.RecipeTemplate", b =>
@@ -2329,7 +2367,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("Name")
                         .IsUnique();
 
-                    b.ToTable("RecipeTemplates", (string)null);
+                    b.ToTable("RecipeTemplates");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.RecipeVersion", b =>
@@ -2370,7 +2408,7 @@ namespace Scada.Data.Migrations.Config
                     b.HasIndex("RecipeId", "Version")
                         .IsUnique();
 
-                    b.ToTable("RecipeVersions", (string)null);
+                    b.ToTable("RecipeVersions");
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ReportTemplate", b =>

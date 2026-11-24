@@ -64,7 +64,8 @@ export interface AnnunciatorStatus {
   lastError: string | null
 }
 
-export type AnnunciatorPanelInput = Omit<AnnunciatorPanel, 'id' | 'revision' | 'updatedTs' | 'updatedBy' | 'outputs' | 'levels'> & {
+export type AnnunciatorPanelInput = Omit<AnnunciatorPanel, 'id' | 'updatedTs' | 'updatedBy' | 'outputs' | 'levels'> & {
+  revision?: number
   outputs: AnnunciatorOutput[]
   levels: AnnunciatorLevelMap[]
 }

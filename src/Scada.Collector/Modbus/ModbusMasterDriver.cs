@@ -33,7 +33,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
     /// </summary>
     public ITransactionGate? TransactionGate { set => _gate = value; }
 
-    protected abstract IModbusMaster Create(Device device);
+    protected abstract Task<IModbusMaster> CreateAsync(Device device, CancellationToken cancellationToken);
 
     public async Task ConnectAsync(Device device, CancellationToken cancellationToken = default)
     {
@@ -41,7 +41,7 @@ public abstract class ModbusMasterDriver : IDeviceDriver, ITransactionGatedDrive
         try
         {
             Disconnect();
-            var master = await Task.Run(() => Create(device), cancellationToken);
+            var master = await CreateAsync(device, cancellationToken);
             if (master.Transport is ModbusTransport transport)
             {
                 transport.Retries = 0;

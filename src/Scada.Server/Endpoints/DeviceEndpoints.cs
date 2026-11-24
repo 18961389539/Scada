@@ -28,7 +28,7 @@ public sealed record DeviceRequest(
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
     OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null,
-    bool SimulationEnabled = false, string? SimulationOptions = null, int? ChannelId = null);
+    bool SimulationEnabled = false, string? SimulationOptions = null, int? ChannelId = null, long? Revision = null);
 
 // 未保存设备的试连：沿用保存时的设备校验，但不落库；网关设备必须保存后由网关执行。
 public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
@@ -224,7 +224,9 @@ public static class DeviceEndpoints
                 return EndpointHelpers.ValidationProblem(
                     [EndpointHelpers.Issue("device.opc.password", nameof(request.OpcPassword), credentialError)]);
 
-            var result = await deviceCommands.UpdateAsync(db, device, cancellationToken);
+            var result = await deviceCommands.UpdateAsync(db, device, cancellationToken, request.Revision);
+            if (result.Error == DeviceCommandError.Conflict)
+                return Results.Conflict(new { message = result.Message ?? Scada.Core.Configuration.ConfigRevision.ConflictMessage, issues = result.Issues.Select(issue => issue.ToApiIssue()).ToArray() });
             return result.Success
                 ? Results.Ok(device)
                 : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);

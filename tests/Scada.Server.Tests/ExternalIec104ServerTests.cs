@@ -94,6 +94,73 @@ public sealed class ExternalIec104ServerTests
     }
 
     [Fact]
+    public async Task Point_table_changes_are_visible_to_interrogation_and_writes_without_restart()
+    {
+        var config = new FakeConfig();
+        config.TagList.Add(new Tag
+        {
+            Id = 1, Name = "运行", Kind = TagKind.Physical, DataType = TagDataType.Bool,
+            Area = TagArea.Coil, Address = 0, Writable = true
+        });
+        config.TagList.Add(new Tag
+        {
+            Id = 2, Name = "温度", Kind = TagKind.Physical, DataType = TagDataType.Float,
+            Area = TagArea.HoldingRegister, Address = 0, Writable = false
+        });
+        var cache = new FakeCache();
+        cache.Set(new TagValue(1, 1, TagQuality.Good, 1_700_000_000_000));
+        cache.Set(new TagValue(2, 42.5, TagQuality.Good, 1_700_000_000_000));
+
+        var options = new Iec104ServerOptions
+        {
+            UseTimeTag = false,
+            AllowControl = true,
+            CommonAddresses = [1],
+            Points =
+            [
+                new Iec104ServerPoint { TagId = 1, Ioa = 100, Kind = Iec104PointKind.SinglePoint },
+                new Iec104ServerPoint { TagId = 2, Ioa = 200, Kind = Iec104PointKind.MeasuredFloat }
+            ]
+        };
+        var map = new ExportPointMap(config, cache);
+        map.Ensure(new ModbusSlaveOptions(), options);
+
+        var (tcp, port) = await StartServerAsync(map, options);
+        using var listenerHandle = tcp;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port, cts.Token);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Iec104Codec.U(Iec104Types.U_StartDtAct), cts.Token);
+        _ = await ReadApduAsync(stream, cts.Token);
+
+        var first = await InterrogateAsync(stream, sendSeq: 0, recvSeq: 0, cts.Token);
+        Assert.Contains(first, a => a.TypeId == Iec104Types.M_SP_NA && a.Objects[0].Ioa == 100);
+        Assert.Contains(first, a => a.TypeId == Iec104Types.M_ME_NC && a.Objects[0].Ioa == 200);
+
+        // 会话保持不断：改 IOA，并把温度点设为可写。
+        options.Points =
+        [
+            new Iec104ServerPoint { TagId = 1, Ioa = 101, Kind = Iec104PointKind.SinglePoint },
+            new Iec104ServerPoint { TagId = 2, Ioa = 201, Kind = Iec104PointKind.MeasuredFloat }
+        ];
+        config.TagList[1].Writable = true;
+        config.Version++;
+
+        var second = await InterrogateAsync(stream, sendSeq: 1, recvSeq: 1, cts.Token);
+        Assert.DoesNotContain(second, a => a.Objects.Any(o => o.Ioa is 100 or 200) && a.TypeId is Iec104Types.M_SP_NA or Iec104Types.M_ME_NC);
+        Assert.Contains(second, a => a.TypeId == Iec104Types.M_SP_NA && a.Objects[0].Ioa == 101);
+        Assert.Contains(second, a => a.TypeId == Iec104Types.M_ME_NC && a.Objects[0].Ioa == 201);
+
+        // 旧 IOA 已不在点表，写回应被拒绝（否定确认），无需重连。
+        await stream.WriteAsync(Iec104Codec.I(2, 2, new Asdu(Iec104Types.C_SC_NA, false, Iec104Types.CotAct,
+            false, false, 0, 1, [new InfoObject(100, [0x01])])), cts.Token);
+        var write = await ReadAsduUntilAsync(stream, cts.Token, a => a.TypeId == Iec104Types.C_SC_NA && a.Cause == Iec104Types.CotActCon);
+        Assert.True(write.Negative);
+    }
+
+    [Fact]
     public async Task Unknown_common_address_is_ignored()
     {
         var (map, options) = BuildSite();
@@ -164,8 +231,9 @@ public sealed class ExternalIec104ServerTests
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 using var client = await listener.AcceptTcpClientAsync(cts.Token);
+                var modbus = new ModbusSlaveOptions();
                 await using var session = new Iec104ServerSession(client.GetStream(), options, map, router,
-                    NullLogger.Instance, "127.0.0.1", 1);
+                    NullLogger.Instance, "127.0.0.1", 1, () => (modbus, options));
                 await session.RunAsync(cts.Token);
             }
             catch { }
@@ -198,13 +266,43 @@ public sealed class ExternalIec104ServerTests
         }
     }
 
+    private static async Task<List<Asdu>> InterrogateAsync(Stream stream, int sendSeq, int recvSeq, CancellationToken ct)
+    {
+        await stream.WriteAsync(Iec104Codec.I(sendSeq, recvSeq, new Asdu(Iec104Types.C_IC_NA, false, Iec104Types.CotAct,
+            false, false, 0, 1, [new InfoObject(0, [20])])), ct);
+        return await ReadAsduListUntilAsync(stream, ct, a => a.TypeId == Iec104Types.C_IC_NA && a.Cause == Iec104Types.CotActTerm);
+    }
+
+    private static async Task<List<Asdu>> ReadAsduListUntilAsync(Stream stream, CancellationToken ct, Func<Asdu, bool> done)
+    {
+        var received = new List<Asdu>();
+        while (true)
+        {
+            var apdu = await ReadApduAsync(stream, ct);
+            if (apdu.Asdu is null) continue;
+            received.Add(apdu.Asdu);
+            if (done(apdu.Asdu)) return received;
+            if (received.Count > 40) throw new TimeoutException("未在预期帧数内等到目标 ASDU");
+        }
+    }
+
+    private static async Task<Asdu> ReadAsduUntilAsync(Stream stream, CancellationToken ct, Func<Asdu, bool> match)
+    {
+        for (var i = 0; i < 40; i++)
+        {
+            var apdu = await ReadApduAsync(stream, ct);
+            if (apdu.Asdu is { } asdu && match(asdu)) return asdu;
+        }
+        throw new TimeoutException("未在预期帧数内等到目标 ASDU");
+    }
+
     private sealed class FakeConfig : IConfigSnapshot
     {
         public List<Tag> TagList { get; } = [];
         public IReadOnlyList<Tag> Tags => TagList;
         public IReadOnlyList<Device> Devices => [];
         public IReadOnlyList<AlarmRule> AlarmRules => [];
-        public int Version => 1;
+        public int Version { get; set; } = 1;
         public long LoadedAt => 0;
         public Task ReloadAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public bool TryGetTag(int tagId, out Tag tag)

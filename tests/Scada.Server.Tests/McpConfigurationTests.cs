@@ -7,6 +7,9 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Data;
 using static Scada.Server.Tests.McpApiTests;
+using Scada.Engine.Maintenance;
+using Microsoft.Extensions.Options;
+using Scada.Core.Options;
 
 namespace Scada.Server.Tests;
 
@@ -62,6 +65,8 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
     public McpConfigurationTests(Site site) => _site = site;
     private IDbContextFactory<ConfigDbContext> Db => _site.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>();
     private IDbContextFactory<RuntimeDbContext> Runtime => _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>();
+    private string ArchiveFile(string stored) =>
+        ReportArchivePaths.Resolve(_site.Services.GetRequiredService<IOptions<ScadaSettings>>().Value.ReportsRoot, stored);
     private static string Name(string prefix) => prefix + Guid.NewGuid().ToString("N")[..6];
 
     private static async Task<JsonElement> Error(HttpClient client, string name, object? arguments = null)
@@ -548,7 +553,7 @@ public sealed class McpConfigurationTests : IClassFixture<McpConfigurationTests.
             var runs = await runtime.ReportRuns.AsNoTracking().Where(x => x.TemplateId == templateId).OrderBy(x => x.Version).ToListAsync();
             Assert.Equal([1, 2], runs.Select(x => x.Version));
             Assert.All(runs, run => Assert.Equal("mcp:lan", run.GeneratedBy));
-            Assert.All(runs, run => Assert.True(File.Exists(run.XlsxPath) && File.Exists(run.PdfPath)));
+            Assert.All(runs, run => Assert.True(File.Exists(ArchiveFile(run.XlsxPath)) && File.Exists(ArchiveFile(run.PdfPath))));
             Assert.True(await runtime.OperationLogs.AsNoTracking().AnyAsync(
                 x => x.TargetType == "McpTool" && x.Action == "MCP generate_report" && x.Result == "成功" && x.UserName == "mcp:lan"));
         }

@@ -484,7 +484,8 @@ export default {
     network: 'Network error. Check the connection and whether the service is running.',
     timeout: 'Request timed out. The service may be busy; try again later.',
     status: ' (HTTP {0})',
-    withTrace: ' (trace ID: {0})'
+    withTrace: ' (trace ID: {0})',
+    revisionConflict: 'This configuration was changed by someone else. Reopen it and merge your edits.'
   },
   shortcuts: {
     title: 'Keyboard shortcuts',
@@ -529,7 +530,7 @@ export default {
     selectAllMatching: 'Select all matches',
     selectAllFailed: 'Could not select all matches',
     exportAllConfirm: 'Export includes every tag, not just this page. Continue?',
-    exportAllFilteredConfirm: 'The list is filtered, but export still includes every tag and ignores the current device or search filters. Export all tags anyway?'
+    exportAllFilteredConfirm: 'The export follows the current list filters, not just the current page. Export the matching tags?'
   },
   workspaceAlarms: {
     incomplete: 'Unacked alarm count may be incomplete',
@@ -580,7 +581,14 @@ export default {
   designReview: {
     importPlanDetail: ' (conflicts: {0}; add {1}, overwrite {2}, rename {3}, delete {4})',
     busBacklogSub: 'Values waiting now; a steady rise means processing is falling behind',
-    busDropped: '{0} values dropped since startup',
+    busDropped: '{0} live-subscription values dropped since startup',
+    busHistoryRejected: '{0} history-subscription values rejected since startup',
+    busHistoryGapRejected: '{0} history-gap marks overflowed since startup',
+    retryOutbox: 'Retry',
+    retryOutboxAll: 'Retry listed failures',
+    retryOutboxHint: 'Retry is at-least-once: the same notification may be delivered again after the channel recovers. Acknowledging only means it is no longer a health gap and does not block retry.',
+    retryOutboxConfirm: 'Retry the {0} failed notifications in the list? The same notification may be delivered again after the channel recovers. Escalations for alarms that are already acknowledged or cleared will be skipped.',
+    retryOutboxSuccess: 'Requeued {0}, skipped {1}',
     diskUnknown: 'Unknown (read failed)',
     logDefaultRange: 'Without a range, the last 7 days are searched',
     passwordRevokes: 'Every signed-in session of this user ends immediately; they must sign in again with the new password.',
@@ -599,6 +607,7 @@ export default {
     annTestNoOutputs: '"{0}" has no enabled outputs, so the test drives nothing in the field. Continue?'
   },
   designReview2: {
+    deadLetterPreview: 'Preview replay', deadLetterReplay: 'Replay', deadLetterReplayConfirm: 'This writes history idempotently by the original stream/sequence (same timestamps are skipped) and does not rewind ProcessedThrough. Replay now?', deadLetterReplayOk: 'Replay finished: wrote {0}, skipped {1}', deadLetterAlready: 'This dead letter was already replayed', deadLetterCannot: 'Cannot replay: {0}',
     reportSummary: 'Total',
     archiveLimit: 'The latest {0} are listed. Older archives are still there and can be loaded.',
     loadOlder: 'Load older records',

@@ -17,14 +17,14 @@ public sealed record BackupManifest(
     DateTimeOffset CreatedAt, string AppVersion, string ConfigDb,
     int Devices, int Tags, int AlarmRules, int HistoryFiles,
     IReadOnlyList<BackupFile> Files,
-    // 追加在末尾并带默认值：旧包的 manifest.json 没有这两个字段，反序列化时必须仍能读出设备/测点数量。
-    bool Encrypted = false, string? Encryption = null);
+    // 追加在末尾并带默认值：旧包的 manifest.json 没有这些字段，反序列化时必须仍能读出设备/测点数量。
+    bool Encrypted = false, string? Encryption = null, string? ReportsNote = null);
 public sealed record BackupSummary(string FileName, string Path, long Bytes, DateTimeOffset CreatedAt, bool Encrypted = false);
 public sealed record BackupVerification(bool Valid, IReadOnlyList<string> Problems, BackupManifest? Manifest);
 public sealed record RestoreReport(string TargetRoot, int Files, int Devices, int Tags, int AlarmRules);
 public sealed record BackupDrill(string FileName, bool Ok, IReadOnlyList<string> Problems, long DurationMs, int Devices, int Tags, int HistoryFiles, DateTimeOffset Ts);
 
-// 完整备份包：配置库 + 历史库 + 历史暂存 + Data Protection 密钥 + OPC PKI + 清单。
+// 完整备份包：配置库 + 运行库 + 历史库 + 历史暂存 + 报表归档 + Data Protection 密钥 + OPC PKI + 清单。
 // 只做"可校验的备份"，恢复由运维在服务停止后按清单解包替换，避免运行中覆盖正在使用的库。
 // 配置了 Scada:BackupPassword 时输出加密容器 .zip.enc（见 BackupArchive），否则保持明文 ZIP。
 public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<BackupService> logger, HistorySpool? spool = null, IHistoryBackend? history = null)
@@ -77,11 +77,12 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             {
                 CopyDirectory(new DirectoryInfo(_settings.OpcPkiRoot), Path.Combine(staging, "opc-pki"), files, staging);
             }
+            var reportsNote = CopyReports(staging, files);
 
             var (devices, tags, rules) = copied ? await CountConfigurationAsync(configCopy, cancellationToken) : (0, 0, 0);
             var manifest = new BackupManifest(DateTimeOffset.UtcNow, AppVersion(), Path.GetFileName(configSource),
                 devices, tags, rules, historyFiles, files,
-                EncryptionEnabled, EncryptionEnabled ? "PBKDF2-SHA256/310000+AES-256-CBC+HMAC-SHA256" : null);
+                EncryptionEnabled, EncryptionEnabled ? "PBKDF2-SHA256/310000+AES-256-CBC+HMAC-SHA256" : null, reportsNote);
             await File.WriteAllTextAsync(Path.Combine(staging, "manifest.json"), JsonSerializer.Serialize(manifest, Json), cancellationToken);
 
             // 文件名与保留判定统一用 UTC：本地时间在 DST 回拨日会重复一小时，既可能撞名，
@@ -174,6 +175,8 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
                 problems.Add("缺少 config.db");
             }
 
+            VerifyReportArchive(extract, manifest, problems);
+
             return new BackupVerification(problems.Count == 0, problems, manifest);
         }
         catch (BackupArchiveException ex)
@@ -218,13 +221,32 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(_settings.BackupPassword))
+        var secrets = new[] { _settings.BackupPassword, _settings.BackupPasswordPrevious }
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (secrets.Length == 0)
             throw new BackupArchiveException("备份包已加密，请先配置 Scada:BackupPassword 再校验或还原");
 
         var plain = Path.Combine(Path.GetTempPath(), "scada-backup-dec-" + Guid.NewGuid().ToString("N") + PlainSuffix);
         try
         {
-            await BackupArchive.DecryptAsync(path, plain, _settings.BackupPassword!, cancellationToken);
+            Exception? last = null;
+            var opened = false;
+            foreach (var secret in secrets)
+            {
+                try
+                {
+                    await BackupArchive.DecryptAsync(path, plain, secret!, cancellationToken);
+                    opened = true;
+                    break;
+                }
+                catch (BackupArchiveException ex)
+                {
+                    last = ex;
+                }
+            }
+            if (!opened) throw last ?? new BackupArchiveException("备份包解密失败");
             ZipFile.ExtractToDirectory(plain, destination);
         }
         finally
@@ -269,6 +291,15 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             }
             CopyTree(Path.Combine(extract, "keys"), Path.Combine(target, "keys"));
             CopyTree(Path.Combine(extract, "opc-pki"), Path.Combine(target, "opc-pki"));
+            var packedReports = Directory.Exists(Path.Combine(extract, "reports"));
+            CopyTree(Path.Combine(extract, "reports"), Path.Combine(target, "reports"));
+            var reportProblems = new List<string>();
+            var runtimeTarget = Path.Combine(target, "runtime.db");
+            if (File.Exists(runtimeTarget) && (packedReports || Directory.Exists(Path.Combine(target, "reports"))))
+                RewriteReportRuns(runtimeTarget, Path.Combine(target, "reports"), reportProblems);
+            // 旧包没有报表归档时不因缺失文件拒绝整包还原；新包则必须哈希一致，且不会把缺失标成已清理。
+            if (packedReports && reportProblems.Count > 0)
+                throw new InvalidOperationException("报表归档校验未通过，拒绝还原：" + string.Join("；", reportProblems));
 
             var (devices, tags, rules) = await CountConfigurationAsync(Path.Combine(target, "scada.db"), cancellationToken);
             var files = Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories).Count();
@@ -364,13 +395,26 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
+            ClearStagingPools(target);
             try { if (Directory.Exists(target)) Directory.Delete(target, true); } catch { }
         }
         var drill = new BackupDrill(fileName, problems.Count == 0, problems, Environment.TickCount64 - started, devices, tags, historyFiles, DateTimeOffset.UtcNow);
         if (drill.Ok) logger.LogInformation("备份 {File} 恢复演练通过（{Ms} 毫秒）", fileName, drill.DurationMs);
         else logger.LogError("备份 {File} 恢复演练失败：{Problems}", fileName, string.Join("；", problems));
         return drill;
+    }
+
+    /// <summary>
+    /// 只清演练暂存目录里的库连接池。不要用进程级 ClearAllPools：那会把正在跑的配置库、运行库和历史库一起打掉。
+    /// </summary>
+    public static void ClearStagingPools(string? directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory)) return;
+        foreach (var path in Directory.EnumerateFiles(directory, "*.db", SearchOption.AllDirectories))
+        {
+            using var probe = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
+            SqliteConnection.ClearPool(probe);
+        }
     }
 
     private async Task<int> CopyHistoryAsync(string staging, List<BackupFile> files, CancellationToken cancellationToken)
@@ -399,9 +443,100 @@ public sealed class BackupService(IOptions<ScadaSettings> options, ILogger<Backu
             }
             packed = fallback;
         }
+        var loss = Path.Combine(_settings.HistoryRoot, HistoryLossLog.FileName);
+        if (File.Exists(loss) && packed.All(item => !string.Equals(Path.GetFileName(item), HistoryLossLog.FileName, StringComparison.OrdinalIgnoreCase)))
+        {
+            var copy = Path.Combine(target, HistoryLossLog.FileName);
+            File.Copy(loss, copy, true);
+            packed = packed.Append(copy).ToList();
+        }
         foreach (var copy in packed)
             files.Add(Describe(staging, copy));
         return packed.Count;
+    }
+
+
+    public const string ReportsNoteText = "已按保留期打包尚未清理的报表归档；库内路径在还原时按新的 ReportsRoot 重写。不重签旧文件，也不提供在线一键恢复接口。";
+
+    private string? CopyReports(string staging, List<BackupFile> files)
+    {
+        var root = Path.GetFullPath(_settings.ReportsRoot);
+        if (!Directory.Exists(root)) return "未发现报表归档目录（可能尚无已生成报表）。";
+        CopyDirectory(new DirectoryInfo(root), Path.Combine(staging, "reports"), files, staging);
+        return ReportsNoteText;
+    }
+
+    private static void VerifyReportArchive(string extract, BackupManifest manifest, List<string> problems)
+    {
+        var hasReports = manifest.Files.Any(x => x.Path.StartsWith("reports/", StringComparison.OrdinalIgnoreCase))
+                         || !string.IsNullOrEmpty(manifest.ReportsNote);
+        if (!hasReports) return;
+        var runtime = Path.Combine(extract, "runtime.db");
+        var reportsRoot = Path.Combine(extract, "reports");
+        if (!File.Exists(runtime)) return;
+        InspectReportRuns(runtime, reportsRoot, problems, rewrite: false);
+    }
+
+    private static void RewriteReportRuns(string runtimeDb, string reportsRoot, List<string> problems) =>
+        InspectReportRuns(runtimeDb, reportsRoot, problems, rewrite: true);
+
+    private static void InspectReportRuns(string runtimeDb, string reportsRoot, List<string> problems, bool rewrite)
+    {
+        Directory.CreateDirectory(reportsRoot);
+        using var connection = new SqliteConnection($"Data Source={runtimeDb};Pooling=False");
+        connection.Open();
+        using (var exists = connection.CreateCommand())
+        {
+            exists.CommandText = "SELECT 1 FROM sqlite_master WHERE type='table' AND name='ReportRuns'";
+            if (exists.ExecuteScalar() is null) return;
+        }
+
+        using var query = connection.CreateCommand();
+        query.CommandText = "SELECT Id, XlsxPath, PdfPath, XlsxSha256, PdfSha256 FROM ReportRuns WHERE PurgedTs IS NULL";
+        var updates = new List<(long Id, string Xlsx, string Pdf)>();
+        using (var reader = query.ExecuteReader())
+        {
+            while (reader.Read())
+            {
+                var id = reader.GetInt64(0);
+                var storedXlsx = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                var storedPdf = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                var xlsx = LocateReportFile(reportsRoot, storedXlsx, reader.IsDBNull(3) ? "" : reader.GetString(3), "xlsx", id, problems);
+                var pdf = LocateReportFile(reportsRoot, storedPdf, reader.IsDBNull(4) ? "" : reader.GetString(4), "pdf", id, problems);
+                if (rewrite) updates.Add((id, xlsx ?? storedXlsx, pdf ?? storedPdf));
+            }
+        }
+        if (!rewrite || updates.Count == 0) return;
+
+        using var tx = connection.BeginTransaction();
+        foreach (var (id, xlsx, pdf) in updates)
+        {
+            using var cmd = connection.CreateCommand();
+            cmd.Transaction = tx;
+            cmd.CommandText = "UPDATE ReportRuns SET XlsxPath = $xlsx, PdfPath = $pdf WHERE Id = $id";
+            cmd.Parameters.AddWithValue("$xlsx", Path.IsPathRooted(xlsx) ? ReportArchivePaths.Relativize(reportsRoot, xlsx) : xlsx.Replace('\\', '/'));
+            cmd.Parameters.AddWithValue("$pdf", Path.IsPathRooted(pdf) ? ReportArchivePaths.Relativize(reportsRoot, pdf) : pdf.Replace('\\', '/'));
+            cmd.Parameters.AddWithValue("$id", id);
+            cmd.ExecuteNonQuery();
+        }
+        tx.Commit();
+    }
+
+    private static string? LocateReportFile(string reportsRoot, string stored, string sha, string format, long id, List<string> problems)
+    {
+        if (string.IsNullOrWhiteSpace(stored)) return stored;
+        var resolved = ReportArchivePaths.Resolve(reportsRoot, stored);
+        if (!File.Exists(resolved))
+        {
+            problems.Add($"报表 {id} 的 {format} 归档文件缺失：{stored}");
+            return null;
+        }
+        if (!string.IsNullOrWhiteSpace(sha) && !string.Equals(Hash(resolved), sha, StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add($"报表 {id} 的 {format} 归档哈希不符：{Path.GetFileName(resolved)}");
+            return null;
+        }
+        return resolved;
     }
 
     private void CopyDirectory(DirectoryInfo? source, string target, List<BackupFile> files, string staging)

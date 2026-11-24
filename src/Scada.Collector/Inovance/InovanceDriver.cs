@@ -39,7 +39,9 @@ public sealed class InovanceDriver : IDeviceDriver, ITransactionGatedDriver
         {
             Disconnect();
             var options = ProtocolCatalog.Options<InovanceDeviceOptions>(device);
-            var master = await Task.Run(() => options.Transport == InovanceTransport.Rtu ? OpenRtu(device) : OpenTcp(device), cancellationToken);
+            var master = options.Transport == InovanceTransport.Rtu
+                ? await Task.Run(() => OpenRtu(device), cancellationToken)
+                : await OpenTcpAsync(device, cancellationToken);
             if (master.Transport is ModbusTransport transport)
             {
                 transport.Retries = 0;
@@ -174,17 +176,19 @@ public sealed class InovanceDriver : IDeviceDriver, ITransactionGatedDriver
         };
     }
 
-    private IModbusMaster OpenTcp(Device device)
+    private static async Task<IModbusMaster> OpenTcpAsync(Device device, CancellationToken cancellationToken)
     {
         var link = DeviceLink.From(device);
-        var client = new TcpClient { NoDelay = true };
-        try { client.Connect(link.Host, link.Port); }
+        try
+        {
+            var client = await TcpConnect.ConnectAsync(link.Host, link.Port, device.TimeoutMs, cancellationToken);
+            return Factory.CreateMaster(client);
+        }
+        catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
-            client.Dispose();
             throw new IOException($"汇川 Modbus TCP 连接失败 {link.Host}:{link.Port}：{ex.Message}", ex);
         }
-        return Factory.CreateMaster(client);
     }
 
     private IModbusMaster OpenRtu(Device device)

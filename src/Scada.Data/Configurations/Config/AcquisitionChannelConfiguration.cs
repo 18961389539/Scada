@@ -25,5 +25,6 @@ public sealed class AcquisitionChannelConfiguration : IEntityTypeConfiguration<A
         entity.Property(x => x.TimeoutMs).HasDefaultValue(3000);
         // 通道删除前必须由接口清空引用；这里用 Restrict 兜底，避免静默把设备变成直连。
         entity.HasMany<Device>().WithOne().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Restrict);
+        entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
     }
 }

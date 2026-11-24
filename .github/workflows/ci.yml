@@ -248,6 +248,8 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: 发布自包含包
         run: dotnet publish src/Scada.Server/Scada.Server.csproj -c Release -r win-x64 --self-contained true -o out --nologo
+    - name: Publish BackupTool into package
+      run: pwsh -File tools/deployment/Publish-BackupTool.ps1 -PackageRoot out
       - name: 校验发布结构
         shell: pwsh
         run: |

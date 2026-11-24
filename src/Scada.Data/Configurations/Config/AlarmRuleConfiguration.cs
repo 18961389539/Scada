@@ -30,5 +30,6 @@ public sealed class AlarmRuleConfiguration : IEntityTypeConfiguration<AlarmRule>
         entity.Property(x => x.Key).HasMaxLength(64).HasDefaultValue("");
         entity.HasIndex(x => new { x.TagId, x.Key }).IsUnique();
         entity.HasOne<Tag>().WithMany().HasForeignKey(x => x.TagId).OnDelete(DeleteBehavior.Cascade);
+        entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
     }
 }

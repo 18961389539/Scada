@@ -43,7 +43,9 @@ internal static class ScadaWiring
             sp.GetRequiredService<ISecretProtector>(),
             sp.GetServices<INotificationSender>(),
             sp.GetRequiredService<IOptions<ScadaSettings>>(),
-            sp.GetRequiredService<ILogger<AlarmNotificationDispatcher>>())
+            sp.GetRequiredService<ILogger<AlarmNotificationDispatcher>>(),
+            clock: null,
+            legacyWebhook: sp.GetRequiredService<AlarmWebhookNotifier>())
         { IsActive = () => sp.GetRequiredService<INodeRole>().IsActive });
         services.AddHostedService(sp => sp.GetRequiredService<AlarmNotificationDispatcher>());
 
@@ -61,6 +63,11 @@ internal static class ScadaWiring
     /// <summary>健康告警贡献者：聚合方只认接口，不再按具体类型反查。</summary>
     public static void AddScadaHealthContributors(this IServiceCollection services)
     {
+        services.AddSingleton<Scada.Server.Ha.HaKeyRingHealth>();
+        services.AddHostedService<Scada.Server.Ha.HaKeyRingHealthHost>();
+        services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Server.Ha.HaKeyRingHealth>());
+        services.AddSingleton<Scada.Server.Ha.TakeoverReviewService>();
+        services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Server.Ha.TakeoverReviewService>());
         services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
         services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<AlarmNotificationDispatcher>());
         services.AddSingleton<IHealthContributor>(sp => sp.GetRequiredService<Scada.Engine.Calculations.CalcJobEngine>());

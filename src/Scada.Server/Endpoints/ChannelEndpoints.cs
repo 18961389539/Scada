@@ -7,6 +7,7 @@ using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
 using Scada.Server.Services;
+using Scada.Core.Configuration;
 
 namespace Scada.Server.Endpoints;
 
@@ -22,7 +23,8 @@ public sealed record ChannelRequest(
     SerialParity Parity = SerialParity.None,
     SerialStopBits StopBits = SerialStopBits.One,
     int TimeoutMs = 3000,
-    bool Enabled = true);
+    bool Enabled = true,
+    long? Revision = null);
 
 /// <summary>
 /// 通道是物理链路（一条 TCP 连接或一个串口），可被多台从站设备共享。
@@ -84,7 +86,7 @@ public static class ChannelEndpoints
             return Results.Ok(channels.Select(x => new
             {
                 x.Id, x.Name, x.Description, x.Protocol, x.Host, x.Port, x.SerialPort,
-                x.BaudRate, x.DataBits, x.Parity, x.StopBits, x.TimeoutMs, x.Enabled,
+                x.BaudRate, x.DataBits, x.Parity, x.StopBits, x.TimeoutMs, x.Enabled, x.Revision,
                 deviceCount = counts.GetValueOrDefault(x.Id)
             }));
         }).RequireAuthorization(AccessPolicies.View);
@@ -158,7 +160,10 @@ public static class ChannelEndpoints
             if (channel is null) return Results.NotFound();
 
             var before = channel.Clone();
+            if (!ConfigRevision.TryAccept(channel.Revision, request.Revision, out var revisionIssue))
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage, issues = new[] { revisionIssue!.Value.ToApiIssue() } });
             Map(channel, request);
+            channel.Revision = ConfigRevision.Next(before.Revision);
             var error = ConfigurationValidator.Channel(channel, DeviceEndpoints.Settings(http));
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.Channels.AnyAsync(x => x.Id != id && x.Name == channel.Name, cancellationToken)) return EndpointHelpers.BadRequest("通道名称已存在");
@@ -191,7 +196,11 @@ public static class ChannelEndpoints
             }
 
             runtime.OperationLogs.Add(Audit.Change(http, $"修改通道：{channel.Name}", "Channel", channel.Id, before, channel));
-            await db.SaveChangesAsync(cancellationToken);
+            try { await db.SaveChangesAsync(cancellationToken); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Results.Conflict(new { message = ConfigRevision.ConflictMessage });
+            }
             await runtime.SaveChangesAsync(cancellationToken);
             await reloader.ReloadAsync(cancellationToken);
             return Results.Ok(channel);

@@ -25,7 +25,7 @@ public sealed record TagRequest(
     double Deadband,
     int ArchivePeriodSec,
     double? MinValue,
-    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "", int? ScanRateMs = null, int TextLength = 0);
+    double? MaxValue, int DbNumber = 1, int BitOffset = 0, string NodeId = "", int? ScanRateMs = null, int TextLength = 0, long? Revision = null);
 
 public sealed record TagRebindRequest(int TargetTagId);
 
@@ -377,7 +377,9 @@ public static class TagEndpoints
             if (await EndpointHelpers.RequireAreaAsync(http, device.AreaId, Permission.Configure, $"修改测点 #{id} 归属设备") is { } deniedTarget) return deniedTarget;
             var updated = MapTag(request);
             updated.Id = id;
-            var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken);
+            var result = await tags.UpdateAsync(db, tag, updated, device, cancellationToken, request.Revision);
+            if (result.Error == TagCommandError.Conflict)
+                return Results.Conflict(new { message = result.Message ?? Scada.Core.Configuration.ConfigRevision.ConflictMessage, issues = result.Issues.Select(issue => issue.ToApiIssue()).ToArray() });
             return result.Success
                 ? Results.Ok(result.Tag)
                 : EndpointHelpers.ValidationProblem(result.Issues.Select(issue => issue.ToApiIssue()).ToArray(), result.Message);
@@ -408,18 +410,44 @@ public static class TagEndpoints
         }).Produces(StatusCodes.Status204NoContent).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapGet("/export", async (
+            int? deviceId,
+            string? search,
+            string? ids,
+            string? deviceIds,
+            string? quality,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IRealtimeCache cache,
             TagExcelService excel,
             CancellationToken cancellationToken) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-            // 只导出有配置权限区域内的设备与测点。
+            // 与列表相同的筛选（不含分页），再限制为当前用户有配置权限的区域。
+            var tagQuery = db.Tags.AsNoTracking();
+            if (deviceId is int exportDevice) tagQuery = tagQuery.Where(x => x.DeviceId == exportDevice);
+            var only = ParseIds(ids);
+            if (only is { Length: > 0 }) tagQuery = tagQuery.Where(x => only.Contains(x.Id));
+            var deviceFilter = ParseIds(deviceIds);
+            if (deviceFilter is { Length: > 0 }) tagQuery = tagQuery.Where(x => x.DeviceId != null && deviceFilter.Contains(x.DeviceId.Value));
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var keyword = search.Trim();
+                var namedDevices = await db.Devices.AsNoTracking().Where(x => x.Name.Contains(keyword)).Select(x => x.Id).ToListAsync(cancellationToken);
+                tagQuery = tagQuery.Where(x => x.Name.Contains(keyword) || (x.Description != null && x.Description.Contains(keyword))
+                    || (x.DeviceId != null && namedDevices.Contains(x.DeviceId.Value)));
+            }
             var devices = (await db.Devices.AsNoTracking().ToListAsync(cancellationToken)).Where(x => access.Has(Permission.Configure, x.AreaId)).ToList();
             var visible = devices.Select(x => x.Id).ToHashSet();
-            var tags = (await db.Tags.AsNoTracking().ToListAsync(cancellationToken)).Where(x => x.DeviceId is int d && visible.Contains(d)).ToList();
-            var bytes = excel.Export(devices, tags);
+            var tags = (await tagQuery.ToListAsync(cancellationToken)).Where(x => x.DeviceId is int d && visible.Contains(d)).ToList();
+            tags = quality switch
+            {
+                "good" => tags.Where(tag => cache.Get(tag.Id) is { Quality: TagQuality.Good }).ToList(),
+                "abnormal" => tags.Where(tag => cache.Get(tag.Id) is not { Quality: TagQuality.Good }).ToList(),
+                _ => tags
+            };
+            var usedDevices = devices.Where(d => tags.Any(tag => tag.DeviceId == d.Id)).ToList();
+            var bytes = excel.Export(usedDevices, tags);
             return Results.File(
                 bytes,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

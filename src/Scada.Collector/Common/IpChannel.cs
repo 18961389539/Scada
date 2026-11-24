@@ -16,21 +16,13 @@ public sealed class IpChannel : IAsyncDisposable
 
     public static async Task<IpChannel> OpenAsync(string host, int port, bool udp, int timeoutMs, CancellationToken ct)
     {
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct); deadline.CancelAfter(timeoutMs);
-        try
+        if (udp)
         {
-            if (udp)
-            {
-                var client = new UdpClient();
-                try { client.Connect(host, port); } catch { client.Dispose(); throw; }
-                return new IpChannel(client);
-            }
-            var tcp = new TcpClient { NoDelay = true };
-            try { await tcp.ConnectAsync(host, port, deadline.Token); }
-            catch { tcp.Dispose(); throw; }
-            return new IpChannel(tcp);
+            var client = new UdpClient();
+            try { client.Connect(host, port); } catch { client.Dispose(); throw; }
+            return new IpChannel(client);
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException($"连接 {host}:{port} 超时"); }
+        return new IpChannel(await TcpConnect.ConnectAsync(host, port, timeoutMs, ct));
     }
 
     /// <summary>发送请求并读取一个完整应答。<paramref name="frameLength"/> 根据已收字节返回完整帧长度（未知返回 null）。</summary>

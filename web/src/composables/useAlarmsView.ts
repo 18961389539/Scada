@@ -15,7 +15,7 @@ import { can } from '../access/policies'
 import { serverFormErrors } from '../composables/formErrors'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
-import { onHubEvent } from '../realtime/hub'
+import { onHubEvent, onHubReconnected } from '../realtime/hub'
 import { tr } from '../i18n'
 import { positiveQueryId } from '../nav/query'
 import { readLastNumber, rememberNumber } from '../composables/lastChoice'
@@ -65,9 +65,15 @@ export function useAlarmsView() {
   if (route.query.tab === 'history') tab.value = 'history'
   // 清除测点筛选与写回地址栏是两条异步导航：置位期间 syncUrl 不再把 tagId 加回去
   let tagFilterClearing = false
+  function queryTagIdsParam(): string | undefined {
+    const raw = route.query.tagIds ?? route.query.tagId
+    const value = Array.isArray(raw) ? raw.filter(x => typeof x === 'string').join(',') : raw
+    return typeof value === 'string' && value.trim() ? value.trim() : undefined
+  }
   function clearTagFilter(): void {
     const query = { ...route.query }
     delete query.tagId
+    delete query.tagIds
     tagFilterClearing = true
     void router.replace({ query }).finally(() => { tagFilterClearing = false })
   }
@@ -147,6 +153,7 @@ export function useAlarmsView() {
   let pushTimer: number | undefined
   let filterTimer: number | undefined
   let disposeAlarmHandler: (() => void) | undefined
+  let disposeReconnect: (() => void) | undefined
   let disposeShortcuts: (() => void) | undefined
 
   // 报警声音统一由 AppLayout 经 handleAlarmPush 播放（走 alarmAudio 的静音与过滤）。
@@ -157,11 +164,11 @@ export function useAlarmsView() {
     active: 'alarmsView.filterActive', live: 'alarmWorkbench.liveScope', unack: 'overviewStatus.activeUnack', rtnUnack: 'overviewStatus.returned',
     acked: 'overviewStatus.acked', shelved: 'alarmsView.k06d561', suppressed: 'alarmsView.kaa2e2b'
   }[stateFilter.value]))
-  const hasFilters = computed(() => !!route.query.tagId || !!keyword.value || !!levelFilter.value || !!categoryFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
+  const hasFilters = computed(() => !!queryTagIdsParam() || !!keyword.value || !!levelFilter.value || !!categoryFilter.value || tab.value === 'live' && stateFilter.value !== 'active')
   const emptyText = computed(() => {
     if (loadError.value) return loadError.value
     if (loading.value || liveTotal.value === null && tab.value === 'live') return tr('alarmsView.loadingResults')
-    if (keyword.value.trim() || levelFilter.value || categoryFilter.value || route.query.tagId) return tr('alarmsView.noFilteredResults')
+    if (keyword.value.trim() || levelFilter.value || categoryFilter.value || queryTagIdsParam()) return tr('alarmsView.noFilteredResults')
     return tab.value === 'live' ? tr('alarmsView.noStateResults', [stateLabel.value]) : tr('alarmsView.noHistoryResults')
   })
   function canSelectAlarm(alarm: AlarmEvent): boolean { return !alarm.ackTs && canAckAlarm(alarm) }
@@ -192,7 +199,7 @@ export function useAlarmsView() {
   function syncUrl(): void {
     if (disposed) return
     const query: Record<string, string> = {}
-    if (!tagFilterClearing && typeof route.query.tagId === 'string') query.tagId = route.query.tagId
+    if (!tagFilterClearing && queryTagIdsParam()) query.tagIds = queryTagIdsParam()
     if (tab.value === 'live' && stateFilter.value !== 'active') query.state = stateFilter.value
     if (levelFilter.value) query.level = levelFilter.value
     if (categoryFilter.value) query.category = categoryFilter.value
@@ -216,7 +223,7 @@ export function useAlarmsView() {
     void router.replace({ query })
   }
 
-  watch([keyword, levelFilter, categoryFilter, stateFilter, () => route.query.tagId, liveSort], (values, previous) => {
+  watch([keyword, levelFilter, categoryFilter, stateFilter, () => queryTagIdsParam(), liveSort], (values, previous) => {
     listSeq++
     if (filterTimer !== undefined) window.clearTimeout(filterTimer)
     clearSelection()
@@ -497,10 +504,13 @@ export function useAlarmsView() {
     }
   }
 
-  function queryFilters(): Pick<AlarmPageQuery, 'level' | 'category' | 'keyword' | 'tagId'> {
-    const tagId = positiveQueryId(route.query.tagId)
-    if (route.query.tagId !== undefined && !tagId) throw new Error(tr('alarmsView.invalidTag'))
-    return { level: levelFilter.value || undefined, category: categoryFilter.value || undefined, keyword: keyword.value.trim() || undefined, tagId: tagId ?? undefined }
+  function queryFilters(): Pick<AlarmPageQuery, 'level' | 'category' | 'keyword' | 'tagId' | 'tagIds'> {
+    const raw = queryTagIdsParam()
+    if (raw) {
+      const parts = raw.split(',').map(x => x.trim()).filter(Boolean)
+      if (parts.some(part => !/^[1-9]\d*$/.test(part))) throw new Error(tr('alarmsView.invalidTag'))
+    }
+    return { level: levelFilter.value || undefined, category: categoryFilter.value || undefined, keyword: keyword.value.trim() || undefined, tagIds: raw }
   }
 
   // background=true 用于推送与定时刷新：不点亮全表遮罩（遮罩会挡住确认操作）。失败留在页面上，不再额外弹提示。
@@ -879,6 +889,7 @@ export function useAlarmsView() {
     await reload()
     if (disposed) return
     registerAlarmHandler()
+    disposeReconnect = onHubReconnected(() => { void backgroundRefresh() })
   })
 
   onBeforeUnmount(() => {
@@ -891,6 +902,7 @@ export function useAlarmsView() {
     if (pushTimer !== undefined) window.clearTimeout(pushTimer)
     if (filterTimer !== undefined) window.clearTimeout(filterTimer)
     disposeAlarmHandler?.()
+    disposeReconnect?.()
   })
   return {
     auth, canAck, deviceAreas, sourceDevices, sourceTags, sourceCatalogLoading, sourceCatalogError, alarmSource, trendQuery, alarmValueText, loadSourceCatalog, canAckAlarm, canSilencePanel, tab, alarms, HISTORY_PAGE_SIZE, livePageSize, livePage, liveTotal, historyPage, historyPageSize, historyTotal, historyCapped, shelves, summary, summaryError, loading, loadError, actionError, ackError, keyword, stateFilter, liveSort, route, router, clearTagFilter, pageIssues, onStatusAction, historyFromQuery, historyToQuery, historyRange, ackDialog, shelveDialog, timeline, timelineAlarm, timelineVisible, timelineLoading, timelineError, shelveError, selected, batchRunning, batchProgress, tableRef, keywordInputRef, focusedId, focusedIndex, focusedAlarm, levelOptions, levelFilter, categoryFilter, rangePreset, loadedHistoryRange, historyRangeDirty, batchOutcome, batchCancel, initialQuery, initialLevel, initialCategory, initialKeyword, initialPage, now, stateLabel, hasFilters, emptyText, canSelectAlarm, selectableAlarms, visibleAckable, filtersOpen, rowMenuId, pendingNotice, silenceUntil, screenPicker, screenMatches, selectedAckable, retryRows, clearSelection, resetFilters, syncUrl, onSelectionChange, isTypingTarget, editingOpen, overlayOpen, onInteractiveElement, focusRow, moveFocus, toggleSelection, onKeyboard, batchAck, confirmAndAck, applyRangePreset, rowClass, chooseRowAction, shelfSource, shelfRemaining, collectScreenTags, ensureScreenIndex, openAlarmScreen, goScreen, focusAlarm, locateFirstOut, duration, loadSummary, queryFilters, load, backgroundRefresh, schedulePushRefresh, applyPendingPush, loadHistory, searchHistory, onLivePageChange, onLiveSizeChange, onHistoryPageChange, onHistorySizeChange, onTabChange, ackVisible, silenceAnnunciators, reload, openAck, openNote, submitAck, openShelve, submitShelve, unshelve, openTimeline, retryTimeline, registerAlarmHandler, ref, alarmActionLabels, alarmCategoryLabels, alarmMessage, alarmStateLabels, alarmStateType, formatTime, levelLabel, levelType, localizedText, can, openShortcutHelp

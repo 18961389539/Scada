@@ -137,6 +137,7 @@ const form = reactive({
   criticalFlashOnMs: 250,
   criticalFlashOffMs: 250,
   browserSound: true,
+  revision: undefined as number | undefined,
   outputs: [] as { kind: AnnunciatorChannelKind; tagId: number; activeValue: number; inactiveValue: number; enabled: boolean }[],
   // 本页不编辑等级映射，但保存是整体覆盖：必须原样带回，否则每次保存都被重置为默认
   levels: [] as AnnunciatorLevelMap[]
@@ -176,6 +177,7 @@ function openEdit(row?: AnnunciatorPanel) {
   form.flashOffMs = row?.flashOffMs ?? 500
   form.criticalFlashOnMs = row?.criticalFlashOnMs ?? 250
   form.criticalFlashOffMs = row?.criticalFlashOffMs ?? 250
+  form.revision = row?.revision
   form.outputs = (row?.outputs ?? []).map((o) => ({ kind: o.kind, tagId: o.tagId, activeValue: o.activeValue, inactiveValue: o.inactiveValue, enabled: o.enabled }))
   form.levels = (row?.levels ?? []).map(({ id: _id, ...level }) => level)
   saveError.value = ''
@@ -189,7 +191,7 @@ async function save() {
     const input = {
       name: form.name, areaId: form.areaId, enabled: form.enabled, latchMode: form.latchMode, silenceMinutes: form.silenceMinutes,
       flashOnMs: form.flashOnMs, flashOffMs: form.flashOffMs, criticalFlashOnMs: form.criticalFlashOnMs, criticalFlashOffMs: form.criticalFlashOffMs,
-      browserSound: form.browserSound, outputs: form.outputs, levels: form.levels
+      browserSound: form.browserSound, revision: form.id ? form.revision : undefined, outputs: form.outputs, levels: form.levels
     }
     if (form.id) await annunciatorApi.update(form.id, input)
     else await annunciatorApi.create(input)

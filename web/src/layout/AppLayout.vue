@@ -160,7 +160,7 @@ import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
 import { applyDensity, applyDisplay, applyTheme, currentDensity, currentDisplay, currentTheme, type DensityMode, type DisplayMode, type ThemeMode } from '../theme'
-import { onHubEvent } from '../realtime/hub'
+import { onHubEvent, onHubReconnected } from '../realtime/hub'
 import { useAlarmSession } from '../composables/useAlarmSession'
 import { useServiceStatus } from '../composables/useServiceStatus'
 import { usePendingApprovals } from '../composables/pendingApprovals'
@@ -267,6 +267,7 @@ const display = ref<DisplayMode>(currentDisplay())
 let badgeTimer: number | undefined
 let badgeBusy = false
 let disposeAlarmBadge: (() => void) | undefined
+let disposeReconnect: (() => void) | undefined
 let badgeQueued = false
 
 async function refreshBadges(): Promise<void> {
@@ -375,6 +376,7 @@ onMounted(async () => {
   window.addEventListener('keydown', onGlobalKey)
   window.addEventListener('scada-open-palette', onOpenPalette)
   disposeAlarmBadge = onHubEvent('alarm', () => scheduleBadges())
+  disposeReconnect = onHubReconnected(() => { void refreshBadges() })
   await refreshBadges()
 })
 
@@ -384,6 +386,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKey)
   window.removeEventListener('scada-open-palette', onOpenPalette)
   disposeAlarmBadge?.()
+  disposeReconnect?.()
   if (badgeTimer !== undefined) window.clearTimeout(badgeTimer)
 })
 </script>

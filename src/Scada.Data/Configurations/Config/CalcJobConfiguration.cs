@@ -16,5 +16,6 @@ public sealed class CalcJobConfiguration : IEntityTypeConfiguration<CalcJob>
         entity.Property(x => x.Name).HasMaxLength(100).IsRequired();
         entity.HasIndex(x => x.Name).IsUnique();
         entity.HasOne<Area>().WithMany().HasForeignKey(x => x.AreaId).OnDelete(DeleteBehavior.Restrict);
+        entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
     }
 }

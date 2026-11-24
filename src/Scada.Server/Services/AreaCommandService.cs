@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Scada.Core.Configuration;
 using Scada.Core.Entities;
 using Scada.Data;
 using Scada.Server.Auth;
@@ -16,6 +17,7 @@ public enum AreaCommandError
     DuplicateName,
     NotFound,
     DefaultArea,
+    Conflict,
     HasDevices,
     HasCalculatedTags,
     HasAssignments
@@ -42,6 +44,7 @@ public sealed class AreaCommandService(AccessModelProvider accessModels)
     public const string HasDevicesMessage = "区域内仍有设备，请先移走设备";
     public const string HasCalculatedTagsMessage = "仍有计算测点指定了该区域";
     public const string HasAssignmentsMessage = "仍有用户授权限定在该区域，请先调整授权";
+    public const string ConflictMessage = ConfigRevision.ConflictMessage;
 
     public async Task<AreaCommandResult> CreateAsync(ConfigDbContext db, string? name, string? description, CancellationToken cancellationToken)
     {
@@ -50,7 +53,7 @@ public sealed class AreaCommandService(AccessModelProvider accessModels)
         var note = Clean(description);
         if (await db.Areas.AnyAsync(x => x.Name == clean, cancellationToken))
             return AreaCommandResult.Failed(AreaCommandError.DuplicateName, DuplicateNameMessage);
-        var area = new Area { Name = clean, Description = note };
+        var area = new Area { Name = clean, Description = note, Revision = ConfigRevision.Initial };
         db.Areas.Add(area);
         await db.SaveChangesAsync(cancellationToken);
         accessModels.Invalidate();
@@ -59,10 +62,12 @@ public sealed class AreaCommandService(AccessModelProvider accessModels)
 
     public async Task<AreaCommandResult> UpdateAsync(
         ConfigDbContext db, int areaId, string? name, bool updateName, string? description, bool updateDescription,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, long? expectedRevision = null)
     {
         var area = await db.Areas.FirstOrDefaultAsync(x => x.Id == areaId, cancellationToken);
         if (area is null) return AreaCommandResult.Failed(AreaCommandError.NotFound, "Area does not exist.");
+        if (!ConfigRevision.TryAccept(area.Revision, expectedRevision, out _))
+            return AreaCommandResult.Failed(AreaCommandError.Conflict, ConflictMessage, area);
         string clean;
         if (updateName)
         {
@@ -75,6 +80,7 @@ public sealed class AreaCommandService(AccessModelProvider accessModels)
             return AreaCommandResult.Failed(AreaCommandError.DuplicateName, DuplicateNameMessage, area);
         area.Name = clean;
         area.Description = note;
+        area.Revision = ConfigRevision.Next(area.Revision);
         await db.SaveChangesAsync(cancellationToken);
         accessModels.Invalidate();
         return AreaCommandResult.Ok(area);

@@ -85,7 +85,7 @@
       </div>
       <p v-if="batchProgress" class="tiny muted alarm-progress" role="status" data-test="batch-progress">{{ batchCancel ? $t('alarmsUx.stopping') : batchProgress }}</p>
       <div v-if="tab !== 'shelved'" class="alarm-list-summary">
-        <el-tag v-if="route.query.tagId" closable type="info" data-test="alarm-tag-filter" @close="clearTagFilter">{{ $t('realtimeMonitor.tagFilter', [route.query.tagId]) }}</el-tag>
+        <el-tag v-if="route.query.tagIds || route.query.tagId" closable type="info" data-test="alarm-tag-filter" @close="clearTagFilter">{{ $t('realtimeMonitor.tagFilter', [route.query.tagIds || route.query.tagId]) }}</el-tag>
         <span class="tiny muted" role="status" data-test="alarm-result-count">
           <template v-if="loading">{{ $t('alarmsView.loadingResults') }}</template>
           <template v-else>{{ $t('alarmsView.pageCount', [tab === 'live' ? stateLabel : $t('alarmsView.k8e0241'), alarms.length, (tab === 'live' ? liveTotal : historyTotal) ?? '--']) }}<template v-if="tab === 'live'"> · {{ $t('alarmsView.selectionCount', [selectableAlarms.length, selectedAckable.length]) }}</template></template>

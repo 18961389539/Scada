@@ -475,6 +475,98 @@ public class AlarmManagementTests
         { Calls.Enqueue((recipients, message)); return Task.CompletedTask; }
     }
 
+    [Fact]
+    public async Task EscalationScanContinuesPastAlarmsAlreadyInTheOutboxWindow()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.NotificationChannels.Add(new NotificationChannel { Id = 1, Name = "hook", Type = NotificationChannelType.Webhook, SettingsJson = """{"url":"http://x/"}""", SecretProtected = "enc:tok" });
+            db.NotificationRoutes.Add(new NotificationRoute { Id = 1, Name = "升级", ChannelId = 1, MinLevel = AlarmLevel.Info, EscalateAfterMinutes = 1 });
+            await db.SaveChangesAsync();
+        }
+
+        var clock = new DateTimeOffset(2026, 10, 19, 10, 10, 0, TimeSpan.Zero);
+        var start = clock.ToUnixTimeMilliseconds() - 5 * 60_000L;
+        var older = new List<AlarmEvent>();
+        for (var i = 0; i < AlarmNotificationDispatcher.EscalationScanBatchSize; i++)
+            older.Add(await AddAlarmAsync(runtime, tagId: 1, AlarmLevel.Warning, start + i));
+        var newer = await AddAlarmAsync(runtime, tagId: 1, AlarmLevel.Warning, start + AlarmNotificationDispatcher.EscalationScanBatchSize + 1);
+        await using (var db = runtime.CreateDbContext())
+        {
+            foreach (var alarm in older)
+            {
+                db.NotificationOutbox.Add(new NotificationOutbox
+                {
+                    DedupKey = $"escalate:{alarm.Id}:1", AlarmEventId = alarm.Id, RouteId = 1, ChannelId = 1, Action = "escalate",
+                    Status = NotificationOutboxStatus.Sent, Attempts = 1, MaxAttempts = 3, CreatedTs = start, SentTs = start, FinishedTs = start
+                });
+            }
+            await db.SaveChangesAsync();
+        }
+
+        var sender = new CapturingSender();
+        var dispatcher = Dispatcher(factory, runtime, sender, () => clock);
+        var deliveries = await dispatcher.ScanEscalationsAsync();
+        Assert.Contains(deliveries, x => x.AlarmEventId == newer.Id && x.Action == "escalate" && x.Success);
+        Assert.DoesNotContain(deliveries, x => older.Select(a => a.Id).Contains(x.AlarmEventId) && x.Action == "escalate");
+    }
+
+    [Fact]
+    public async Task FailedOutboxCanBeManuallyRetriedKeepingAckAndSkippingRecoveredEscalation()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext())
+        {
+            await db.Database.EnsureCreatedAsync();
+            db.NotificationChannels.Add(new NotificationChannel { Id = 1, Name = "hook", Type = NotificationChannelType.Webhook, SettingsJson = """{"url":"http://x/"}""", SecretProtected = "enc:tok" });
+            db.NotificationRoutes.Add(new NotificationRoute { Id = 1, Name = "A区", ChannelId = 1, MinLevel = AlarmLevel.Warning, OnRaise = true });
+            db.NotificationRoutes.Add(new NotificationRoute { Id = 2, Name = "升级", ChannelId = 1, MinLevel = AlarmLevel.Warning, EscalateAfterMinutes = 1 });
+            await db.SaveChangesAsync();
+        }
+        var clock = new DateTimeOffset(2026, 10, 19, 10, 0, 0, TimeSpan.Zero);
+        var raise = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds());
+        var recovered = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 10 * 60_000);
+        await using (var db = runtime.CreateDbContext())
+        {
+            recovered = await db.AlarmEvents.SingleAsync(x => x.Id == recovered.Id);
+            recovered.EndTs = clock.ToUnixTimeMilliseconds();
+            var now = clock.ToUnixTimeMilliseconds();
+            db.NotificationOutbox.AddRange(
+                new NotificationOutbox { DedupKey = $"raise:{raise.Id}:1", AlarmEventId = raise.Id, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "down", AcknowledgedTs = now, AcknowledgedBy = "cfg" },
+                new NotificationOutbox { DedupKey = $"escalate:{recovered.Id}:2", AlarmEventId = recovered.Id, RouteId = 2, ChannelId = 1, Action = "escalate", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "down" });
+            await db.SaveChangesAsync();
+        }
+        await using var ids = runtime.CreateDbContext();
+        var raiseId = await ids.NotificationOutbox.Where(x => x.Action == "raise").Select(x => x.Id).SingleAsync();
+        var escId = await ids.NotificationOutbox.Where(x => x.Action == "escalate").Select(x => x.Id).SingleAsync();
+
+        var sender = new CapturingSender();
+        var dispatcher = Dispatcher(factory, runtime, sender, () => clock);
+        var result = await dispatcher.RetryFailedAsync([raiseId, escId]);
+        Assert.Equal(1, result.Retried);
+        Assert.Equal(1, result.Skipped);
+        Assert.Contains(result.Reasons, x => x.Contains("已确认或已恢复"));
+
+        await using (var db = runtime.CreateDbContext())
+        {
+            var retried = await db.NotificationOutbox.SingleAsync(x => x.Id == raiseId);
+            Assert.Equal(NotificationOutboxStatus.Pending, retried.Status);
+            Assert.Equal(0, retried.Attempts);
+            Assert.NotNull(retried.AcknowledgedTs);
+            var skipped = await db.NotificationOutbox.SingleAsync(x => x.Id == escId);
+            Assert.Equal(NotificationOutboxStatus.Failed, skipped.Status);
+        }
+
+        var sent = await dispatcher.DrainAsync();
+        Assert.Contains(sent, x => x.AlarmEventId == raise.Id && x.Success);
+        await using (var db = runtime.CreateDbContext())
+            Assert.Equal(NotificationOutboxStatus.Sent, (await db.NotificationOutbox.SingleAsync(x => x.Id == raiseId)).Status);
+    }
+
     // ---- helpers ----
 
     private static AlarmNotificationDispatcher Dispatcher(Factory factory, IDbContextFactory<RuntimeDbContext> runtime, INotificationSender sender, Func<DateTimeOffset> clock, ScadaSettings? settings = null) => new(

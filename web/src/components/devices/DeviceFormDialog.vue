@@ -160,6 +160,7 @@ const visible = ref(false)
 const advancedOpen = ref(false)
 const saving = ref(false)
 watch(visible, shown => { if (shown) advancedOpen.value = false })
+const editingRevision = ref<number | undefined>()
 const editingId = ref<number | null>(null)
 const copying = ref(false)
 const formRef = ref<FormInstance>()
@@ -326,6 +327,7 @@ function openCreate(gatewayId: number | null): void {
 function openEdit(device: Device): void {
   creatingForGateway.value = null
   editingId.value = device.id
+  editingRevision.value = device.revision
   editingGatewayId.value = device.gatewayId ?? null
   copying.value = false
   clearFieldErrors(fieldErrors)
@@ -409,7 +411,8 @@ function devicePayload(): DeviceInput {
     enabled: iec61850 ? false : form.enabled,
     opcPassword: form.opcPassword?.length ? form.opcPassword : null,
     protocolOptions: currentDef.value ? JSON.stringify(iec61850 ? { ...options, useReports: false } : options) : '',
-    simulationOptions: form.simulationEnabled ? JSON.stringify(simOptions) : ''
+    simulationOptions: form.simulationEnabled ? JSON.stringify(simOptions) : '',
+    revision: editingRevision.value
   }
 }
 

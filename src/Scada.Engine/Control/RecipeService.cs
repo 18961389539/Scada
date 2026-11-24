@@ -21,9 +21,13 @@ public sealed record RecipeCheck(int RecipeId, int Version, bool DualApproval, I
 
 // 配方下发：整体预检查（全部参数通过才开始）→ 双人复核（按模板或参数测点策略，整批一次复核）→ 逐个经控制闭环写入并回读核对 →
 // 任一参数失败立即停止，其余参数记为未下发，结果明确标记“部分下发”并列出已写入的参数及原值，不静默部分生效、不自动重发。
-public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, IConfigSnapshot config, IRealtimeCache cache, ILogger<RecipeService> logger) : BackgroundService
+public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlCommandService commands, IConfigSnapshot config, IRealtimeCache cache, ILogger<RecipeService> logger, INodeRole? role = null) : BackgroundService
 {
+    public const string RestartInterruptPrefix = "服务重启，配方下发中断（不会自动续发）；";
+    public const string TakeoverUnknownPrefix = "主备接管，配方下发结果未知，不会自动续发；";
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private readonly INodeRole _role = role ?? new StandaloneNodeRole();
+    private long _reconciledGeneration = long.MinValue;
     private readonly ConcurrentDictionary<int, CancellationTokenSource> _running = new();
     private readonly ConcurrentDictionary<int, Task> _tasks = new();
     // 同一时刻只允许一个“检查是否有正在下发 → 开始下发”的过程，避免同一模板并发下发。
@@ -33,13 +37,28 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, ID
     public static List<RecipeValue> Values(RecipeVersion v) => JsonSerializer.Deserialize<List<RecipeValue>>(v.ValuesJson, Json) ?? [];
     public static List<RecipeParameterResult> Results(RecipeDownload d) => JsonSerializer.Deserialize<List<RecipeParameterResult>>(d.ResultsJson, Json) ?? [];
 
-    // 启动时：上次进程退出时仍在下发的记录标记为失败/部分下发（不自动续跑）。
+    // 仅在主机上收口滞留下发：备机不把复制来的 Running 写成失败。提升后再按结果未知收口，不自动续发。
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        do
+        {
+            if (_role.IsActive && _reconciledGeneration != _role.Generation)
+            {
+                await ReconcileOrphanDownloadsAsync(_role.Generation > 0, stoppingToken);
+                _reconciledGeneration = _role.Generation;
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false));
+    }
+
+    internal async Task ReconcileOrphanDownloadsAsync(bool takeover, CancellationToken stoppingToken)
     {
         try
         {
             await using var db = await factory.CreateDbContextAsync(stoppingToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(stoppingToken);
+            var prefix = takeover ? TakeoverUnknownPrefix : RestartInterruptPrefix;
             foreach (var d in await runtime.RecipeDownloads.Where(x => x.Status == RecipeDownloadStatus.Running).ToListAsync(stoppingToken))
             {
                 if (_running.ContainsKey(d.Id)) continue;
@@ -47,7 +66,7 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, ID
                 foreach (var r in results.Where(x => x.Status == "pending")) r.Status = "skipped";
                 d.ResultsJson = JsonSerializer.Serialize(results, Json);
                 d.Status = d.Written > 0 || results.Any(x => x.Status is "done" or "unknown") ? RecipeDownloadStatus.PartiallyApplied : RecipeDownloadStatus.Failed;
-                d.EndedTs = ScadaTime.NowMs(); d.Message = Trim("服务重启，配方下发中断（不会自动续发）；" + Summary(results) + "；请核对现场后重新下发");
+                d.EndedTs = ScadaTime.NowMs(); d.Message = Trim(prefix + Summary(results) + "；请核对现场后重新下发");
                 runtime.OperationLogs.Add(Audit(d.RequestedByUserId, "system", $"配方下发中断 {d.RecipeName} v{d.Version}", d.Message, d.Id));
             }
             await db.SaveChangesAsync(stoppingToken);

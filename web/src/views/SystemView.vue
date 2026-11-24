@@ -140,7 +140,7 @@
                 <div class="label">{{ $t('systemView.k9ef115') }}</div>
                 <div class="value">{{ health.busBacklog }}</div>
                 <div class="sub" data-test="health-bus-sub">
-                  {{ $t('designReview.busBacklogSub') }}<span v-if="health.busDropped" class="bus-dropped">{{ $t('designReview.busDropped', [health.busDropped]) }}</span>
+                  {{ $t('designReview.busBacklogSub') }}<span v-if="health.busDropped" class="bus-dropped">{{ $t('designReview.busDropped', [health.busDropped]) }}</span><span v-if="health.busHistoryRejected" class="bus-dropped">{{ $t('designReview.busHistoryRejected', [health.busHistoryRejected]) }}</span><span v-if="health.busHistoryGapRejected" class="bus-dropped">{{ $t('designReview.busHistoryGapRejected', [health.busHistoryGapRejected]) }}</span>
                 </div>
               </div>
               <div class="stat-card">
@@ -183,6 +183,41 @@
                   <div><dt>{{ $t('systemView.historyQueryRejected') }}</dt><dd>{{ health.historyQueries.rejected }} / {{ health.historyQueries.timedOut }} / {{ health.historyQueries.readLimited }}</dd></div>
                 </template>
               </dl>
+
+                <div v-if="health.spaceReclaim" class="subpanel" data-test="space-reclaim">
+                  <h4>{{ $t('systemView.spaceReclaim') }}</h4>
+                  <p class="muted">{{ $t('systemView.spaceReclaimHint') }}</p>
+                  <el-table :data="health.spaceReclaim.targets" size="small">
+                    <el-table-column prop="id" :label="$t('systemView.spaceReclaimTarget')" min-width="120" />
+                    <el-table-column prop="autoVacuumMode" :label="$t('systemView.spaceReclaimMode')" width="140" />
+                    <el-table-column prop="freelistPages" :label="$t('systemView.spaceReclaimFreelist')" width="120" />
+                    <el-table-column :label="$t('systemView.spaceReclaimFile')" min-width="140">
+                      <template #default="{ row }">{{ (row.fileBytes / 1048576).toFixed(1) }} MB</template>
+                    </el-table-column>
+                  </el-table>
+                  <p v-if="health.spaceReclaim.lastRuns.length" class="muted">{{ $t('systemView.spaceReclaimLast', [health.spaceReclaim.lastRuns[0].action, health.spaceReclaim.lastRuns[0].ok ? $t('systemView.spaceReclaimOk') : (health.spaceReclaim.lastRuns[0].reason || $t('systemView.spaceReclaimFail')), health.spaceReclaim.lastRuns[0].ts]) }}</p>
+                </div>
+
+                <div v-if="health.historyLoss" class="subpanel" data-test="history-loss">
+                  <h4>{{ $t('systemView.historyLoss') }}</h4>
+                  <p class="muted">{{ $t('systemView.historyLossHint') }}</p>
+                  <p class="muted">{{ health.historyLoss.persistent ? $t('systemView.historyLossPersistent') : $t('systemView.historyLossMemory') }} · {{ $t('systemView.historyLossWindows') }} {{ health.historyLoss.windows }}</p>
+                  <p class="muted">{{ health.historyLoss.note }}</p>
+                </div>
+
+                <div v-if="health.takeoverReview && (health.takeoverReview.unknownCommands + health.takeoverReview.interruptedSequences + health.takeoverReview.interruptedRecipes) > 0" class="subpanel" data-test="takeover-review">
+                  <h4>{{ $t('systemView.takeoverReview') }}</h4>
+                  <p class="muted">{{ $t('systemView.takeoverReviewHint') }}</p>
+                  <p class="muted">{{ $t('systemView.takeoverReviewCounts', [health.takeoverReview.unknownCommands, health.takeoverReview.interruptedSequences, health.takeoverReview.interruptedRecipes]) }}</p>
+                  <el-table :data="health.takeoverReview.items" size="small">
+                    <el-table-column :label="$t('systemView.takeoverReviewKind')" width="110">
+                      <template #default="{ row }">{{ takeoverKindLabel(row.kind) }}</template>
+                    </el-table-column>
+                    <el-table-column prop="name" :label="$t('systemView.takeoverReviewName')" min-width="160" show-overflow-tooltip />
+                    <el-table-column prop="message" :label="$t('systemView.takeoverReviewMessage')" min-width="240" show-overflow-tooltip />
+                  </el-table>
+                </div>
+
             </section>
             <el-alert v-for="warning in health.warnings ?? []" :key="warning.code" :title="warning.message" type="warning" :closable="false" show-icon class="capacity-warning" />
 
@@ -276,6 +311,13 @@ import { formatBytes, formatTime, roleLabels } from '../utils'
 import { canGlobal } from '../access/policies'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
+
+function takeoverKindLabel(kind: string): string {
+  if (kind === 'command') return tr('systemView.takeoverReviewKind_command')
+  if (kind === 'sequence') return tr('systemView.takeoverReviewKind_sequence')
+  if (kind === 'recipe') return tr('systemView.takeoverReviewKind_recipe')
+  return kind
+}
 
 const auth = useAuthStore()
 const canUsers = computed(() => canGlobal(auth.user, 'ManageUsers'))

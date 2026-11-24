@@ -3,21 +3,41 @@ import { ElNotification } from 'element-plus'
 import { alarmSessionActive, alarmToastSurface, onCriticalAlarmRaise, resetAlarmSessionForTests, shouldRunAlarmSession, useAlarmSession } from './useAlarmSession'
 import { resetAlarmSoundForTests } from './useAlarmSound'
 
-const { onHubEvent, onHubClosed, resetHubMock } = vi.hoisted(() => ({
+const { onHubEvent, onHubClosed, onHubReconnected, resetHubMock } = vi.hoisted(() => ({
   // 显式声明可变参数：onHubEvent 的真实签名是 (type, handler)，无参 mock 会让 calls[0][1] 过不了类型检查。
   onHubEvent: vi.fn((..._args: unknown[]) => vi.fn()),
   onHubClosed: vi.fn((..._args: unknown[]) => vi.fn()),
+  onHubReconnected: vi.fn((..._args: unknown[]) => vi.fn()),
   resetHubMock: vi.fn()
 }))
 
 vi.mock('../realtime/hub', () => ({
   onHubEvent,
   onHubClosed,
+  onHubReconnected,
   resetHub: resetHubMock
 }))
 
 vi.mock('../stores/auth', () => ({
   useAuthStore: () => ({ confirmSession: vi.fn(async () => undefined) })
+}))
+
+const { statusMock, startAlarmLoop, stopAlarmLoop } = vi.hoisted(() => ({
+  statusMock: vi.fn(async () => []),
+  startAlarmLoop: vi.fn(),
+  stopAlarmLoop: vi.fn()
+}))
+
+vi.mock('../api/annunciators', () => ({
+  annunciatorApi: { status: statusMock }
+}))
+
+vi.mock('../alarmAudio', () => ({
+  handleAlarmPush: vi.fn(),
+  primeAlarmAudio: vi.fn(),
+  setAlarmMute: vi.fn(),
+  startAlarmLoop,
+  stopAlarmLoop
 }))
 
 vi.mock('element-plus', () => ({
@@ -54,6 +74,7 @@ describe('useAlarmSession lifecycle', () => {
   beforeEach(() => {
     onHubEvent.mockClear()
     onHubClosed.mockClear()
+    onHubReconnected.mockClear()
     resetHubMock.mockClear()
     localStorage.setItem('scada_sound', 'on')
   })
@@ -106,6 +127,7 @@ describe('critical raise presentation', () => {
   beforeEach(() => {
     onHubEvent.mockClear()
     onHubClosed.mockClear()
+    onHubReconnected.mockClear()
     resetHubMock.mockClear()
     vi.mocked(ElNotification).mockClear()
     localStorage.setItem('scada_sound', 'on')
@@ -151,5 +173,37 @@ describe('critical raise presentation', () => {
     raiseCritical()
     expect(seen).toEqual(['Critical'])
     stop()
+  })
+})
+
+describe('hub reconnect sound refresh', () => {
+  beforeEach(() => {
+    onHubEvent.mockClear()
+    onHubClosed.mockClear()
+    onHubReconnected.mockClear()
+    statusMock.mockReset()
+    startAlarmLoop.mockReset()
+    stopAlarmLoop.mockReset()
+    localStorage.setItem('scada_sound', 'on')
+  })
+
+  afterEach(() => {
+    resetAlarmSessionForTests()
+    resetAlarmSoundForTests()
+  })
+
+  it('recomputes annunciator sound from current status after a hub reconnect', async () => {
+    statusMock.mockResolvedValueOnce([{ enabled: true, soundKey: 'critical', silenced: false }])
+    const session = useAlarmSession()
+    session.start()
+    const onReconnect = onHubReconnected.mock.calls[0]?.[0] as (() => void) | undefined
+    expect(onReconnect).toBeTypeOf('function')
+    onReconnect?.()
+    await vi.waitFor(() => expect(startAlarmLoop).toHaveBeenCalledWith('critical'))
+
+    statusMock.mockResolvedValueOnce([])
+    startAlarmLoop.mockClear()
+    onReconnect?.()
+    await vi.waitFor(() => expect(stopAlarmLoop).toHaveBeenCalled())
   })
 })

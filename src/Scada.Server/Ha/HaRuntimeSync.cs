@@ -13,7 +13,7 @@ namespace Scada.Server.Ha;
 /// </summary>
 public sealed record HaRuntimeChangeRow(long Id, string Table, string Key, bool Deleted, IReadOnlyDictionary<string, JsonElement>? Row);
 
-public sealed record HaRuntimeChanges(long After, long Through, bool More, IReadOnlyList<HaRuntimeChangeRow> Changes, long Oldest = 0, bool Gap = false);
+public sealed record HaRuntimeChanges(long After, long Through, bool More, IReadOnlyList<HaRuntimeChangeRow> Changes, long Oldest = 0, bool Gap = false, long Pending = 0, IReadOnlyList<string>? PendingTables = null);
 
 public static class HaRuntimeSync
 {
@@ -156,7 +156,33 @@ public static class HaRuntimeSync
         // 主机按水位裁剪旧窗；游标落在最早可用行之前说明中间有已删行，不能假装连续。
         var oldest = OldestId(connection);
         var gap = after > 0 && oldest > 0 && after + 1 < oldest;
-        return new HaRuntimeChanges(after, through, rows.Count == limit, changes, oldest, gap);
+        var pending = SummarizeCore(connection, through);
+        return new HaRuntimeChanges(after, through, rows.Count == limit, changes, oldest, gap, pending.Count, pending.Tables);
+    }
+
+    public static (long Count, IReadOnlyList<string> Tables) Summarize(SqliteConnection connection, long after)
+    {
+        try { return SummarizeCore(connection, after); }
+        catch (SqliteException)
+        {
+            EnsureChangeFeed(connection);
+            return SummarizeCore(connection, after);
+        }
+    }
+
+    private static (long Count, IReadOnlyList<string> Tables) SummarizeCore(SqliteConnection connection, long after)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*), GROUP_CONCAT(DISTINCT T) FROM \"" + ChangeTable + "\" WHERE Id > $after";
+        cmd.Parameters.AddWithValue("$after", after);
+        using var reader = cmd.ExecuteReader();
+        if (!reader.Read()) return (0, []);
+        var count = reader.IsDBNull(0) ? 0 : reader.GetInt64(0);
+        var raw = reader.IsDBNull(1) ? "" : reader.GetString(1);
+        var tables = string.IsNullOrWhiteSpace(raw)
+            ? []
+            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return (count, tables);
     }
 
     public static long Apply(SqliteConnection connection, HaRuntimeChanges batch)

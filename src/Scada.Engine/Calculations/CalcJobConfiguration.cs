@@ -6,6 +6,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Scripting;
 using Scada.Data;
+using Scada.Core.Configuration;
 
 namespace Scada.Engine.Calculations;
 
@@ -213,7 +214,8 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         if (id is int existing)
         {
             job = await db.CalcJobs.SingleOrDefaultAsync(x => x.Id == existing, ct) ?? throw new CalculationRequestException(404, "计算任务不存在");
-            if (request.Revision != job.Revision) throw new CalculationRequestException(409, "计算任务已被修改，请重新读取后核对");
+            if (!ConfigRevision.TryAccept(job.Revision, request.Revision == 0 ? null : request.Revision, out _))
+                throw new CalculationRequestException(409, ConfigRevision.ConflictMessage);
             if (job.Kind != candidate.Kind) throw new CalculationRequestException(400, "不能修改任务类型，请新建任务");
             before = JsonSerializer.Serialize(job, AuditJson);
         }

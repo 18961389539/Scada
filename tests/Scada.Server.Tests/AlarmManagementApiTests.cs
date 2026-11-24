@@ -233,6 +233,36 @@ public sealed class AlarmManagementApiTests : IClassFixture<AuthorizationTests.S
     }
 
     [Fact]
+    public async Task FailedNotificationsCanBeRetriedPerAreaWithAudit()
+    {
+        var alarmA = await ActiveAlarmAsync(_site.TagA, null); var alarmB = await ActiveAlarmAsync(_site.TagB, null);
+        long idA, idB;
+        await using (var db = await Runtime().CreateDbContextAsync())
+        {
+            var now = ScadaTime.NowMs();
+            var a = new NotificationOutbox { DedupKey = $"raise:{alarmA}:retry", AlarmEventId = alarmA, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "HTTP 500", AcknowledgedTs = now, AcknowledgedBy = "cfgA" };
+            var b = new NotificationOutbox { DedupKey = $"raise:{alarmB}:retry", AlarmEventId = alarmB, RouteId = 1, ChannelId = 1, Action = "raise", Status = NotificationOutboxStatus.Failed, Attempts = 5, MaxAttempts = 5, CreatedTs = now, FinishedTs = now, LastError = "HTTP 500" };
+            db.NotificationOutbox.AddRange(a, b); await db.SaveChangesAsync(); idA = a.Id; idB = b.Id;
+        }
+        var cfg = await _site.ClientAsync("cfgA"); var op = await _site.ClientAsync("opA");
+        Assert.Equal(HttpStatusCode.Forbidden, (await op.PostAsJsonAsync("/api/notification-outbox/retry", new { ids = new[] { idA } })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await cfg.PostAsJsonAsync("/api/notification-outbox/retry", new { ids = new[] { idB } })).StatusCode);
+        var ok = await cfg.PostAsJsonAsync("/api/notification-outbox/retry", new { ids = new[] { idA } });
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        var body = await ok.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(1, body.GetProperty("retried").GetInt32());
+        Assert.Equal(0, body.GetProperty("skipped").GetInt32());
+        var audit = await _site.LastLogAsync(x => x.UserName == "cfgA" && x.Action == "重试通知最终失败" && x.Result == "成功");
+        Assert.Contains("retried", audit!.Details);
+        await using var check = await Runtime().CreateDbContextAsync();
+        var row = await check.NotificationOutbox.SingleAsync(x => x.Id == idA);
+        Assert.Equal("cfgA", row.AcknowledgedBy);
+        Assert.NotNull(row.AcknowledgedTs);
+        Assert.Null((await check.NotificationOutbox.SingleAsync(x => x.Id == idB)).AcknowledgedTs);
+        Assert.Equal(NotificationOutboxStatus.Failed, (await check.NotificationOutbox.SingleAsync(x => x.Id == idB)).Status);
+    }
+
+    [Fact]
     public async Task OutOfServiceNeedsConfigureAndReasonAndWritesDiff()
     {
         var ruleA = await RuleAsync(_site.TagA);

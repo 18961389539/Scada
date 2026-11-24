@@ -169,7 +169,11 @@ export const tagApi = {
   remove: async (id: number) => http.delete(`/tags/${id}`),
   usage: async (id: number) => (await http.get<TagUsage>(`/tags/${id}/usage`)).data,
   rebind: async (id: number, targetTagId: number) => (await http.post<TagRebindResult>(`/tags/${id}/rebind`, { targetTagId })).data,
-  export: async () => (await http.get('/tags/export', { responseType: 'blob' })).data as Blob,
+  export: async (params?: { deviceId?: number; search?: string; ids?: number[]; deviceIds?: number[]; quality?: string }) =>
+    (await http.get('/tags/export', {
+      params: params ? { ...params, ids: params.ids?.join(','), deviceIds: params.deviceIds?.join(',') } : undefined,
+      responseType: 'blob'
+    })).data as Blob,
   import: async (file: File) => {
     const form = new FormData()
     form.append('file', file)
@@ -296,6 +300,7 @@ export interface OutboxFailure { id: number; alarmEventId: number; alarmMessage:
 export const notificationApi = {
   failed: async (before?: number) => readPage(await http.get<OutboxFailure[]>('/notification-outbox/failed', { params: { before } })),
   acknowledge: async (ids: number[]) => (await http.post<{ acknowledged: number }>('/notification-outbox/acknowledge', { ids })).data,
+  retry: async (ids: number[]) => (await http.post<{ retried: number; skipped: number; reasons: string[] }>('/notification-outbox/retry', { ids })).data,
   channels: async () => (await http.get<NotificationChannel[]>('/notification-channels')).data,
   createChannel: async (input: NotificationChannelInput) => (await http.post<NotificationChannel>('/notification-channels', input)).data,
   updateChannel: async (id: number, input: NotificationChannelInput) => (await http.put<NotificationChannel>(`/notification-channels/${id}`, input)).data,
@@ -420,8 +425,8 @@ export const userApi = {
 
 export const areaApi = {
   list: async () => (await http.get<Area[]>('/areas')).data,
-  create: async (input: { name: string; description?: string | null }) => (await http.post<Area>('/areas', input)).data,
-  update: async (id: number, input: { name: string; description?: string | null }) => (await http.put<Area>(`/areas/${id}`, input)).data,
+  create: async (input: { name: string; description?: string | null; revision?: number }) => (await http.post<Area>('/areas', input)).data,
+  update: async (id: number, input: { name: string; description?: string | null; revision?: number }) => (await http.put<Area>(`/areas/${id}`, input)).data,
   remove: async (id: number) => http.delete(`/areas/${id}`)
 }
 

@@ -30,8 +30,8 @@ internal static class ScadaSecurityServices
         builder.Services.Configure<Scada.Server.Auth.MobileOptions>(builder.Configuration.GetSection("Mobile"));
 
         var credentialKeys = new DirectoryInfo(Path.Combine(Path.GetDirectoryName(Path.GetFullPath(scadaOptions.ConfigDbPath))!, "keys"));
-        var protection = builder.Services.AddDataProtection().SetApplicationName("Scada").PersistKeysToFileSystem(credentialKeys);
-        if (OperatingSystem.IsWindows()) protection.ProtectKeysWithDpapi();
+        var ha = builder.Configuration.GetSection("Ha").Get<Scada.Server.Ha.HaOptions>() ?? new Scada.Server.Ha.HaOptions();
+        Scada.Server.Ha.HaDataProtection.Configure(builder.Services.AddDataProtection(), credentialKeys, ha.Enabled, ha.SharedKey);
         builder.Services.AddSingleton<IDeviceCredentials, DeviceCredentials>();
 
         var jwtOptions = builder.Configuration.GetSection("Jwt").Get<JwtOptions>() ?? new JwtOptions();

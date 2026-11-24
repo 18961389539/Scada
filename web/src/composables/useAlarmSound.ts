@@ -10,6 +10,7 @@ function createAlarmSound() {
   const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
   let annunciatorTimer: number | undefined
   let annunciatorBusy = false
+  let annunciatorQueued = false
   const scope = effectScope()
 
   async function refresh(): Promise<void> {
@@ -17,7 +18,10 @@ function createAlarmSound() {
       stopAlarmLoop()
       return
     }
-    if (annunciatorBusy) return
+    if (annunciatorBusy) {
+      annunciatorQueued = true
+      return
+    }
     annunciatorBusy = true
     try {
       const statuses = await annunciatorApi.status()
@@ -30,6 +34,10 @@ function createAlarmSound() {
       // 状态取不到就沿用上一次的播音状态（正在响的继续响、原本静默的保持静默），下一条报警推送会再试。
     } finally {
       annunciatorBusy = false
+    }
+    if (annunciatorQueued) {
+      annunciatorQueued = false
+      await refresh()
     }
   }
 

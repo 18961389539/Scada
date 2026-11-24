@@ -2,16 +2,19 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Scada.Core.Options;
 using Scada.Data;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Engine.History;
 using Scada.Server.Services;
 
 namespace Scada.Server.Ha;
 
-public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History, string? RuntimeSha = null, long? RuntimeBytes = null, long RuntimeWatermark = 0);
+public sealed record HaManifest(string NodeId, string Role, long Term, string Schema, string ConfigSha, long ConfigBytes, IReadOnlyList<HaHistoryCursor> History, string? RuntimeSha = null, long? RuntimeBytes = null, long RuntimeWatermark = 0, string? SecretsSha = null, long SecretsBytes = 0, HaSpoolAdvertisement? Spool = null, string? HistoryLossSha = null);
+public sealed record HaSpoolAdvertisement(long Bytes, long ApproxCount, int Segments, long? From, long? To);
 
 // 本节点私有状态：任期、已应用的配置摘要、历史复制游标。放在 StateDir，不在配置库里，因此不会被复制覆盖。
 public sealed class HaNodeState
@@ -41,10 +44,23 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
     public long LastConfigSyncTs { get; private set; }
     public long LastHistorySyncTs { get; private set; }
     public long HistoryRowsBehind { get; private set; }
+    public int HistoryLagStreak => HistoryLag.Streak;
+    public HaHistoryLagMonitor HistoryLag { get; } = new();
     public long ConfigApplied { get; private set; }
     public long HistoryRowsApplied { get; private set; }
     public long LastRuntimeSyncTs { get; private set; }
     public long RuntimeRowsApplied { get; private set; }
+    public long RuntimeRowsBehind { get; private set; }
+    public int RuntimeLagStreak => RuntimeLag.Streak;
+    public HaHistoryLagMonitor RuntimeLag { get; } = new("运行库复制");
+    public HaSpoolAdvertisement? PeerSpool { get; private set; }
+    public bool HistoryArtifactsImported { get; private set; }
+    public const long SpoolUnreplicatedWarnBytes = 1_048_576;
+
+    public string KeysDir => Path.Combine(Path.GetDirectoryName(ConfigPath)!, "keys");
+    public string? OpcPkiRoot => string.IsNullOrWhiteSpace(_settings.OpcPkiRoot)
+        ? Path.Combine(Path.GetDirectoryName(ConfigPath)!, "opc-pki")
+        : Path.GetFullPath(_settings.OpcPkiRoot);
 
     // ---------- 主机侧 ----------
 
@@ -161,6 +177,9 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
             }
             const string runtimeCursor = "runtime";
             var bootstrapped = state.Cursors.ContainsKey(runtimeCursor);
+            PeerSpool = manifest.Spool;
+            if (force) HistoryArtifactsImported = false;
+            var runtimeCaughtUp = !runtimeDue && !force;
             // 全库快照仅用于强制切换或备机尚未引导。日常路径按变更游标增量拉取，避免 RuntimeSha 因高周转行每几秒都变而反复下载整个库。
             if (force || (runtimeDue && !bootstrapped))
             {
@@ -169,11 +188,15 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                 state.Cursors[runtimeCursor] = manifest.RuntimeWatermark;
                 state.RuntimeSha = manifest.RuntimeSha;
                 await save();
+                RuntimeRowsBehind = 0;
+                RuntimeLag.Observe(0);
+                runtimeCaughtUp = true;
             }
             else if (runtimeDue && manifest.RuntimeWatermark > state.Cursors.GetValueOrDefault(runtimeCursor))
             {
                 var at = state.Cursors.GetValueOrDefault(runtimeCursor);
                 var deadline = Environment.TickCount64 + (force ? 20000 : 2000);
+                IReadOnlyList<string> pendingTables = RuntimeLag.Tables;
                 while (at < manifest.RuntimeWatermark && Environment.TickCount64 < deadline)
                 {
                     var batch = await peer.RuntimeChangesAsync(at, ct);
@@ -186,18 +209,32 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                         state.RuntimeSha = manifest.RuntimeSha;
                         await save();
                         at = manifest.RuntimeWatermark;
+                        pendingTables = [];
                         break;
                     }
-                    if (batch.Changes.Count == 0) { at = Math.Max(at, batch.Through); break; }
+                    if (batch.Changes.Count == 0) { at = Math.Max(at, batch.Through); pendingTables = batch.PendingTables ?? pendingTables; break; }
                     ApplyRuntimeChanges(batch);
                     at = batch.Through;
                     RuntimeRowsApplied += batch.Changes.Count;
+                    if (batch.PendingTables is { Count: > 0 }) pendingTables = batch.PendingTables;
                     state.Cursors[runtimeCursor] = at; await save();
                     if (!batch.More) break;
                 }
                 state.Cursors[runtimeCursor] = at; await save();
+                var behind = Math.Max(0, manifest.RuntimeWatermark - at);
+                RuntimeRowsBehind = behind;
+                RuntimeLag.Observe(behind, pendingTables);
+                runtimeCaughtUp = behind == 0;
             }
-            if (runtimeDue || force) LastRuntimeSyncTs = Scada.Core.Models.ScadaTime.NowMs();
+            else if (runtimeDue)
+            {
+                RuntimeRowsBehind = 0;
+                RuntimeLag.Observe(0);
+                runtimeCaughtUp = true;
+            }
+            if (runtimeCaughtUp) LastRuntimeSyncTs = Scada.Core.Models.ScadaTime.NowMs();
+            if (config || force) await SyncSecretsAsync(peer, manifest, ct);
+            if (force) await SyncHistoryArtifactsAsync(peer, manifest, ct);
             if ((config || force) && manifest.ConfigSha != state.ConfigSha)
             {
                 await ApplyConfigAsync(peer, manifest, ct);
@@ -224,6 +261,7 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
                     behind += Math.Max(0, cursor.MaxRowId - at);
                 }
                 HistoryRowsBehind = behind;
+                HistoryLag.Observe(behind);
                 LastHistorySyncTs = Scada.Core.Models.ScadaTime.NowMs();
             }
             LastError = null;
@@ -330,11 +368,127 @@ public sealed class HaReplication(IOptions<ScadaSettings> settings, IDbContextFa
         }
     }
 
+
+    public (string Path, string Sha, long Bytes)? SecretsSnapshot(string stateDir) =>
+        HaSecretSync.Snapshot(stateDir, KeysDir, OpcPkiRoot);
+
+    public HaSpoolAdvertisement? AdvertiseSpool()
+    {
+        var spool = services.GetService<HistorySpool>();
+        if (spool is null) return null;
+        var pending = spool.DescribePending();
+        if (pending.Segments == 0 && pending.Bytes == 0 && pending.ApproxCount == 0) return null;
+        return new HaSpoolAdvertisement(pending.Bytes, pending.ApproxCount, pending.Segments, pending.From, pending.To);
+    }
+
+    public string? HistoryLossSha()
+    {
+        var path = Path.Combine(HistoryRoot, HistoryLossLog.FileName);
+        return File.Exists(path) ? Hash(path) : null;
+    }
+
+    public string HistoryLossPath() => Path.Combine(HistoryRoot, HistoryLossLog.FileName);
+
+    private async Task SyncSecretsAsync(HaPeerClient peer, HaManifest manifest, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(manifest.SecretsSha)) return;
+        var incoming = Path.Combine(Path.GetDirectoryName(ConfigPath)!, ".ha-incoming-secrets.zip");
+        File.Delete(incoming);
+        try
+        {
+            await peer.DownloadSecretsAsync(incoming, ct);
+            var sha = Hash(incoming);
+            if (!string.Equals(sha, manifest.SecretsSha, StringComparison.OrdinalIgnoreCase))
+                throw new HaException("密钥环在传输中已更新，稍后重试");
+            HaSecretSync.Apply(incoming, KeysDir, OpcPkiRoot);
+            logger.LogInformation("已从主机同步 Data Protection 密钥环与 OPC PKI（{Bytes} 字节）", manifest.SecretsBytes);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            logger.LogInformation("主机尚未提供密钥环快照，跳过");
+        }
+        finally { try { File.Delete(incoming); } catch { } }
+    }
+
+    private async Task SyncHistoryArtifactsAsync(HaPeerClient peer, HaManifest manifest, CancellationToken ct)
+    {
+        var spool = services.GetService<HistorySpool>();
+        var incomingSpool = Path.Combine(HistoryRoot, ".ha-incoming-spool");
+        try
+        {
+            if (Directory.Exists(incomingSpool)) Directory.Delete(incomingSpool, true);
+            await peer.DownloadSpoolAsync(incomingSpool, ct);
+            if (spool is not null && Directory.Exists(incomingSpool))
+                await spool.MergeFromDirectoryAsync(incomingSpool, ct);
+            var writer = services.GetService<HistoryWriterService>();
+            if (writer is not null) await writer.RecoverSpoolAsync(ct);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            logger.LogInformation("主机没有可复制的历史暂存");
+        }
+        finally { try { if (Directory.Exists(incomingSpool)) Directory.Delete(incomingSpool, true); } catch { } }
+
+        var loss = services.GetService<HistoryLossLog>();
+        var incomingLoss = Path.Combine(HistoryRoot, ".ha-incoming-history-loss.jsonl");
+        try
+        {
+            File.Delete(incomingLoss);
+            await peer.DownloadHistoryLossAsync(incomingLoss, ct);
+            if (loss is not null && File.Exists(incomingLoss))
+            {
+                var merged = loss.MergeFromFile(incomingLoss);
+                if (merged > 0) logger.LogInformation("已合并对端历史缺口日志 {Count} 条", merged);
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // 对端没有缺口日志属于正常情况。
+        }
+        finally { try { File.Delete(incomingLoss); } catch { } }
+        HistoryArtifactsImported = true;
+    }
     private static string Stamp(string path) => File.Exists(path) ? $"{new FileInfo(path).Length}:{File.GetLastWriteTimeUtc(path).Ticks}" : "-";
 
     public static string Hash(string path)
     {
         using var stream = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(stream));
+    }
+}
+
+/// <summary>
+/// 备机历史复制落后的可观测计数：超过行数阈值，或连续多轮无法追平，即构成健康告警。
+/// </summary>
+public sealed class HaHistoryLagMonitor(string subject = "历史复制")
+{
+    public const long WarnRows = 10_000;
+    public const int WarnStreak = 3;
+    public long Behind { get; private set; }
+    public int Streak { get; private set; }
+    public IReadOnlyList<string> Tables { get; private set; } = [];
+
+    public void Observe(long behind, IReadOnlyList<string>? tables = null)
+    {
+        if (behind <= 0) { Streak = 0; Tables = []; }
+        else if (Behind == 0 || behind < Behind) Streak = 1;
+        else Streak++;
+        Behind = behind;
+        if (tables is { Count: > 0 }) Tables = tables.Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToArray();
+        else if (behind <= 0) Tables = [];
+    }
+
+    public string? Warning()
+    {
+        if (Behind >= WarnRows) return $"备机{subject}落后 {Behind} 行，超过告警阈值 {WarnRows}";
+        if (Streak >= WarnStreak && Behind > 0) return $"备机{subject}落后 {Behind} 行，已连续 {Streak} 轮未能追平";
+        return null;
+    }
+
+    public static void RecordPromotionGap(HistoryLossLog? log, long behind, long lastSyncTs, long now, string reason)
+    {
+        if (log is null || behind <= 0) return;
+        var from = lastSyncTs > 0 ? lastSyncTs : now;
+        log.Record(HistoryGapKind.Rejected, from, now, detail: $"主备接管时历史未同步尾段 {behind} 行（{reason}）");
     }
 }

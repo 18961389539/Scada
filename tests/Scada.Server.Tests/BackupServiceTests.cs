@@ -90,6 +90,76 @@ public sealed class BackupServiceTests
     }
 
     [Fact]
+    public async Task FullBackupPacksReportsAndRestoreRewritesRelativePaths()
+    {
+        using var rig = new Rig();
+        var reports = Path.Combine(rig.Root, "reports", "3");
+        Directory.CreateDirectory(reports);
+        var xlsx = Path.Combine(reports, "run.xlsx");
+        var pdf = Path.Combine(reports, "run.pdf");
+        await File.WriteAllTextAsync(xlsx, "xlsx-body");
+        await File.WriteAllTextAsync(pdf, "pdf-body");
+        static string Sha(string path) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)));
+        var runtimePath = Path.Combine(rig.Root, "runtime.db");
+        await using (var db = new SqliteConnection($"Data Source={runtimePath};Pooling=False"))
+        {
+            await db.OpenAsync();
+            await using var cmd = db.CreateCommand();
+            cmd.CommandText = @"CREATE TABLE ReportRuns(
+                    Id INTEGER PRIMARY KEY,
+                    XlsxPath TEXT,
+                    PdfPath TEXT,
+                    XlsxSha256 TEXT,
+                    PdfSha256 TEXT,
+                    PurgedTs INTEGER
+                );
+                INSERT INTO ReportRuns(Id, XlsxPath, PdfPath, XlsxSha256, PdfSha256, PurgedTs)
+                VALUES(1, $xlsx, $pdf, $xsha, $psha, NULL);";
+            cmd.Parameters.AddWithValue("$xlsx", xlsx);
+            cmd.Parameters.AddWithValue("$pdf", pdf);
+            cmd.Parameters.AddWithValue("$xsha", Sha(xlsx));
+            cmd.Parameters.AddWithValue("$psha", Sha(pdf));
+            await cmd.ExecuteNonQueryAsync();
+        }
+        await rig.PrepareAsync(settings => settings.RuntimeDbPath = runtimePath);
+
+        var summary = await rig.Backups.CreateAsync(default);
+        using (var zip = ZipFile.OpenRead(summary.Path))
+        {
+            var names = zip.Entries.Select(x => x.FullName.Replace('\\', '/')).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Assert.Contains("reports/3/run.xlsx", names);
+            Assert.Contains("reports/3/run.pdf", names);
+        }
+        var verification = await rig.Backups.VerifyAsync(summary.FileName, default);
+        Assert.True(verification.Valid, string.Join("; ", verification.Problems));
+        Assert.Equal(BackupService.ReportsNoteText, verification.Manifest!.ReportsNote);
+
+        var restored = Path.Combine(rig.Root, "restored-reports");
+        await rig.Backups.RestoreAsync(summary.FileName, restored, default);
+        Assert.True(File.Exists(Path.Combine(restored, "reports", "3", "run.xlsx")));
+        await using (var db = new SqliteConnection($"Data Source={Path.Combine(restored, "runtime.db")};Pooling=False"))
+        {
+            await db.OpenAsync();
+            await using var cmd = db.CreateCommand();
+            cmd.CommandText = "SELECT XlsxPath, PdfPath, PurgedTs FROM ReportRuns WHERE Id=1";
+            await using var reader = await cmd.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            Assert.Equal("3/run.xlsx", reader.GetString(0).Replace('\\', '/'));
+            Assert.Equal("3/run.pdf", reader.GetString(1).Replace('\\', '/'));
+            Assert.True(reader.IsDBNull(2));
+        }
+
+        var work = Path.Combine(rig.Root, "tamper-reports");
+        ZipFile.ExtractToDirectory(summary.Path, work);
+        await File.AppendAllTextAsync(Path.Combine(work, "reports", "3", "run.xlsx"), "x");
+        var tamperedName = "full_tampered_reports.zip";
+        ZipFile.CreateFromDirectory(work, Path.Combine(rig.Root, "backups", tamperedName));
+        var failed = await rig.Backups.VerifyAsync(tamperedName, default);
+        Assert.False(failed.Valid);
+        Assert.Contains(failed.Problems, x => x.Contains("哈希不符"));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => rig.Backups.RestoreAsync(tamperedName, Path.Combine(rig.Root, "restored-bad-reports"), default));
+    }
+    [Fact]
     public async Task BackupFileNamesRejectPathTraversal()
     {
         using var rig = new Rig();
@@ -329,6 +399,7 @@ public sealed class BackupServiceTests
             }
 
             var history = Path.Combine(Root, "history");
+            Directory.CreateDirectory(Path.Combine(Root, "reports"));
             Directory.CreateDirectory(Path.Combine(history, "_spool"));
             using (var db = new SqliteConnection($"Data Source={Path.Combine(history, "raw_202610.db")};Pooling=False"))
             {
@@ -345,7 +416,8 @@ public sealed class BackupServiceTests
             {
                 ConfigDbPath = ConfigPath,
                 HistoryRoot = history,
-                BackupRoot = Path.Combine(Root, "backups")
+                BackupRoot = Path.Combine(Root, "backups"),
+                ReportsRoot = Path.Combine(Root, "reports")
             };
             configure?.Invoke(settings);
             Settings = settings;

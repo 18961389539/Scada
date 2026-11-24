@@ -19,5 +19,6 @@ public sealed class NotificationRouteConfiguration : IEntityTypeConfiguration<No
         entity.HasOne<NotificationChannel>().WithMany().HasForeignKey(x => x.ChannelId).OnDelete(DeleteBehavior.Restrict);
         entity.HasOne<DutyShift>().WithMany().HasForeignKey(x => x.ShiftId).OnDelete(DeleteBehavior.Restrict);
         entity.HasIndex(x => x.AreaId);
+        entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
     }
 }

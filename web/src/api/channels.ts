@@ -2,6 +2,7 @@ import { http } from './http'
 
 export interface ChannelInfo {
   id: number
+  revision?: number
   name: string
   description: string
   protocol: string
@@ -18,6 +19,7 @@ export interface ChannelInfo {
 }
 
 export interface ChannelInput {
+  revision?: number
   name: string
   protocol: string
   description: string

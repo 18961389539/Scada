@@ -708,7 +708,7 @@ async function exportTags(): Promise<void> {
   } catch { return }
   actionError.value = ''
   try {
-    const blob = await tagApi.export()
+    const blob = await tagApi.export(requestedQuery.value)
     downloadBlob(blob, `tags_${new Date().toISOString().slice(0, 10)}.xlsx`)
   } catch (error) {
     actionError.value = await errorText(error, tr('tagsView.k675338'))
