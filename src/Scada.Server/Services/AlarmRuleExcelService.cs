@@ -18,7 +18,7 @@ public sealed record AlarmRuleImportResult(int Created, int Updated, int Skipped
 // 每行都走与接口相同的结构与目标校验，成功后由调用方热加载配置并写审计。
 public sealed class AlarmRuleExcelService
 {
-    private sealed record PreviewState(int Owner, byte[] Bytes, string FileName, string Fingerprint, ExcelImportPreview Preview);
+    private sealed record PreviewState(int Owner, byte[] Bytes, string FileName, IReadOnlyDictionary<int, long> Tokens, ExcelImportPreview Preview);
     private readonly ConcurrentDictionary<string, PreviewState> _previews = new();
 
     private static readonly string[] Headers =
@@ -227,12 +227,12 @@ public sealed class AlarmRuleExcelService
         var bytes = buffer.ToArray();
         buffer.Position = 0;
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var fingerprint = await FingerprintAsync(db, cancellationToken);
+        var tokens = await LoadTokensAsync(db, cancellationToken);
         var plan = await ImportAsync(buffer, fileName, contextFactory, runtimeFactory, null, "preview", cancellationToken, dryRun: true);
         var canApply = plan.Created + plan.Updated > 0;
         var id = Guid.NewGuid().ToString("N");
         var preview = new ExcelImportPreview(id, plan.Created, plan.Updated, plan.Skipped, plan.Conflicts, plan.Errors, [ExcelImportImpact.ReloadWarning], canApply, DateTime.UtcNow.AddMinutes(10));
-        _previews[id] = new(owner, bytes, fileName, fingerprint, preview);
+        _previews[id] = new(owner, bytes, fileName, tokens, preview);
         return preview;
     }
 
@@ -249,8 +249,7 @@ public sealed class AlarmRuleExcelService
             throw new InvalidOperationException("导入预览不存在或已过期，请重新预览");
         if (!saved.Preview.CanApply) throw new InvalidOperationException("导入预览没有可应用的变更");
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        if (await FingerprintAsync(db, cancellationToken) != saved.Fingerprint)
-            throw new InvalidOperationException("报警规则已变化，请重新预览");
+        await AcceptTokensAsync(db, saved.Tokens, cancellationToken);
         using var buffer = new MemoryStream(saved.Bytes);
         var result = await ImportAsync(buffer, saved.FileName, contextFactory, runtimeFactory, userId, userName, cancellationToken);
         _previews.TryRemove(previewId, out _);
@@ -264,12 +263,19 @@ public sealed class AlarmRuleExcelService
             if (state.Preview.ExpiresAt < now) _previews.TryRemove(key, out _);
     }
 
-    private static async Task<string> FingerprintAsync(ConfigDbContext db, CancellationToken ct)
+    private static Task<Dictionary<int, long>> LoadTokensAsync(ConfigDbContext db, CancellationToken ct) =>
+        db.AlarmRules.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Revision, ct);
+
+    private static async Task AcceptTokensAsync(ConfigDbContext db, IReadOnlyDictionary<int, long> tokens, CancellationToken ct)
     {
-        var count = await db.AlarmRules.CountAsync(ct);
-        var maxId = count == 0 ? 0 : await db.AlarmRules.MaxAsync(x => x.Id, ct);
-        return $"rules:{count}:{maxId}";
+        var current = await LoadTokensAsync(db, ct);
+        foreach (var (id, expected) in tokens)
+        {
+            if (!current.TryGetValue(id, out var actual) || !ConfigRevision.TryAccept(actual, expected, out _))
+                throw new ConfigRevisionConflictException();
+        }
     }
+
 
     private static AlarmRule Clone(AlarmRule source) => new()
     {

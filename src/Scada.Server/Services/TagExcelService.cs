@@ -38,7 +38,7 @@ public sealed class TagExcelService
 
     public TagExcelService() : this(Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())) { }
 
-    private sealed record PreviewState(int Owner, byte[] Bytes, string FileName, string Fingerprint, ExcelImportPreview Preview);
+    private sealed record PreviewState(int Owner, byte[] Bytes, string FileName, IReadOnlyDictionary<int, long> Tokens, ExcelImportPreview Preview);
     private readonly ConcurrentDictionary<string, PreviewState> _previews = new();
 
     private static readonly System.Text.Json.JsonSerializerOptions AuditJson = new()
@@ -239,7 +239,10 @@ public sealed class TagExcelService
 
                 if (exists)
                 {
-                    db.Entry(tags[key]).CurrentValues.SetValues(tag);
+                    var original = tags[key];
+                    tag.Id = original.Id;
+                    tag.CalculationRevision = ConfigRevision.Next(original.CalculationRevision);
+                    db.Entry(original).CurrentValues.SetValues(tag);
                     updated++;
                 }
                 else
@@ -392,12 +395,12 @@ public sealed class TagExcelService
         var bytes = buffer.ToArray();
         buffer.Position = 0;
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        var fingerprint = await FingerprintAsync(db, cancellationToken);
+        var tokens = await LoadTokensAsync(db, cancellationToken);
         var plan = await ImportAsync(buffer, contextFactory, runtimeFactory, cancellationToken, fileName: fileName, dryRun: true);
         var canApply = plan.Created + plan.Updated > 0;
         var id = Guid.NewGuid().ToString("N");
         var preview = new ExcelImportPreview(id, plan.Created, plan.Updated, plan.Skipped, plan.Conflicts, plan.Errors, [ExcelImportImpact.ReloadWarning], canApply, DateTime.UtcNow.AddMinutes(10));
-        _previews[id] = new(owner, bytes, fileName, fingerprint, preview);
+        _previews[id] = new(owner, bytes, fileName, tokens, preview);
         return preview;
     }
 
@@ -414,8 +417,7 @@ public sealed class TagExcelService
             throw new InvalidOperationException("导入预览不存在或已过期，请重新预览");
         if (!saved.Preview.CanApply) throw new InvalidOperationException("导入预览没有可应用的变更");
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
-        if (await FingerprintAsync(db, cancellationToken) != saved.Fingerprint)
-            throw new InvalidOperationException("测点配置已变化，请重新预览");
+        await AcceptTokensAsync(db, saved.Tokens, cancellationToken);
         using var buffer = new MemoryStream(saved.Bytes);
         var result = await ImportAsync(buffer, contextFactory, runtimeFactory, cancellationToken, userId, userName, saved.FileName);
         _previews.TryRemove(previewId, out _);
@@ -429,11 +431,17 @@ public sealed class TagExcelService
             if (state.Preview.ExpiresAt < now) _previews.TryRemove(key, out _);
     }
 
-    private static async Task<string> FingerprintAsync(ConfigDbContext db, CancellationToken ct)
+    private static Task<Dictionary<int, long>> LoadTokensAsync(ConfigDbContext db, CancellationToken ct) =>
+        db.Tags.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.CalculationRevision, ct);
+
+    private static async Task AcceptTokensAsync(ConfigDbContext db, IReadOnlyDictionary<int, long> tokens, CancellationToken ct)
     {
-        var count = await db.Tags.CountAsync(ct);
-        var maxId = count == 0 ? 0 : await db.Tags.MaxAsync(x => x.Id, ct);
-        return $"tags:{count}:{maxId}";
+        var current = await LoadTokensAsync(db, ct);
+        foreach (var (id, expected) in tokens)
+        {
+            if (!current.TryGetValue(id, out var actual) || !ConfigRevision.TryAccept(actual, expected, out _))
+                throw new ConfigRevisionConflictException();
+        }
     }
 
     private static bool TryParseEnum<TEnum>(string text, out TEnum value) where TEnum : struct, Enum

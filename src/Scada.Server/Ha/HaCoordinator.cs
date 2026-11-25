@@ -88,6 +88,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
     public IEnumerable<SystemWarning> Warnings()
     {
         if (!_options.Enabled) yield break;
+        if (HaPeerTransport.InsecureWarning(_options) is { } insecure) yield return insecure;
         var now = ScadaTime.NowMs();
         if (_peer is null) yield return new("ha_peer_down", $"主备对端 {_options.PeerUrl} 不可达" + (_primary ? "，当前无热备" : ""));
         if (_witnessError is not null) yield return new("ha_witness_unreachable", $"仲裁不可用：{_witnessError}");

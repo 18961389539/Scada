@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Scada.Core.Configuration;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Data.Auditing;
@@ -38,6 +39,8 @@ public static class DataServiceCollectionExtensions
 
         services.AddSingleton<IHistoryDbFactory, HistoryDbFactory>();
         services.AddSingleton<IConfigSnapshot, ConfigSnapshot>();
+        services.AddSingleton<IConfigChangeNotifier, ConfigChangeNotifier>();
+        services.AddSingleton<ConfigChangeTracker>();
         services.AddSingleton<AccessModelProvider>();
         // 启动迁移的条数/耗时快照；DatabaseInitializer 写入，/metrics 读取。
         services.AddSingleton<MigrationTelemetry>();

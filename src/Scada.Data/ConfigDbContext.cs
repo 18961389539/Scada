@@ -79,6 +79,8 @@ public class ConfigDbContext : DbContext
 
     public DbSet<SerialProfileConfig> SerialProfiles => Set<SerialProfileConfig>();
 
+    public DbSet<SiteOperationsSettings> SiteOperationsSettings => Set<SiteOperationsSettings>();
+
     public override int SaveChanges(bool acceptAllChangesOnSuccess) { AssignKeys(); return base.SaveChanges(acceptAllChangesOnSuccess); }
     public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default) { AssignKeys(); return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken); }
 

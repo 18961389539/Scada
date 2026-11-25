@@ -20,6 +20,8 @@ public interface IHistoryDbFactory
     string GetAggregatePath(int year);
     void EnsureCreated(HistoryDbContext context);
     void ReleaseFile(string path) { }
+    /// <summary>时区变更后重跑已有历史文件的小时网格对齐，沿用既有整点/半点回补规则。</summary>
+    void RealignExisting() { }
 }
 
 public sealed class HistoryDbFactory : IHistoryDbFactory
@@ -279,6 +281,31 @@ public sealed class HistoryDbFactory : IHistoryDbFactory
         command.CommandText = sql;
         if (offset is long value) command.Parameters.Add(new SqliteParameter("$offset", value));
         command.ExecuteNonQuery();
+    }
+
+
+    public void RealignExisting()
+    {
+        if (!Directory.Exists(_settings.HistoryRoot)) return;
+        foreach (var path in Directory.EnumerateFiles(_settings.HistoryRoot, "*.db", SearchOption.TopDirectoryOnly))
+        {
+            var name = Path.GetFileName(path);
+            if (!name.StartsWith("raw_", StringComparison.OrdinalIgnoreCase)
+                && !name.StartsWith("agg_", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var gate = Gate(path);
+            gate.Wait();
+            try
+            {
+                using var context = new HistoryDbContext(Options(path));
+                AlignHourWindows(context, path);
+                _initialized.TryAdd(path, true);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }
     }
 
     private HistoryDbContext Create(string path)

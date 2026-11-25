@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Scada.Core;
+using Scada.Core.Configuration;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -69,6 +70,10 @@ public sealed class DeviceCommandService(
     public async Task<DeviceCommandResult> UpdateAsync(
         ConfigDbContext db, Device device, CancellationToken cancellationToken, long? expectedRevision = null)
     {
+        if (device.Revision < 1) device.Revision = ConfigRevision.Initial;
+        if (!ConfigRevision.TryAccept(device.Revision, expectedRevision, out var revisionIssue))
+            return DeviceCommandResult.Failed(DeviceCommandError.Conflict, [revisionIssue!.Value]);
+        device.Revision = ConfigRevision.Next(device.Revision);
         SoftElementByteOrder.Normalize(device);
         var channelIssues = await ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
         if (channelIssues.Count > 0)

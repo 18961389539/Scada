@@ -32,3 +32,5 @@
 ## 完整备份中的报表归档
 
 完整备份会按保留期打包尚未清理的 `ReportsRoot`（默认 `data/reports`）。库内改存相对路径，还原时按新的归档根重写，并校验 SHA-256；文件缺失或哈希不符会明确失败，不会把记录标成已清理，也不重签旧文件。签名证书仍在 `keys/`。不提供在线一键恢复 HTTP 接口。操作步骤见 [publishing.md](publishing.md)。
+
+工厂日历等厂级运营组态随配置库复制；站点文件中的部署项（JWT、`Ha:SharedKey`、监听地址）不进配置复制。详见 [configuration-planes.md](configuration-planes.md)。

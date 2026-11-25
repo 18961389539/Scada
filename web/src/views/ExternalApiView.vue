@@ -52,6 +52,8 @@
           </span>
         </div>
       </div>
+      <el-alert type="info" :closable="false" show-icon data-test="ext-opcua-alarm-rebuild"
+        :title="$t('externalApiView.opcUaAlarmRebuildHint')" style="margin-bottom: 12px" />
       <el-alert
         v-if="mappingWarnings.length"
         type="warning"

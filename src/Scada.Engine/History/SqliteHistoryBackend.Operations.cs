@@ -194,7 +194,7 @@ public partial class SqliteHistoryBackend
     public async Task<bool> HasPendingRawWindowsAsync(long fromInclusive, long toExclusive, CancellationToken cancellationToken)
     {
         var end = Math.Max(fromInclusive, toExclusive - 1);
-        foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(fromInclusive, end, _zone))
+        foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(fromInclusive, end, Zone))
         {
             if (!File.Exists(_factory.GetRawPath(year, month))) continue;
             await using var db = _factory.CreateRaw(year, month);

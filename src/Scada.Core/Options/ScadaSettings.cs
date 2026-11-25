@@ -180,6 +180,8 @@ public sealed class ScadaSettings
     public int OeeAnalyticsRawMaxDays { get; set; } = 31;
     // 报警转停机候选：匹配的报警等级下限；0=提示起全部。
     public int OeeAlarmDowntimeMinLevel { get; set; } = 1;
+    // 工厂日历（班次时区）的启动回退值。页面与 API 读写配置库中的厂级组态；本键只用于首次种子和测试。
+    // 站点文件不要再写入此项。未配置时按服务器本地时区切日，历史小时桶仍按 UTC 整点（既有整点/半点回补规则见 HistoryDbFactory）。
     public string? ShiftTimeZone { get; set; }
     // 计算任务：运行状态落盘周期（断电最多丢失该时长的累计量）与脚本执行上限。
     public int CalcStatePersistSec { get; set; } = 10;

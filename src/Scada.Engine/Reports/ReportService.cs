@@ -20,18 +20,18 @@ public sealed record ReportResult(string Type, long From, long To, IReadOnlyList
 public sealed class ReportService
 {
     private readonly IHistoryStore _store;
-
-    private readonly bool _explicitZone;
+    private readonly IOptions<ScadaSettings>? _options;
 
     public ReportService(IHistoryStore store, IOptions<ScadaSettings>? options = null)
     {
         _store = store;
-        _explicitZone = !string.IsNullOrWhiteSpace(options?.Value.ShiftTimeZone);
-        Zone = CalcJobEngine.ResolveZone(options?.Value.ShiftTimeZone);
+        _options = options;
     }
 
+    private bool ExplicitZone => !string.IsNullOrWhiteSpace(_options?.Value.ShiftTimeZone);
+
     // 月报按工厂时区（ShiftTimeZone）切天，与报表中心、OEE、报警统计一致
-    public TimeZoneInfo Zone { get; }
+    public TimeZoneInfo Zone => CalcJobEngine.ResolveZone(_options?.Value.ShiftTimeZone);
 
     // 小时聚合（含尚未生成聚合的最近小时，用原始数据补算）。
     public async Task<IReadOnlyList<AggregatePoint>> HourlyAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken = default)
@@ -118,7 +118,7 @@ public sealed class ReportService
 
     // 未配置工厂时区时仍按 UTC 整点，与历史库里已有的小时键一致。
     // 配置之后按该时区的本地整点，和聚合触发器使用的基准偏移是同一网格。
-    private long AlignToHour(long ts) => ZoneTime.FloorHour(ts, _explicitZone ? Zone : TimeZoneInfo.Utc);
+    private long AlignToHour(long ts) => ZoneTime.FloorHour(ts, ExplicitZone ? Zone : TimeZoneInfo.Utc);
 
     private List<ReportPoint> BuildPoints(string type, IEnumerable<AggregatePoint> rows)
     {

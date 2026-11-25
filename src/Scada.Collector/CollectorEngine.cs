@@ -137,7 +137,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
     {
         if (!_role.IsActive) throw new InvalidOperationException(_role.StandbyMessage);
         if (!_settings.Value.LocalCollectionEnabled) throw new InvalidOperationException(LocalCollection.DisabledMessage);
-        if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
+        if (_config.CollectionVersion != _loadedCollectionVersion)
             throw new InvalidOperationException("采集配置正在重新加载，请稍后重试");
         if (HasStuckIo(deviceId))
             throw new InvalidOperationException("旧采集 I/O 尚未退出，暂不接受读取请求");
@@ -161,7 +161,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         if (tag.Kind != TagKind.Physical || tag.DeviceId != deviceId) return CommandResults.Of(GatewayCommandOutcome.NotSent, "测点不是该设备的物理测点");
         if (!_role.IsActive) return CommandResults.Of(GatewayCommandOutcome.NotSent, _role.StandbyMessage);
         if (!_settings.Value.LocalCollectionEnabled) return CommandResults.Of(GatewayCommandOutcome.NotSent, LocalCollection.DisabledMessage);
-        if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
+        if (_config.CollectionVersion != _loadedCollectionVersion)
             return CommandResults.Of(GatewayCommandOutcome.NotSent, "采集配置正在重新加载，请稍后重试");
         if (HasStuckIo(deviceId))
             return CommandResults.Of(GatewayCommandOutcome.NotSent, "旧采集 I/O 尚未退出，暂不接受控制");
@@ -183,7 +183,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         if (tag.DataType != TagDataType.String) return CommandResults.Of(GatewayCommandOutcome.NotSent, "测点不是字符串类型");
         if (!_role.IsActive) return CommandResults.Of(GatewayCommandOutcome.NotSent, _role.StandbyMessage);
         if (!_settings.Value.LocalCollectionEnabled) return CommandResults.Of(GatewayCommandOutcome.NotSent, LocalCollection.DisabledMessage);
-        if (_reloadRequested || _config.CollectionVersion != _loadedCollectionVersion)
+        if (_config.CollectionVersion != _loadedCollectionVersion)
             return CommandResults.Of(GatewayCommandOutcome.NotSent, "采集配置正在重新加载，请稍后重试");
         if (HasStuckIo(deviceId))
             return CommandResults.Of(GatewayCommandOutcome.NotSent, "旧采集 I/O 尚未退出，暂不接受控制");

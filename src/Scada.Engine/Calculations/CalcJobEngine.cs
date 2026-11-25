@@ -130,7 +130,6 @@ public sealed class CalcJobEngine(
     private int _configVersion = -1;
     private volatile bool _reload = true;
     private long _lastPersist;
-    private TimeZoneInfo? _zone;
 
     private long _reloadRequests;
     public long ReloadRequestCount => Interlocked.Read(ref _reloadRequests);
@@ -144,7 +143,7 @@ public sealed class CalcJobEngine(
     private void UpdateWarnings() => _warnings = _jobs.Values.Where(x => x.Job.Enabled && x.IdentityProblem is not null)
         .Select(x => $"计算任务「{x.Job.Name}」无法写测点：{x.IdentityProblem}；请由有控制权限的人员重新保存任务").ToList();
 
-    private TimeZoneInfo Zone => _zone ??= ResolveZone(options.Value.ShiftTimeZone);
+    private TimeZoneInfo Zone => ResolveZone(options.Value.ShiftTimeZone);
     public static TimeZoneInfo ResolveZone(string? id)
     {
         if (string.IsNullOrWhiteSpace(id)) return TimeZoneInfo.Local;

@@ -626,6 +626,9 @@ export interface Health {
     interruptedSequences: number
     interruptedRecipes: number
     items: { kind: string; id: string; name: string; message: string; ts?: number | null }[]
+    unreplayedSpool?: { segments: number; bytes: number; approxCount: number; from?: number | null; to?: number | null } | null
+    lossWindows?: number
+    lossOldestFrom?: number | null
   } | null
   alarmWebhook?: {
     enabled: boolean

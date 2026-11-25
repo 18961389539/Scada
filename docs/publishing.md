@@ -374,9 +374,12 @@ on the application's active/standby role management.
 ## Encrypted Backups
 
 A full backup bundle contains the configuration database (including every user
-password hash), the runtime database, the history files, unpurged report archives
+password hash and plant-level operations settings such as the factory calendar),
+the runtime database, the history files, unpurged report archives
 under `ReportsRoot`, the OPC PKI and the ASP.NET Data Protection key ring under
-`keys/` (including `report-signing.pfx`). Report run paths are stored relative to
+`keys/` (including `report-signing.pfx`). The site settings file (`appsettings.Site.json`,
+JWT signing key, `Ha:SharedKey`, listen addresses) is a deployment-plane item: it is
+retained on restore and is not part of the configuration snapshot. See [configuration-planes.md](configuration-planes.md). Report run paths are stored relative to
 `ReportsRoot` and rewritten on restore; SHA-256 mismatches or missing archive
 files fail verification and restore. Old files are not re-signed, and there is
 no online one-click restore HTTP API. Whoever can read the bundle can
@@ -587,7 +590,7 @@ The runbook is: stop the service, restore into an empty staging directory, verif
 
 Two backup kinds are not interchangeable:
 
-- **Full backup packages** produced by BackupTool / `/api/maintenance/backups` (`full_*.zip` or `.zip.enc`) contain the configuration database, runtime database, history shards, unpurged report archives, OPC PKI and keys. This is what the restore scripts accept. Restore rewrites report paths to the new `ReportsRoot` and refuses the pack when a packed report is missing or its SHA-256 does not match; `PurgedTs` is never set as a substitute for a missing file.
+- **Full backup packages** produced by BackupTool / `/api/maintenance/backups` (`full_*.zip` or `.zip.enc`) contain the configuration database (including the factory calendar), runtime database, history shards, unpurged report archives, OPC PKI and keys. The site settings file is not packed and must be kept on the target machine. This is what the restore scripts accept. Restore rewrites report paths to the new `ReportsRoot` and refuses the pack when a packed report is missing or its SHA-256 does not match; `PurgedTs` is never set as a substitute for a missing file.
 - **Configuration copies** left by the daily maintenance task (`scada_*.db`) are SQLite copies of the configuration database only. They are not a complete site restore and must not be fed to the full restore runbook as if they were.
 
 The restore scripts write only to an empty staging directory and never overwrite a running instance in place.

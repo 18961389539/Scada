@@ -1308,7 +1308,8 @@
     "mappingWarnings": "Point-map warnings",
     "createdAt": "Created",
     "lastUsed": "Last used",
-    "neverUsed": "Never used"
+    "neverUsed": "Never used",
+    "opcUaAlarmRebuildHint": "Changing only alarm rules does not drop connected OPC UA clients. New alarm conditions appear at the next address-space rebuild, for example when the tag tree, areas, or writable flags change."
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "Device",
@@ -2668,7 +2669,8 @@
     "verifyFailed": "Backup verification failed: {0}",
     "verifyUnknown": "No problem details were returned",
     "downloadDiagnostics": "Download diagnostics",
-    "diagnosticsReady": "Diagnostics pack downloaded. It includes version and configuration size, health metrics, database checks, notification status and recent logs. It does not include device credentials, tokens, or passwords."
+    "diagnosticsReady": "Diagnostics pack downloaded. It includes version and configuration size, health metrics, database checks, notification status and recent logs. It does not include device credentials, tokens, or passwords.",
+    "peerTransportHint": "The HA peer key-replication channel is authenticated but not encrypted. Use HTTPS for the peer connection in production. This notice does not force site-wide HTTPS."
   },
   "overviewView": {
     "alarmListFailed": "Could not load alarms",
@@ -4145,7 +4147,10 @@
     "notificationFailedLink": "Open failed outbox",
     "webhookCounts": "Webhook {0}: sent {1}, failed {2}, suppressed {3}, dropped {4}",
     "webhookOn": "enabled",
-    "webhookOff": "disabled"
+    "webhookOff": "disabled",
+    "takeoverReviewHistory": "About {0} unreplayed history-spool samples and {1} history-loss windows. Use this to decide whether to restore from a backup; history is not dual-written continuously.",
+    "takeoverReviewKind_historySpool": "History spool",
+    "takeoverReviewKind_historyLoss": "History loss"
   },
   "tagPicker": {
     "calculated": "Calculated tags",

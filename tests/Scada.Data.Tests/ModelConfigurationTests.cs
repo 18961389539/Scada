@@ -20,6 +20,7 @@ public sealed class ModelConfigurationTests
             new DbContextOptionsBuilder<ConfigDbContext>().UseSqlite("Data Source=:memory:").Options);
         Assert.NotNull(config.Model.FindEntityType(typeof(Tag)));
         Assert.NotNull(config.Model.FindEntityType(typeof(AuditOutboxEntry)));
+        Assert.NotNull(config.Model.FindEntityType(typeof(SiteOperationsSettings)));
         Assert.Null(config.Model.FindEntityType(typeof(AlarmEvent)));
 
         using var runtime = new RuntimeDbContext(
@@ -27,6 +28,7 @@ public sealed class ModelConfigurationTests
         Assert.NotNull(runtime.Model.FindEntityType(typeof(AlarmEvent)));
         Assert.NotNull(runtime.Model.FindEntityType(typeof(OperationLog)));
         Assert.Null(runtime.Model.FindEntityType(typeof(Device)));
+        Assert.Null(runtime.Model.FindEntityType(typeof(SiteOperationsSettings)));
     }
 
     [Fact]
@@ -55,9 +57,9 @@ public sealed class ModelConfigurationTests
             .Where(t => t.IsClass && !t.IsAbstract && t.GetInterfaces().Any(i =>
                 i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IEntityTypeConfiguration<>)))
             .ToArray();
-        Assert.Equal(88, types.Length);
+        Assert.Equal(89, types.Length);
         Assert.All(types, t => Assert.True(t.IsPublic));
-        Assert.Equal(53, types.Count(t => t.Namespace == "Scada.Data.Configurations.Config"));
+        Assert.Equal(54, types.Count(t => t.Namespace == "Scada.Data.Configurations.Config"));
         Assert.Equal(35, types.Count(t => t.Namespace == "Scada.Data.Configurations.Runtime"));
     }
 }

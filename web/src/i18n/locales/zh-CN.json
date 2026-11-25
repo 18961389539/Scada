@@ -1308,7 +1308,8 @@
     "mappingWarnings": "点表映射警告",
     "createdAt": "创建时间",
     "lastUsed": "最后使用",
-    "neverUsed": "尚未使用"
+    "neverUsed": "尚未使用",
+    "opcUaAlarmRebuildHint": "只改报警规则不会断开已连接的 OPC UA 客户端。新的报警条件会在下一次地址空间重建后出现，例如测点树、区域或可写标志变化时。"
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "设备",
@@ -2668,7 +2669,8 @@
     "verifyFailed": "备份校验未通过：{0}",
     "verifyUnknown": "未返回问题说明",
     "downloadDiagnostics": "下载诊断包",
-    "diagnosticsReady": "诊断包已下载。包内含版本与配置规模、健康指标、数据库自检、通知状态和最近日志，不含设备凭据、令牌或任何口令。"
+    "diagnosticsReady": "诊断包已下载。包内含版本与配置规模、健康指标、数据库自检、通知状态和最近日志，不含设备凭据、令牌或任何口令。",
+    "peerTransportHint": "主备密钥复制通道只认证、不加密。生产环境应对等连接使用 HTTPS；此说明不强制全站 HTTPS。"
   },
   "overviewView": {
     "alarmListFailed": "报警列表加载失败",
@@ -4145,7 +4147,10 @@
     "notificationFailedLink": "查看失败发件箱",
     "webhookCounts": "Webhook {0}：已发送 {1}，失败 {2}，抑制 {3}，丢弃 {4}",
     "webhookOn": "已启用",
-    "webhookOff": "未启用"
+    "webhookOff": "未启用",
+    "takeoverReviewHistory": "未回放历史暂存约 {0} 条，历史缺口 {1} 个窗口。可据此决定要不要从备份补；不会做持续双写。",
+    "takeoverReviewKind_historySpool": "历史暂存",
+    "takeoverReviewKind_historyLoss": "历史缺口"
   },
   "tagPicker": {
     "calculated": "计算测点",

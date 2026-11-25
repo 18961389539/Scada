@@ -215,11 +215,12 @@
                   <p class="muted">{{ health.historyLoss.note }}</p>
                 </div>
 
-                <div v-if="health.takeoverReview && (health.takeoverReview.unknownCommands + health.takeoverReview.interruptedSequences + health.takeoverReview.interruptedRecipes) > 0" class="subpanel" data-test="takeover-review">
+                <div v-if="takeoverReview" class="subpanel" data-test="takeover-review">
                   <h4>{{ $t('systemView.takeoverReview') }}</h4>
                   <p class="muted">{{ $t('systemView.takeoverReviewHint') }}</p>
-                  <p class="muted">{{ $t('systemView.takeoverReviewCounts', [health.takeoverReview.unknownCommands, health.takeoverReview.interruptedSequences, health.takeoverReview.interruptedRecipes]) }}</p>
-                  <el-table :data="health.takeoverReview.items" size="small">
+                  <p class="muted">{{ $t('systemView.takeoverReviewCounts', [takeoverReview.unknownCommands, takeoverReview.interruptedSequences, takeoverReview.interruptedRecipes]) }}</p>
+                  <p v-if="(takeoverReview.lossWindows ?? 0) > 0 || takeoverReview.unreplayedSpool" class="muted" data-test="takeover-review-history">{{ $t('systemView.takeoverReviewHistory', [takeoverReview.unreplayedSpool?.approxCount ?? 0, takeoverReview.lossWindows ?? 0]) }}</p>
+                  <el-table :data="takeoverReview.items" size="small">
                     <el-table-column :label="$t('systemView.takeoverReviewKind')" width="110">
                       <template #default="{ row }">{{ takeoverKindLabel(row.kind) }}</template>
                     </el-table-column>
@@ -322,10 +323,23 @@ import { canGlobal } from '../access/policies'
 import { usePolling } from '../composables/usePolling'
 import { tr } from '../i18n'
 
+const takeoverReview = computed(() => {
+  const review = health.value?.takeoverReview
+  if (!review) return null
+  const spool = review.unreplayedSpool
+  const spoolPending = !!spool && ((spool.approxCount ?? 0) > 0 || (spool.bytes ?? 0) > 0)
+  const visible = review.unknownCommands + review.interruptedSequences + review.interruptedRecipes > 0
+    || spoolPending
+    || (review.lossWindows ?? 0) > 0
+  return visible ? review : null
+})
+
 function takeoverKindLabel(kind: string): string {
   if (kind === 'command') return tr('systemView.takeoverReviewKind_command')
   if (kind === 'sequence') return tr('systemView.takeoverReviewKind_sequence')
   if (kind === 'recipe') return tr('systemView.takeoverReviewKind_recipe')
+  if (kind === 'history-spool') return tr('systemView.takeoverReviewKind_historySpool')
+  if (kind === 'history-loss') return tr('systemView.takeoverReviewKind_historyLoss')
   return kind
 }
 

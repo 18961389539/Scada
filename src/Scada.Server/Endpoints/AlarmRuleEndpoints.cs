@@ -357,7 +357,11 @@ public static class AlarmRuleEndpoints
                 await runtime.SaveChangesAsync(cancellationToken);
                 return Results.Ok(result);
             }
-            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+                        catch (Scada.Core.Configuration.ConfigRevisionConflictException ex)
+            {
+                return Results.Conflict(new { message = ex.Message, issues = new[] { new Scada.Core.Models.ValidationIssue(Scada.Core.Configuration.ConfigRevision.ConflictCode, Scada.Core.Configuration.ConfigRevision.Field, ex.Message).ToApiIssue() } });
+            }
+catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
                 return EndpointHelpers.BadRequest(ex.Message);
             }

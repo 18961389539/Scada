@@ -27,6 +27,8 @@
           <el-descriptions-item :label="$t('opsView.kb51418')">{{ $t('opsView.k81d109', [ha.historySyncTs ? formatTime(ha.historySyncTs) : '-', ha.historyRowsBehind]) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('opsView.k5387b4')">{{ ha.switchovers }}</el-descriptions-item>
         </el-descriptions>
+        <el-alert type="info" :closable="false" show-icon data-test="ha-peer-transport"
+          :title="$t('opsView.peerTransportHint')" style="margin-top: 8px" />
         <el-alert v-if="ha.witnessError" type="error" :closable="false" :title="$t('opsView.k98e6fc', [ha.witnessError])" style="margin-top: 8px" />
         <el-alert v-if="ha.replicationError" type="warning" :closable="false" :title="$t('opsView.k9f2469', [ha.replicationError])" style="margin-top: 8px" />
         <el-table :data="ha.events" size="small" style="margin-top: 8px" max-height="240" :empty-text="readError || $t('opsView.kfad64b')" data-test="ha-events">

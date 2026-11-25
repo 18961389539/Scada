@@ -50,6 +50,16 @@
 两种方式下 HTTPS 请求都会带 HSTS 头（`Middleware/SecurityHeaders.cs`）；
 未检测到 https 端点时，非 Development 环境启动会记录一条告警。
 
+## 配置平面
+
+配置分成三层，不要把页面可改且会影响按日切分或历史分桶的项放进站点文件：
+
+1. **部署平面**：站点配置文件（`data/appsettings.Site.json`）与进程启动参数。存放路径、JWT、监听地址、`Ha:SharedKey` 等。还原时保留，不进配置快照。
+2. **厂级运营组态**：配置库（随完整备份和主备配置复制）。工厂日历（班次时区）在此层。写入后历史、报表、OEE、计算任务和通知会重读。
+3. **运行时**：运行库与历史库。历史按测点编号存储，删除组态时不做在线大清理。
+
+详见 [configuration-planes.md](configuration-planes.md)。
+
 ## 标量配置
 
 「配置文件中」列表示该键是否显式出现在 `appsettings.json` 里；
@@ -70,8 +80,9 @@
 | `OpcPkiRoot` | `（无）` | — | **敏感** — |
 | `DiskFreeWarnGb` | `5` | ✓ | 运维告警阈值：低于/高于这些值时 /health 转为 degraded 并写日志。 |
 | `FullBackupIntervalHours` | `168` | ✓ | 定时全量备份间隔（小时）；0 表示关闭，默认每周一次。 |
+| `SpaceReclaimVacuumTimeoutSeconds` | `60` | — | 一次性 VACUUM 的命令超时（秒）。维护任务在历史查询空闲时对尚未 incremental 的老库执行；超时或锁冲突则跳过。 |
 | `OperationLogRetentionDays` | `365` | — | 操作/审计日志保留天数。到期删除不可恢复；0 表示不自动清理。 |
-| `ShiftTimeZone` | `（无）` | — | — |
+| `ShiftTimeZone` | `（无）` | — | 工厂日历（班次时区）的启动回退值。页面与 API 读写配置库中的厂级组态；本键只用于首次种子和测试。 站点文件不要再写入此项。未配置时按服务器本地时区切日，历史小时桶仍按 UTC 整点（既有整点/半点回补规则见 HistoryDbFactory）。 |
 | `PushIntervalMs` | `500` | ✓ | — |
 | `TagImportMaxRows` | `50000` | — | 测点 Excel 导入的每张工作表最大数据行数，防止超大文件长时间占用内存与配置库写锁。 |
 | `CollectorWorkerStopGraceMs` | `5000` | — | 停止一台设备时等待在途采集 I/O 退出的时长。超时后任务进入"已放弃"名单， 仍不退出则由 CollectorStuckIoGraceSeconds 强制关链路兜底。 |
@@ -174,7 +185,7 @@
 
 | 配置键 | 默认值 | 配置文件 | 说明 |
 |---|---|---|---|
-| `ReportsRoot` | `"data/reports"` | — | 已生成报表归档目录（只追加，文件带 SHA256 校验）。库内保存相对本目录的路径；完整备份会按保留期打包尚未清理的归档，还原时按新目录重写路径并校验哈希，缺失或哈希不符会明确失败，不会把记录标成已清理，也不重签旧文件。 |
+| `ReportsRoot` | `"data/reports"` | — | 已生成报表归档目录（只追加，文件带 SHA256 校验）。 |
 | `ReportFontPath` | `（无）` | — | PDF 中文字体文件（.ttf/.otf/.ttc）；为空时依次尝试常见系统字体。 |
 | `ReportLocale` | `"zh-CN"` | — | 归档报表（班报/日报/月报）固定表头的语言；归档文件生成后不可修改，因此按系统配置而非查看人语言。 |
 | `ReportArchiveRetentionDays` | `（无）` | — | 归档文件保留天数；0 表示永久保留（默认）。到期只删文件，记录保留，并写审计。 |
@@ -193,6 +204,7 @@
 | `BackupKeepLatest` | `7` | ✓ | 完整备份保留：至少保留最近 N 份；超过 BackupRetentionDays 天且不在最近 N 份内的删除。异地目标按各自的 KeepLatest 保留。 |
 | `BackupDrillEnabled` | `true` | ✓ | 每次定时/手动“备份并演练”后，把备份还原到临时目录并做完整性与数量核对。 |
 | `BackupPassword` | `（无）` | — | **敏感** 备份包加密口令。配置后新备份写成 full_*.zip.enc（PBKDF2-SHA256 + AES-256-CBC + HMAC-SHA256）， 校验、演练与还原都要同一口令；留空则沿用明文 ZIP。包里含 Data Protection 密钥（可解出设备口令与 通知密钥）和全部用户口令哈希，凡需要把包拷贝出站点（发给厂商排查、进共享盘、随工单流转）都应设置。 旧明文包在设置口令后仍可校验与还原，不会被拒。 |
+| `BackupPasswordPrevious` | `（无）` | — | **敏感** / <summary>口令轮换后仅用于打开旧加密包，不作新备份。</summary> |
 
 ### Maintenance
 
@@ -268,17 +280,3 @@
 - `Scada:Telemetry`（`TelemetryOptions`）：OTLP 端点、采样比例、EF Core 埋点开关。
 - `Scada:BackupTargets`（数组）：异地备份目标，`Type` 为 `Directory` 或 `S3`。
 - `Scada:Ai`、`Mcp`、`External:*`、`Ha`、`Jwt`：各有独立段落与校验，见 `appsettings.json`。
-
-## 主备（`Ha`）与密钥环
-
-启用 `Ha` 后，两台节点必须共用同一套 ASP.NET Data Protection 密钥环（配置库同目录的 `keys/`，含 `report-signing.pfx`）以及 OPC PKI。日常配置快照只复制 `config.db`；密钥与 PKI 走已认证的节点共享密钥通道（`X-Scada-Ha-Key` / `/api/ha/peer/secrets`），落盘后限制目录权限。该通道只做认证，HTTP 明文仍可能泄露密钥，生产环境应使用 HTTPS。Windows 双机不再使用本机 DPAPI（否则接管后无法解密设备口令与通知凭据）；改为可用证书保护的密钥环（`keys/ha-dataprotection.pfx`，口令来自 `Ha:SharedKey`）或受 ACL 保护的目录。无 HA 的 Windows 单机仍使用 DPAPI。启动时会用已有密文或哨兵做一次解密自检，失败写入健康告警。不引入外部 KMS，也不提供在线改密接口。
-详见 [high-availability.md](high-availability.md)。
-
-
-## Optimistic concurrency for core configuration
-
-Devices, tags (`CalculationRevision`), alarm rules, acquisition channels, notification routes and calculation jobs carry a revision token.
-
-- Web, MCP, Excel import and project apply all go through the same accept-and-increment rule.
-- **Legacy clients that omit the revision** are still allowed to write; the server increments the token so the next updated client is protected.
-- If a revision is provided and does not match the current value, the write returns HTTP 409 with “配置已被其他用户修改，请重新打开并合并”. Reopen the record and merge manually; the server does not overwrite or auto-merge.

@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core.Configuration;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 
@@ -19,7 +20,10 @@ public sealed class ConfigRefreshService(
     IConfigSnapshot snapshot,
     AccessModelProvider access,
     IOptions<ScadaSettings> settings,
-    ILogger<ConfigRefreshService> logger) : BackgroundService
+    ILogger<ConfigRefreshService> logger,
+    ConfigChangeTracker? tracker = null,
+    IConfigChangeNotifier? changes = null,
+    IFactoryCalendar? calendar = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -60,6 +64,12 @@ public sealed class ConfigRefreshService(
                     await snapshot.ReloadAsync(stoppingToken);
                     // 授权模型跟着配置走：用户、角色、区域分配变了就一起失效。
                     access.Invalidate();
+                    if (tracker is not null)
+                    {
+                        var (changeset, calendarChanged) = await tracker.DiffAfterReloadAsync(snapshot, stoppingToken);
+                        if (calendarChanged) calendar?.Refresh();
+                        changes?.Publish(changeset);
+                    }
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

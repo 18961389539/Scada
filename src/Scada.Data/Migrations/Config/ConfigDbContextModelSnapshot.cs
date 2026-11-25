@@ -2579,6 +2579,33 @@ namespace Scada.Data.Migrations.Config
                     b.ToTable("SerialProfile", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.SiteOperationsSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ShiftTimeZone")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("SiteOperationsSettings", t =>
+                        {
+                            t.HasCheckConstraint("CK_SiteOperationsSettings_Singleton", "Id = 1");
+                        });
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.SparePart", b =>
                 {
                     b.Property<int>("Id")

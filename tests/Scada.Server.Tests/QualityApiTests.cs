@@ -152,6 +152,7 @@ public sealed class QualityApiTests : IClassFixture<AuthorizationTests.Site>
         }
         finally
         {
+            await admin.PutAsJsonAsync("/api/oee/shift-timezone", new { timeZone = original });
             settings.ShiftTimeZone = original;
         }
     }

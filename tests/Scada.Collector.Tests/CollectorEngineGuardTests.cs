@@ -159,6 +159,31 @@ public class CollectorEngineGuardTests
         }
     }
 
+    [Fact]
+    public async Task WriteAfterStartIsAllowedWhenOnlyReloadRequestedAndRejectedOnVersionMismatch()
+    {
+        using var rig = new Rig();
+        await rig.Engine.StartAsync(CancellationToken.None);
+        await WaitForReconcileAsync(rig);
+
+        var before = await rig.Engine.WriteAsync(1, PhysicalTag(), 1);
+        Assert.DoesNotContain("重新加载", before.Message);
+
+        rig.Engine.RequestReload();
+        var duringFlag = await rig.Engine.WriteAsync(1, PhysicalTag(), 1);
+        Assert.DoesNotContain("重新加载", duringFlag.Message);
+
+        rig.Config.Version = rig.Config.Version + 1;
+        var mismatch = await rig.Engine.WriteAsync(1, PhysicalTag(), 1);
+        Assert.False(mismatch.Success);
+        Assert.Contains("重新加载", mismatch.Message);
+        var textMismatch = await rig.Engine.WriteTextAsync(1, StringTag(), "x");
+        Assert.False(textMismatch.Success);
+        Assert.Contains("重新加载", textMismatch.Message);
+
+        await rig.Engine.StopAsync(CancellationToken.None);
+    }
+
     private static async Task WaitForReconcileAsync(Rig rig)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

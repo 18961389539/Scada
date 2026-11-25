@@ -286,7 +286,7 @@ public static class OeeEndpoints
             try
             {
                 var before = zones.Get();
-                var after = zones.Set(request.TimeZone);
+                var after = zones.Set(request.TimeZone, http.User.GetUserName());
                 await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
                 runtime.OperationLogs.Add(Audit.Change(http, "修改班次时区", "ShiftTimeZone", null, before.Configured, after.Configured));
                 await runtime.SaveChangesAsync(ct);

@@ -23,11 +23,11 @@ public partial class SqliteHistoryBackend : IHistoryBackend
     private const int AggregateRowsPerInsert = 100;
 
     private readonly IHistoryDbFactory _factory;
-    private readonly TimeZoneInfo _zone;
     // 三个字面量语句而不是拼接：PRAGMA 不支持参数化，传常量可以避免"用插值拼 SQL"的注入告警。
     private readonly string _synchronousPragma;
 
     private readonly ScadaSettings _settings;
+    private TimeZoneInfo Zone => HistoryCalendar.Resolve(_settings.ShiftTimeZone);
     private readonly ILogger _logger;
     private readonly INodeRole? _explicitRole;
     private readonly IServiceProvider? _services;
@@ -42,7 +42,6 @@ public partial class SqliteHistoryBackend : IHistoryBackend
     {
         _factory = factory;
         _settings = settings?.Value ?? factory.Settings ?? new ScadaSettings();
-        _zone = HistoryCalendar.Resolve(_settings.ShiftTimeZone);
         _logger = logger ?? NullLogger<SqliteHistoryBackend>.Instance;
         _explicitRole = role;
         _services = services;
@@ -101,7 +100,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
         // 逐月回退，直到所有测点都找到或达到回看上限（默认保留期之外的数据已不存在）。
         for (var months = 0; months < 24 && remaining.Count > 0 && cursor > 0; months++)
         {
-            foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(cursor, cursor, _zone))
+            foreach (var (year, month) in HistoryCalendar.MonthsOverlapping(cursor, cursor, Zone))
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!seen.Add((year, month)) || !File.Exists(_factory.GetRawPath(year, month))) continue;
@@ -476,9 +475,9 @@ public partial class SqliteHistoryBackend : IHistoryBackend
         return aligned.ToUnixTimeMilliseconds();
     }
 
-    private (int Year, int Month) MonthOf(long ts) => HistoryCalendar.WriteMonth(ts, _zone);
+    private (int Year, int Month) MonthOf(long ts) => HistoryCalendar.WriteMonth(ts, Zone);
 
-    private IEnumerable<(int Year, int Month)> MonthsBetween(long from, long to) => HistoryCalendar.MonthsOverlapping(from, to, _zone);
+    private IEnumerable<(int Year, int Month)> MonthsBetween(long from, long to) => HistoryCalendar.MonthsOverlapping(from, to, Zone);
 
     private static IEnumerable<int> YearsBetween(long from, long to)
     {

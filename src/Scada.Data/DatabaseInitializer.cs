@@ -40,6 +40,7 @@ public static partial class DatabaseInitializer
         await MigrateRuntimeAsync(ctx);
         await using var db = await ctx.ConfigFactory.CreateDbContextAsync(ctx.Ct);
         await MigrateConfigAsync(ctx, db);
+        await SeedFactoryCalendarAsync(ctx, db);
         await SeedAdminAsync(ctx, db);
         await SeedDemoAsync(ctx, db);
         await ReloadSnapshotAsync(ctx);
@@ -112,6 +113,21 @@ public static partial class DatabaseInitializer
                 pending.Count, elapsed, total);
     }
 
+    private static async Task SeedFactoryCalendarAsync(InitContext ctx, ConfigDbContext db)
+    {
+        if (await db.SiteOperationsSettings.AnyAsync(ctx.Ct)) return;
+        var seed = string.IsNullOrWhiteSpace(ctx.Settings.ShiftTimeZone) ? null : ctx.Settings.ShiftTimeZone.Trim();
+        db.SiteOperationsSettings.Add(new SiteOperationsSettings
+        {
+            Id = SiteOperationsSettings.SingletonId,
+            ShiftTimeZone = seed,
+            Revision = 1,
+            UpdatedTs = ScadaTime.NowMs(),
+            UpdatedBy = "system"
+        });
+        await db.SaveChangesAsync(ctx.Ct);
+    }
+
     private static async Task SeedAdminAsync(InitContext ctx, ConfigDbContext db)
     {
         if (await db.Users.AnyAsync(ctx.Ct)) return;
@@ -149,8 +165,14 @@ public static partial class DatabaseInitializer
         await transaction.CommitAsync(ctx.Ct);
     }
 
-    private static async Task ReloadSnapshotAsync(InitContext ctx) =>
-        await ctx.Services.GetRequiredService<IConfigSnapshot>().ReloadAsync(ctx.Ct);
+    private static async Task ReloadSnapshotAsync(InitContext ctx)
+    {
+        var snapshot = ctx.Services.GetRequiredService<IConfigSnapshot>();
+        await snapshot.ReloadAsync(ctx.Ct);
+        ctx.Services.GetService<IFactoryCalendar>()?.Refresh();
+        if (ctx.Services.GetService<ConfigChangeTracker>() is { } tracker)
+            await tracker.InitializeAsync(snapshot, ctx.Ct);
+    }
 
     private static async Task SeedDemoDataAsync(ConfigDbContext db, CancellationToken cancellationToken)
     {

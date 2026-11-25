@@ -1,4 +1,5 @@
 using Scada.Core.Interfaces;
+using Scada.Core.Configuration;
 using Scada.Data;
 
 namespace Scada.Server.Services;
@@ -9,13 +10,31 @@ public sealed class ConfigReloader
     private readonly ICollectorControl _collector;
     private readonly IRealtimeCache _cache;
     private readonly AccessModelProvider? _access;
+    private readonly INodeRole? _role;
+    private readonly IConfigChangeNotifier? _changes;
+    private readonly ConfigChangeTracker? _tracker;
+    private readonly IFactoryCalendar? _calendar;
+    private long _roleGeneration;
 
-    public ConfigReloader(IConfigSnapshot snapshot, ICollectorControl collector, IRealtimeCache cache, AccessModelProvider? access = null)
+    public ConfigReloader(
+        IConfigSnapshot snapshot,
+        ICollectorControl collector,
+        IRealtimeCache cache,
+        AccessModelProvider? access = null,
+        INodeRole? role = null,
+        IConfigChangeNotifier? changes = null,
+        ConfigChangeTracker? tracker = null,
+        IFactoryCalendar? calendar = null)
     {
         _snapshot = snapshot;
         _collector = collector;
         _cache = cache;
         _access = access;
+        _role = role;
+        _changes = changes;
+        _tracker = tracker;
+        _calendar = calendar;
+        _roleGeneration = role?.Generation ?? 0;
     }
 
     private long _reloads;
@@ -25,11 +44,25 @@ public sealed class ConfigReloader
     public async Task ReloadAsync(CancellationToken cancellationToken = default)
     {
         Interlocked.Increment(ref _reloads);
+        var previousCollection = _snapshot.CollectionVersion;
+        var previousRole = _roleGeneration;
+        await _snapshot.ReloadAsync(cancellationToken);
         // 设备/测点归属变化会影响区域授权判定，先让授权模型失效。
         _access?.Invalidate();
-        await _snapshot.ReloadAsync(cancellationToken);
         PruneRealtimeCache();
-        _collector.RequestReload();
+
+        var collectionChanged = _snapshot.CollectionVersion != previousCollection;
+        var roleChanged = _role is not null && _role.Generation != previousRole;
+        if (collectionChanged || roleChanged)
+            _collector.RequestReload();
+        _roleGeneration = _role?.Generation ?? previousRole;
+
+        if (_tracker is not null)
+        {
+            var (changes, calendarChanged) = await _tracker.DiffAfterReloadAsync(_snapshot, cancellationToken);
+            if (calendarChanged) _calendar?.Refresh();
+            _changes?.Publish(changes);
+        }
     }
 
     // 删除测点后缓存条目不会自己消失：留着会让 Snapshot() 与历史快照继续返回已删测点，

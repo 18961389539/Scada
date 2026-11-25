@@ -132,6 +132,10 @@ internal static class ScadaServerServices
         builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Reports.ReportScheduler>());
         builder.Services.AddSingleton<TagExcelService>();
         builder.Services.AddSingleton<AlarmRuleExcelService>();
+        builder.Services.AddSingleton<Scada.Engine.Calculations.FactoryCalendarService>();
+        builder.Services.AddSingleton<Scada.Core.Interfaces.IFactoryCalendar>(sp => sp.GetRequiredService<Scada.Engine.Calculations.FactoryCalendarService>());
+        builder.Services.AddSingleton<Scada.Engine.Calculations.FactoryCalendarBindings>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Engine.Calculations.FactoryCalendarBindings>());
         builder.Services.AddSingleton<ShiftTimeZoneService>();
         // 测点/设备写入的唯一落地点：REST 与 MCP 共用同一套校验顺序与落盘顺序。
         builder.Services.AddSingleton<TagCommandService>();

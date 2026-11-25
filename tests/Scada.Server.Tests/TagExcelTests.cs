@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Scada.Core.Configuration;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Data;
@@ -255,6 +256,29 @@ public class TagExcelTests
     }
 
     [Fact]
+    public async Task ApplyPreviewRejectsWhenRevisionChangedAfterPreview()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection);
+        var device = new Device { Name = "modbus", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var tag = new Tag { DeviceId = device.Id, Name = "flow", Area = TagArea.HoldingRegister, Address = 3, DataType = TagDataType.UInt16, CalculationRevision = 1 };
+        db.Tags.Add(tag); await db.SaveChangesAsync();
+        var service = new TagExcelService();
+        using var source = new MemoryStream(service.Export([device], [
+            new Tag { Id = tag.Id, DeviceId = device.Id, Name = "flow", Area = TagArea.HoldingRegister, Address = 5, DataType = TagDataType.UInt16, CalculationRevision = 1 }
+        ]));
+        var preview = await service.PreviewAsync(source, "tags.xlsx", owner: 7, factory, runtimeFactory, default);
+        Assert.True(preview.Updated >= 1);
+        tag.CalculationRevision = 2;
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<ConfigRevisionConflictException>(() =>
+            service.ApplyPreviewAsync(7, preview.Id, factory, runtimeFactory, 7, "engineer", default));
+        db.ChangeTracker.Clear();
+        Assert.Equal(3, (await db.Tags.SingleAsync(x => x.Id == tag.Id)).Address);
+    }
+
+    [Fact]
     public async Task ApplyPreviewRejectsWhenTagTableChangedAfterPreview()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
@@ -268,11 +292,12 @@ public class TagExcelTests
         var preview = await service.PreviewAsync(source, "tags.xlsx", owner: 7, factory, runtimeFactory, default);
         db.Tags.Add(new Tag { DeviceId = device.Id, Name = "temp", Area = TagArea.HoldingRegister, Address = 1, DataType = TagDataType.UInt16 });
         await db.SaveChangesAsync();
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            service.ApplyPreviewAsync(7, preview.Id, factory, runtimeFactory, 7, "engineer", default));
-        Assert.Contains("重新预览", ex.Message);
+        // 预览时没有已有测点令牌；新增无关测点不构成修订冲突，确认后仍应写入 flow。
+        var applied = await service.ApplyPreviewAsync(7, preview.Id, factory, runtimeFactory, 7, "engineer", default);
+        Assert.Equal(1, applied.Created);
         db.ChangeTracker.Clear();
-        Assert.DoesNotContain(await db.Tags.ToListAsync(), x => x.Name == "flow");
+        Assert.Contains(await db.Tags.ToListAsync(), x => x.Name == "flow");
+        Assert.Contains(await db.Tags.ToListAsync(), x => x.Name == "temp");
     }
 
     private static Tag Physical(int deviceId, string name, int address, int? scanRateMs) => new()
