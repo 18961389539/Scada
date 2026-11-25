@@ -131,4 +131,31 @@ public sealed class HmiLayoutTests : IClassFixture<HmiLayoutTests.LayoutSite>
         }
         finally { options.AllowControl = true; options.ControlRoles = []; }
     }
+
+    [Fact]
+    public async Task MobileControlPolicy_CoversLockoutsModesAbortAndAnnunciator()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var options = _site.Services.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Scada.Server.Auth.MobileOptions>>().CurrentValue;
+        async Task<HttpResponseMessage> Send(HttpMethod method, string url, object? body = null)
+        {
+            var request = new HttpRequestMessage(method, url);
+            if (body is not null) request.Content = JsonContent.Create(body);
+            request.Headers.Add("X-Scada-Client", "mobile");
+            return await admin.SendAsync(request);
+        }
+        try
+        {
+            options.AllowControl = false;
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Put, $"/api/control/modes/{_site.DeviceA}", new { mode = "Local", reason = "试验" })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/control/lockouts", new { deviceId = _site.DeviceA, kind = "NoOperate", reason = "试验" })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/control/runs/1/abort")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/recipes/downloads/1/abort")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/annunciators/1/silence")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/annunciators/1/clear-silence")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/annunciators/1/test")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await Send(HttpMethod.Post, "/api/annunciators/silence-visible")).StatusCode);
+        }
+        finally { options.AllowControl = true; }
+    }
 }

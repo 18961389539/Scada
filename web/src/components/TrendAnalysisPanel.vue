@@ -6,6 +6,7 @@
       <span class="spacer" />
       <el-tag v-if="rows.length" class="tag-quiet" :type="undefined" size="small">{{ $t('trendsView.coverageSummary', [coverageSummary]) }}</el-tag>
     </div>
+    <p v-if="scopeHint" class="tiny muted" data-test="trend-analysis-scope">{{ scopeHint }}</p>
 
     <el-alert v-if="!canAnalyze" :title="$t('trendsView.analysisLimit')" type="info" :closable="false" show-icon />
     <template v-else>
@@ -103,6 +104,7 @@ const props = defineProps<{
   error: string
   canAnalyze: boolean
   coverageSummary: string
+  scopeHint?: string
   qualities: TagQuality[]
   rows: TrendAnalysisRow[]
   displayFrom: number

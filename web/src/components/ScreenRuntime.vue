@@ -51,7 +51,7 @@
       <div v-for="item in sequenceWatches" :key="item.runId" class="runtime-sequence-run" :data-test="`runtime-sequence-run-${item.runId}`">
         <span>{{ item.text }}</span>
         <el-button size="small" link data-test="runtime-sequence-view" @click="viewSequenceRun(item.runId)">{{ $t('hmi.sequenceViewFlow') }}</el-button>
-        <el-button v-if="item.abortable" size="small" link type="danger" data-test="runtime-sequence-abort" @click="abortSequenceRun(item)">{{ $t('hmi.sequenceAbort') }}</el-button>
+        <el-button v-if="item.abortable && !mobileReadOnly" size="small" link type="danger" data-test="runtime-sequence-abort" @click="abortSequenceRun(item)">{{ $t('hmi.sequenceAbort') }}</el-button>
       </div>
     </div>
     <CommandReceipt v-if="receiptId" :id="receiptId" />
@@ -80,7 +80,7 @@
 import ControlConfirmDialog from './ControlConfirmDialog.vue'
 import { isMomentaryPressBlockedByConfirm } from '../screens/momentaryConfirm'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { attachPinch, controlBlockedOnMobile, isMobile, loadClientPolicy, mobileControl } from '../mobile'
+import { attachPinch, controlBlockedOnMobile, isMobile, isMobileClient, loadClientPolicy, mobileControl } from '../mobile'
 const confirmDialog = ref<InstanceType<typeof ControlConfirmDialog> | null>(null)
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -157,7 +157,7 @@ const zoom = computed(() => {
 })
 let resizeObserver: ResizeObserver | undefined, detachPinch: (() => void) | undefined, detachScroll: (() => void) | undefined
 const zoomOptions = computed(() => { const base = [.5, .75, 1, 1.25, 1.5]; const z = zoomChoice.value; return typeof z === 'number' && !base.includes(z) ? [...base, z].sort((a, b) => a - b) : base })
-const mobileReadOnly = computed(() => isMobile.value && !mobileControl.value && !isPreview.value && can(auth.user, 'Control'))
+const mobileReadOnly = computed(() => isMobileClient.value && !mobileControl.value && !isPreview.value && can(auth.user, 'Control'))
 if (isMobile.value && props.initialZoom !== 'fit' && !props.depth) zoomChoice.value = 'fit'
 const viewport = reactive({ x: 0, y: 0, width: 0, height: 0 })
 function updateViewport(el: HTMLDivElement): void {
@@ -326,7 +326,7 @@ async function resubscribe(): Promise<void> {
 function canCommandTag(tagId: number | null): boolean { return !replayMode.value && canControlBoundTag(tagId) }
 // 配方控件按模板区域及全部参数测点的控制权限预判；服务端在预检查与下发时再次完整校验。
 function canControlRecipeTemplate(templateId: number): boolean {
-  if (props.monitorMode || replayMode.value) return false
+  if (props.monitorMode || replayMode.value || controlBlockedOnMobile()) return false
   const template = recipeTemplates.value.find(item => item.id === templateId)
   if (!template || !can(auth.user, 'Control', template.areaId)) return false
   return template.parameters.every(parameter => canControlBoundTag(parameter.tagId))
@@ -357,6 +357,7 @@ function openRecipeDownload(_node: ScreenNode, recipeId: number): void {
   if (replayMode.value) { commandError.value = tr('screenReplay.readOnly'); return }
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
   const recipe = recipes.value.find(item => item.id === recipeId)
   if (!recipe) { recipeError.value = tr('hmi.recipeUnavailable'); return }
   if (!can(auth.user, 'Control', recipe.areaId)) { commandError.value = tr('hmi.recipeDenied'); return }
@@ -480,6 +481,7 @@ function viewSequenceRun(runId: number): void {
   void router.push({ path: '/control', query: { tab: 'sequences', run: String(runId) } })
 }
 async function abortSequenceRun(item: SequenceWatch): Promise<void> {
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
   try { await ElMessageBox.confirm(tr('controlView.k689787'), tr('controlView.kf11c45', [item.runId]), { type: 'warning' }) } catch { return }
   try {
     await controlApi.abort(item.runId)
@@ -657,6 +659,7 @@ async function silenceVisibleAnnunciators(node: ScreenNode): Promise<void> {
   if (blockStale()) return
   if (isPreview.value) { commandError.value = tr('screenRuntime.previewModeHint'); return }
   if (props.monitorMode) { commandError.value = tr('runtimeImprovements.monitorReadOnly'); return }
+  if (controlBlockedOnMobile()) { commandError.value = tr('screenRuntime.mobileControlBlocked'); return }
   if (await announceAckDenied()) return
   const minutes = node.silenceMinutes ?? 5
   try { await ElMessageBox.confirm(tr('hmi.silenceConfirm', [minutes]), tr('hmi.silence'), { type: 'warning', confirmButtonText: tr('hmi.confirm'), cancelButtonText: tr('hmi.cancel') }) }
@@ -836,7 +839,7 @@ watch(() => props.screenId, () => { popupVisible.value = false; void load() })
 usePolling(() => { if (replayMode.value) return; if (!connected.value || Date.now() - lastSnapshot >= 5000) return poll() }, 1000, { enabled: () => !props.suspended })
 
 onMounted(async () => {
-  if (isMobile.value) void loadClientPolicy()
+  if (isMobileClient.value) void loadClientPolicy()
   disposePublished = onHubEvent('screenPublished', onScreenPublished)
   await Promise.all([draftPreview.value ? library.ensure() : undefined, loadTags(), loadDevices()])
   if (disposed) return

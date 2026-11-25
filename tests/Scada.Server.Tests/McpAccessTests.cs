@@ -1,6 +1,9 @@
+using System.Net.Http.Json;
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Scada.Server.Mcp;
+
+using System.Text.Json;
 
 namespace Scada.Server.Tests;
 
@@ -102,5 +105,20 @@ public sealed class McpAccessTests : IClassFixture<McpAccessTests.RestrictedSite
             Assert.DoesNotContain("create_device", names);
             Assert.Empty(McpApiTests.WriteTools.Intersect(names));
         }
+    }
+
+    [Fact]
+    public async Task External_Status_Reports_Mcp_ReadOnly_View()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var status = await (await admin.GetAsync("/api/external/status")).Content.ReadFromJsonAsync<JsonElement>();
+        var mcp = status.GetProperty("mcp");
+        Assert.True(mcp.GetProperty("enabled").GetBoolean());
+        Assert.Equal("/api/mcp", mcp.GetProperty("path").GetString());
+        Assert.Equal("any", mcp.GetProperty("sourceRestriction").GetString());
+        Assert.False(mcp.GetProperty("allowControlWrites").GetBoolean());
+        Assert.False(mcp.GetProperty("allowConfigurationWrites").GetBoolean());
+        Assert.True(mcp.GetProperty("recent").GetArrayLength() >= 0);
+        Assert.True(mcp.TryGetProperty("lastActivityTs", out _));
     }
 }

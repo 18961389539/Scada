@@ -33,12 +33,32 @@ export type ExternalEndpointStatus = {
   warnings?: string[]
 }
 
+export type McpRecentCall = {
+  ts: number
+  action: string
+  targetType?: string
+  targetId?: string
+  result: string
+}
+
+export type McpStatus = {
+  enabled?: boolean
+  path?: string
+  sourceRestriction?: 'loopback' | 'any' | 'allowlist' | string
+  allowedCidrs?: string[]
+  allowControlWrites?: boolean
+  allowConfigurationWrites?: boolean
+  lastActivityTs?: number | null
+  recent?: McpRecentCall[]
+}
+
 export type ExternalStatus = {
   rest?: { enabled?: boolean; allowJwt?: boolean; cors?: string[]; defaultRateLimitPerMinute?: number }
   tcp?: ExternalEndpointStatus
   opcUa?: { enabled?: boolean; running?: boolean; endpoint?: string; endpointUrl?: string; allowWrite?: boolean }
   modbusSlave?: ExternalEndpointStatus
   iec104Server?: ExternalEndpointStatus
+  mcp?: McpStatus
 }
 
 export const externalApi = {

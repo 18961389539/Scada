@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { tr } from '../i18n'
+import { isMobileUserAgent } from '../clientKind'
 import { currentRedirectTarget } from '../nav/query'
 
 export interface SessionUpdate { token: string; expiresAt?: string; user?: unknown }
@@ -91,8 +92,8 @@ http.interceptors.request.use(async (config) => {
   // 界面语言：服务端据此翻译错误提示与报表表头。
   const locale = localStorage.getItem('scada_locale') || 'zh-CN'
   config.headers['X-Scada-Locale'] = locale
-  // 移动端按设备类型声明，不按窗口宽度：桌面缩窗不应被当成手机禁控，平板横屏也不该绕过限制。
-  if (/Android|iPhone|iPad|iPod|Mobile|HarmonyOS/i.test(navigator.userAgent)) config.headers['X-Scada-Client'] = 'mobile'
+  // 移动端按设备类型声明，不按窗口宽度：与 isMobileUserAgent / 服务端判定一致。
+  if (isMobileUserAgent()) config.headers['X-Scada-Client'] = 'mobile'
   return config
 })
 

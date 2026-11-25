@@ -801,7 +801,7 @@ export default {
     play: 'Play',
     pause: 'Pause',
     exit: 'Exit replay',
-    hint: 'Restores the whole runtime screen at a historical instant. Controls, alarm state and live refresh are unavailable during replay.',
+    hint: 'Uses the currently published screen and fills tag values at the chosen instant. It does not restore the screen version or alarms from that time. Controls and live refresh are unavailable during replay.',
     readOnly: 'Replay is read-only. The control command was not sent.',
     alarmHint: 'Historical replay does not restore alarm state. Controls are disabled.',
     time: 'Replay time',

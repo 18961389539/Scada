@@ -84,7 +84,7 @@
           <span class="spacer" />
           <span v-if="silenceUntil > now" class="banner-silence" data-test="console-silence-until">{{ $t('consoleUx.silenceUntil', [formatTime(silenceUntil)]) }}</span>
           <el-button v-if="fullscreen" size="small" link data-test="console-exit-fullscreen" @click="toggleFullscreen">{{ $t('consoleUx.exitFullscreen') }}</el-button>
-          <el-button v-if="!previewLayout" size="small" link data-test="console-silence" @click="silenceBanner">{{ $t('consoleUx.silence') }}</el-button>
+          <el-button v-if="!previewLayout" size="small" link :disabled="mobileBlocked" data-test="console-silence" @click="silenceBanner">{{ $t('consoleUx.silence') }}</el-button>
           <span data-test="alarm-banner-count">{{ $t('consoleView.kded3fc', [unackShown, activeShown]) }}</span>
           <span data-test="alarm-returned-count">{{ $t('layoutMonitor.returnedCount', [returnedShown]) }}</span>
           <span v-if="truncated" data-test="alarm-truncated">{{ $t('consoleView.truncated', [ALARM_LIMIT]) }}</span>
@@ -218,6 +218,7 @@ import { alarmMessage, canAckAlarmEvent, formatTime, levelLabel } from '../utils
 import type { AlarmEvent, AlarmSummary, AlarmTimeline, Area, Device } from '../types'
 import type { ScreenSummary } from '../screens/model'
 import { tr } from '../i18n'
+import { controlBlockedOnMobile, loadClientPolicy } from '../mobile'
 import { contentMonitor } from '../components/console/layoutGeometry'
 import { alarmMatchesScope, alarmScopeBound } from '../components/console/alarmScope'
 import { collectScreenTags } from '../screens/screenTags'
@@ -286,6 +287,7 @@ const activeScreenId = computed(() => regionScreens.value[activeRegionId.value] 
 const workstationKey = computed(() => { const binding = getLocalWorkstation(); return station.value ? `station-${station.value.id}` : binding.id ? `station-${binding.id}` : binding.name ? `legacy-${binding.name}` : 'unassigned' })
 const directoryKey = computed(() => `${auth.user?.id ?? auth.user?.userName ?? 'unknown'}:${workstationKey.value}:${layout.value?.id ?? ''}`)
 const monitorModeKey = computed(() => `scada-console-monitor-mode:${auth.user?.id ?? auth.user?.userName ?? 'unknown'}`)
+const mobileBlocked = computed(() => controlBlockedOnMobile())
 const monitorMode = ref(!!props.previewLayout || localStorage.getItem(monitorModeKey.value) === 'true')
 watch(monitorModeKey, key => { if (!props.previewLayout) monitorMode.value = localStorage.getItem(key) === 'true' })
 watch(monitorMode, value => { if (props.previewLayout) return; try { localStorage.setItem(monitorModeKey.value, String(value)) } catch { /* This preference remains available for the current window. */ } })
@@ -633,6 +635,7 @@ async function ackVisible(region: HmiRegion): Promise<void> {
   } finally { ackBusy.value = false }
 }
 async function silenceBanner(): Promise<void> {
+  if (controlBlockedOnMobile()) { silenceError.value = tr('screenRuntime.mobileControlBlocked'); return }
   silenceError.value = ''
   try { await ElMessageBox.confirm(tr('consoleUx.silenceConfirm', [5]), tr('consoleUx.silence'), { type: 'warning' }) }
   catch { return }
@@ -797,6 +800,7 @@ function onFullscreenChange(): void { fullscreen.value = document.fullscreenElem
 let unregisterShortcuts = () => {}
 let disposeCriticalRaise: (() => void) | undefined
 onMounted(async () => {
+  void loadClientPolicy()
   window.addEventListener('storage', syncPreferences)
   disposeCriticalRaise = onCriticalAlarmRaise(() => { focusAlarmSurface() })
   document.addEventListener('click', onMoreClick, true)

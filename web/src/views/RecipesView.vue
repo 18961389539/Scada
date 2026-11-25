@@ -6,6 +6,7 @@
     <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="recipes-areas-error" />
     <el-alert v-if="downloadsError" :title="downloadsError" type="error" :closable="false" show-icon data-test="recipe-downloads-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="recipes-action-error" />
+    <el-alert v-if="mobileBlocked" type="warning" :closable="false" show-icon :title="$t('screenRuntime.mobileControlBlocked')" data-test="mobile-control-blocked" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('recipesView.k85ad5d')" name="recipes">
         <div class="toolbar">
@@ -30,7 +31,7 @@
           </template></el-table-column>
           <el-table-column :label="$t('recipesView.k97bfba')" min-width="150" show-overflow-tooltip><template #default="{ row }"><div class="recipe-meta">{{ row.updatedBy }}</div><div class="recipe-meta muted">{{ formatTime(row.updatedTs) }}</div><div v-if="row.note" class="recipe-meta muted">{{ row.note }}</div></template></el-table-column>
           <el-table-column :label="$t('recipesView.kf3ea6d')" width="220"><template #default="{ row }"><div class="recipe-actions">
-            <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :loading="checking && downloadRecipe?.id === row.id" :disabled="submitting" :data-test="`recipe-download-${row.id}`" @click="prepareDownload(row)">{{ $t('recipesView.ka1468f') }}</el-button>
+            <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :loading="checking && downloadRecipe?.id === row.id" :disabled="mobileBlocked || submitting" :data-test="`recipe-download-${row.id}`" @click="prepareDownload(row)">{{ $t('recipesView.ka1468f') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editRecipe(row)">{{ $t('recipesView.ka7f814') }}</el-button>
             <el-dropdown trigger="click" :disabled="submitting">
               <el-button size="small" :disabled="submitting" :data-test="`recipe-more-${row.id}`">{{ $t('ux.tables.more') }}</el-button>
@@ -63,7 +64,7 @@
             <div v-for="r in row.results" :key="r.key" class="tiny"><el-tag size="small" :class="{ 'tag-quiet': listedType(paramType, r.status) == null }" :type="listedType(paramType, r.status)">{{ paramLabels[r.status] ?? r.status }}</el-tag> {{ r.name }}：{{ fmt(r.before) }} → <strong>{{ r.target }}</strong><span v-if="r.readBack != null">{{ $t('recipesView.k08b3a6', [r.readBack]) }}</span> <span class="muted">{{ r.status === 'done' ? '' : r.message }}</span></div>
           </template></el-table-column>
           <el-table-column :label="$t('recipesView.k28febb')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.requestedBy }}{{ row.approvedBy ? $t('recipesView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.createdTs) }}</span><div class="tiny" :class="row.status === 'PartiallyApplied' ? 'danger' : 'muted'">{{ row.message }}</div></template></el-table-column>
-          <el-table-column label="" width="80"><template #default="{ row }"><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" :data-test="`recipe-abort-${row.id}`" @click="abort(row)">{{ $t('recipesView.k67847e') }}</el-button></template></el-table-column>
+          <el-table-column label="" width="80"><template #default="{ row }"><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" :disabled="mobileBlocked" :data-test="`recipe-abort-${row.id}`" @click="abort(row)">{{ $t('recipesView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
         <el-button v-if="downloadsMore" :loading="downloadsLoadingOlder" data-test="downloads-older" @click="loadOlderDownloads">{{ $t('designReview2.loadOlder') }}</el-button>
         </div>
@@ -138,7 +139,7 @@
       <p v-if="!checkResult.ok" class="danger tiny">{{ $t('recipesView.kf75999') }}</p>
       <p v-for="reason in checkResult.refusals" :key="reason" class="danger tiny">{{ reason }}</p>
     </template>
-    <template #footer><el-button :disabled="submitting" @click="downloadDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="submitting" :disabled="!canConfirmDownload" data-test="recipe-download-confirm" @click="confirmDownload()">{{ checkResult?.dualApproval ? $t('recipesView.k61385c') : $t('recipesView.k00bb4a') }}</el-button></template>
+    <template #footer><el-button :disabled="submitting" @click="downloadDialog = false">{{ $t('recipesView.k4d0b46') }}</el-button><el-button type="primary" :loading="submitting" :disabled="mobileBlocked || !canConfirmDownload" data-test="recipe-download-confirm" @click="confirmDownload()">{{ checkResult?.dualApproval ? $t('recipesView.k61385c') : $t('recipesView.k00bb4a') }}</el-button></template>
   </el-dialog>
 
   <el-dialog v-model="versionsDialog" :title="$t('recipesView.kedfc09', [versionsRecipe?.name ?? ''])" width="760px">
@@ -184,6 +185,7 @@ import { usePolling } from '../composables/usePolling'
 import { useEditDialog } from '../composables/useEditDialog'
 import { readLastNumber, rememberNumber } from '../composables/lastChoice'
 import { tr } from '../i18n'
+import { controlBlockedOnMobile, loadClientPolicy } from '../mobile'
 
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean }
 const tab = ref('recipes')
@@ -197,6 +199,7 @@ const templateError = ref(''), recipeError = ref(''), downloadError = ref(''), v
 const auth = useAuthStore()
 const canConfigureArea = (areaId?: number | null) => can(auth.user, 'Configure', areaId)
 const canControlArea = (areaId?: number | null) => can(auth.user, 'Control', areaId)
+const mobileBlocked = computed(() => controlBlockedOnMobile())
 const tags = ref<NamedTag[]>([]), devices = ref<{ id: number; name: string; areaId?: number | null }[]>([]), areas = ref<{ id: number; name: string }[]>([])
 const configurableAreas = computed(() => areas.value.filter(a => canConfigureArea(a.id)))
 const configurableTemplates = computed(() => templates.value.filter(t => canConfigureArea(t.areaId)))
@@ -444,6 +447,7 @@ const canConfirmDownload = computed(() => downloadDialog.value && !checking.valu
 watch(downloadDialog, visible => { if (!visible) { checkSeq++; checking.value = false; checkResult.value = null } }, { flush: 'sync' })
 function closeDownload(done: () => void): void { if (!submitting.value) done() }
 async function prepareDownload(r: Recipe): Promise<void> {
+  if (controlBlockedOnMobile()) { actionError.value = tr('screenRuntime.mobileControlBlocked'); return }
   if (disposed || submitting.value || (checking.value && downloadRecipe.value?.id === r.id && downloadRecipe.value.version === r.version)) return
   const target: Recipe = JSON.parse(JSON.stringify(r)), seq = ++checkSeq
   downloadRecipe.value = target; checkResult.value = null; downloadError.value = ''; checking.value = true; downloadDialog.value = true
@@ -459,6 +463,7 @@ async function prepareDownload(r: Recipe): Promise<void> {
   }
 }
 async function confirmDownload(): Promise<void> {
+  if (controlBlockedOnMobile()) { downloadError.value = tr('screenRuntime.mobileControlBlocked'); return }
   if (disposed || !canConfirmDownload.value || !downloadRecipe.value || !checkResult.value) return
   const { id } = downloadRecipe.value, version = checkResult.value.version
   submitting.value = true; downloadError.value = ''
@@ -485,6 +490,7 @@ async function confirmDownload(): Promise<void> {
   } finally { if (!disposed) submitting.value = false }
 }
 async function abort(d: RecipeDownload): Promise<void> {
+  if (controlBlockedOnMobile()) { actionError.value = tr('screenRuntime.mobileControlBlocked'); return }
   try { await ElMessageBox.confirm(tr('recipesView.abortConfirm', [d.recipeName, d.id]), tr('recipesView.k67847e'), { type: 'warning', confirmButtonText: tr('recipesView.k67847e') }) } catch { return }
   if (await guard(() => recipeApi.abort(d.id), tr('recipesView.k50cf66'), actionError)) await refresh()
 }
@@ -511,6 +517,7 @@ function scrollToDownloads(): void {
 }
 watch(() => route.hash, scrollToDownloads)
 onMounted(async () => {
+  void loadClientPolicy()
   await refresh()
   scrollToDownloads()
 })

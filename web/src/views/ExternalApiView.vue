@@ -52,6 +52,45 @@
           </span>
         </div>
       </div>
+      <div v-if="status?.mcp" class="mcp-status" data-test="ext-mcp-status">
+        <div class="mcp-head">
+          <span class="status-label">{{ $t('externalApiView.mcp') }}</span>
+          <span class="status-value">
+            <span class="status-dot" :class="status.mcp.enabled ? 'is-on' : 'is-off'" />
+            {{ status.mcp.enabled ? $t('externalApiView.on') : $t('externalApiView.off') }}
+          </span>
+          <span class="mono muted">{{ status.mcp.path || '/api/mcp' }}</span>
+        </div>
+        <p class="tiny muted">{{ $t('externalApiView.mcpReadOnlyHint') }}</p>
+        <dl class="mcp-grid">
+          <div>
+            <dt>{{ $t('externalApiView.mcpSource') }}</dt>
+            <dd data-test="ext-mcp-source">{{ mcpSourceLabel }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('externalApiView.mcpControlWrites') }}</dt>
+            <dd data-test="ext-mcp-control">{{ status.mcp.allowControlWrites ? $t('externalApiView.mcpWritesOn') : $t('externalApiView.mcpWritesOff') }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('externalApiView.mcpConfigWrites') }}</dt>
+            <dd data-test="ext-mcp-config">{{ status.mcp.allowConfigurationWrites ? $t('externalApiView.mcpWritesOn') : $t('externalApiView.mcpWritesOff') }}</dd>
+          </div>
+          <div>
+            <dt>{{ $t('externalApiView.mcpLastActivity') }}</dt>
+            <dd data-test="ext-mcp-last">{{ status.mcp.lastActivityTs ? formatTime(status.mcp.lastActivityTs) : $t('externalApiView.mcpNoActivity') }}</dd>
+          </div>
+        </dl>
+        <div v-if="status.mcp.recent?.length" class="mcp-recent" data-test="ext-mcp-recent">
+          <div class="tiny muted">{{ $t('externalApiView.mcpRecent') }}</div>
+          <ul>
+            <li v-for="(item, index) in status.mcp.recent" :key="index">
+              <span class="mono">{{ formatTime(item.ts) }}</span>
+              {{ item.action }}
+              <span class="muted">{{ item.result }}</span>
+            </li>
+          </ul>
+        </div>
+      </div>
       <el-alert type="info" :closable="false" show-icon data-test="ext-opcua-alarm-rebuild"
         :title="$t('externalApiView.opcUaAlarmRebuildHint')" style="margin-bottom: 12px" />
       <el-alert
@@ -173,6 +212,14 @@ const opcUaLabel = computed(() => {
 })
 
 const mappingWarnings = computed(() => status.value?.modbusSlave?.warnings?.filter(Boolean) ?? [])
+const mcpSourceLabel = computed(() => {
+  const mcp = status.value?.mcp
+  if (!mcp) return ''
+  if (mcp.sourceRestriction === 'loopback') return tr('externalApiView.mcpSourceLoopback')
+  if (mcp.sourceRestriction === 'any') return tr('externalApiView.mcpSourceAny')
+  const list = (mcp.allowedCidrs ?? []).join(', ')
+  return list ? tr('externalApiView.mcpSourceAllowlist', [list]) : tr('externalApiView.mcpSourceLoopback')
+})
 
 function slaveDot(item?: ExternalEndpointStatus): string {
   if (!item?.enabled) return 'is-off'
@@ -324,5 +371,19 @@ onMounted(load)
 }
 .muted { color: var(--scada-text-muted); }
 .warn-list { margin: 6px 0 0; padding-left: 1.1em; }
+.mcp-status {
+  margin-bottom: var(--scada-space-4);
+  padding: 10px var(--scada-space-4);
+  border: 1px solid var(--scada-border);
+  border-radius: var(--scada-radius-sm);
+  background: var(--scada-panel-muted);
+}
+.mcp-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.mcp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px 16px; margin: 8px 0 0; }
+.mcp-grid dt { font-size: var(--scada-fs-caption); color: var(--scada-text-muted); }
+.mcp-grid dd { margin: 2px 0 0; }
+.mcp-recent { margin-top: 10px; }
+.mcp-recent ul { margin: 4px 0 0; padding-left: 1.1em; }
+.mcp-recent li { display: flex; gap: 8px; flex-wrap: wrap; font-size: var(--scada-fs-caption); }
 
 </style>

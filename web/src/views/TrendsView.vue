@@ -46,7 +46,7 @@
       </div>
       <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
       <p v-if="resolution || totalPoints" class="trend-meta tiny muted" role="status">
-        <span v-if="resolution">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</span>
+        <span v-if="resolution" data-test="trend-source">{{ $t('trendsView.kebf028', [resolutionLabel]) }}</span>
         <span v-if="totalPoints" data-test="point-count">{{ $t('trendsView.pointCount', [totalPoints, series.length]) }}</span>
       </p>
       <p v-if="displayedQuery" id="trend-result-context" class="trend-result-context muted tiny" role="status" data-test="trend-result-context">{{ $t('trendsView.resultContext', [formatTime(displayedQuery.from), formatTime(displayedQuery.to), displayedQuery.tagIds.length]) }}</p>
@@ -100,6 +100,7 @@
         :error="analysisError"
         :can-analyze="canAnalyze"
         :coverage-summary="coverageSummary"
+        :scope-hint="analysisScopeHint"
         :qualities="qualities"
         :rows="analysisRows"
         :display-from="displayFrom"
@@ -222,6 +223,10 @@ const chartModel = computed(() => {
 const hasBooleanTraces = computed(() => chartTraces.value.some(trace => trace.isBoolean && trace.points.length))
 const hasAggregatedBooleans = computed(() => hasBooleanTraces.value && resolution.value !== 'Raw')
 // 页面级错误/提示统一走状态条：单条时原位显示，多条时折叠，避免把图表推到首屏之外。
+const selectedTagRows = computed(() => selectedTags.value
+  .map(id => tags.value.find(tag => tag.id === id))
+  .filter((tag): tag is Tag => !!tag))
+const unarchivedSelected = computed(() => selectedTagRows.value.filter(tag => tag.archiveMode === 'None'))
 const pageIssues = computed<PageIssue[]>(() => {
   const issues: PageIssue[] = []
   if (catalogError.value) issues.push({ id: 'catalog', test: 'trend-catalog-error', level: 'error', message: catalogError.value, action: tr('common.retry'), actionTest: 'trend-catalog-retry' })
@@ -230,6 +235,7 @@ const pageIssues = computed<PageIssue[]>(() => {
   if (pendingConditions.value) issues.push({ id: 'pending', test: 'trend-pending-conditions', level: 'warning', message: tr('trendsView.conditionsChanged') })
   if (hasAggregatedBooleans.value) issues.push({ id: 'boolean', test: 'trend-boolean-aggregate', level: 'warning', message: tr('trendsView.aggregateBooleanHint') })
   else if (hasBooleanTraces.value && downsampled.value) issues.push({ id: 'sampled', test: 'trend-boolean-sampled', level: 'warning', message: tr('trendsView.sampledBooleanHint') })
+  if (unarchivedSelected.value.length) issues.push({ id: 'unarchived', test: 'trend-unarchived', level: 'warning', message: tr('trendsView.unarchivedSelected', [unarchivedSelected.value.map(tag => tag.name).join('、')]) })
   if (alarmMarksCapped.value) issues.push({ id: 'marks-capped', test: 'trend-alarm-marks-capped', level: 'warning', message: tr('trendsUx.alarmMarksCapped', [alarmMarkLimit]) })
   if (alarmMarksError.value) issues.push({ id: 'marks-error', test: 'trend-alarm-marks-error', level: 'warning', message: alarmMarksError.value })
   return issues
@@ -265,7 +271,7 @@ const tagOptions = computed(() => {
   if (!tags.value.length) return []
   const toOption = (tag: Tag) => ({
     value: tag.id,
-    label: `${deviceNames.value.get(tag.deviceId ?? -1) ?? (tag.deviceId ? `#${tag.deviceId}` : tr('trendsView.k4e0387'))} / ${tag.name}`
+    label: `${deviceNames.value.get(tag.deviceId ?? -1) ?? (tag.deviceId ? `#${tag.deviceId}` : tr('trendsView.k4e0387'))} / ${tag.name}${tag.archiveMode === 'None' ? tr('trendsView.unarchivedSuffix') : ''}`
   })
   const groups: { label: string; options: { value: number; label: string }[] }[] = []
   if (recentTags.value.length) groups.push({ label: tr('trendsUx.recentTags'), options: recentTags.value.map(toOption) })
@@ -288,10 +294,12 @@ const presets = [
 ]
 
 const resolutionLabel = computed(() => {
-  if (resolution.value === 'Raw') return tr('trendsView.k77a6fb')
-  if (resolution.value === 'FiveMinute') return tr('trendsView.kfbf1e3')
-  if (resolution.value === 'Hour') return tr('trendsView.kc9d329')
-  return resolution.value
+  const base = resolution.value === 'Raw' ? tr('trendsView.k77a6fb')
+    : resolution.value === 'FiveMinute' ? tr('trendsView.kfbf1e3')
+      : resolution.value === 'Hour' ? tr('trendsView.kc9d329')
+        : resolution.value
+  if (resolution.value === 'Raw' && downsampled.value) return tr('trendsView.rawDownsampled')
+  return downsampled.value ? tr('trendsView.downsampledSource', [base]) : base
 })
 
 const totalPoints = computed(() => series.value.reduce((sum, item) => sum + item.points.length, 0))
@@ -306,9 +314,20 @@ const emptyHint = computed(() => {
   if (queryError.value && totalPoints.value === 0) return queryError.value
   if (contextError.value && selectedTags.value.length === 0) return contextError.value
   if (selectedTags.value.length === 0) return tr('trendsView.k24f3cf')
-  if (queried.value && totalPoints.value === 0) return tr('trendsView.emptyNoData')
+  if (queried.value && totalPoints.value === 0) {
+    if (unarchivedSelected.value.length === selectedTagRows.value.length && selectedTagRows.value.length)
+      return tr('trendsView.emptyUnarchived')
+    if (unarchivedSelected.value.length)
+      return tr('trendsView.emptyMixedUnarchived', [unarchivedSelected.value.map(tag => tag.name).join('、')])
+    return tr('trendsView.emptyNoData')
+  }
   if (!queried.value) return tr('trendsView.readyToQuery')
   return ''
+})
+const analysisScopeHint = computed(() => {
+  if (!canAnalyze.value || !resolution.value) return ''
+  if (resolution.value === 'Raw' && !downsampled.value) return ''
+  return tr('trendsView.analysisScopeHint', [resolutionLabel.value])
 })
 
 interface AnalysisRow {
@@ -727,10 +746,19 @@ function exportData(): void {
       rows.push([formatTime(point.ts), tagName(item.tagId), point.value, point.quality])
     }
   }
+  const exactRaw = resolution.value === 'Raw' && !downsampled.value
+  const range = displayedQuery.value
+    ? `${formatTime(displayedQuery.value.from)} ~ ${formatTime(displayedQuery.value.to)}`
+    : ''
+  const preamble = [
+    tr('trendsView.exportSource', [resolutionLabel.value, range, String(series.value.length)]),
+    exactRaw ? tr('trendsView.exportExactRaw') : tr('trendsView.exportNotExactRaw')
+  ]
   exportCsv(
     `trend_${new Date().toISOString().slice(0, 10)}.csv`,
     [tr('trendsView.k89b4aa'), tr('trendsView.k8cff1c'), tr('trendsView.k521523'), tr('trendsView.k82f516')],
-    rows
+    rows,
+    preamble
   )
 }
 

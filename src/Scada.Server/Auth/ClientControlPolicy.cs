@@ -26,13 +26,21 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
     public static bool IsMobile(HttpContext http) =>
         string.Equals(http.Request.Headers[ClientHeader].FirstOrDefault(), "mobile", StringComparison.OrdinalIgnoreCase);
 
-    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/approve|control/sequences/\d+/start|recipes/\d+/download|traceability/jobs/\d+/scan)$", RegexOptions.IgnoreCase)]
+    // 会改变现场的写路径：写值、画面动作、审批、顺控启停、配方下发/中止、挂牌、就地/远方、光字牌试验/消音、追溯扫码。
+    // 就地/远方是 PUT /api/control/modes/{id}，因此策略同时匹配 POST 与 PUT。
+    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/approve|control/sequences/\d+/start|control/runs/\d+/abort|control/lockouts|control/lockouts/\d+/remove|control/modes/\d+|recipes/\d+/download|recipes/downloads/\d+/abort|annunciators/\d+/(silence|clear-silence|test)|annunciators/silence-visible|traceability/jobs/\d+/scan)$", RegexOptions.IgnoreCase)]
     public static partial Regex ControlPath();
+
+    public static bool IsControlRequest(HttpContext http)
+    {
+        var method = http.Request.Method;
+        if (!HttpMethods.IsPost(method) && !HttpMethods.IsPut(method)) return false;
+        return ControlPath().IsMatch(http.Request.Path.Value ?? "");
+    }
 
     public async Task InvokeAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, Microsoft.Extensions.Options.IOptionsMonitor<MobileOptions> mobile)
     {
-        if (HttpMethods.IsPost(http.Request.Method) && ControlPath().IsMatch(http.Request.Path.Value ?? "")
-            && IsMobile(http) && !mobile.CurrentValue.Permits(http.User))
+        if (IsControlRequest(http) && IsMobile(http) && !mobile.CurrentValue.Permits(http.User))
         {
             var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", "移动端不允许下发控制（配置 Mobile:AllowControl / Mobile:ControlRoles）");
             await result.ExecuteAsync(http);
@@ -40,8 +48,7 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
         }
         var station = http.Request.Headers[WorkstationHeader].FirstOrDefault();
         var hasStationId = http.Request.Headers.ContainsKey(WorkstationIdHeader);
-        if (HttpMethods.IsPost(http.Request.Method) && ControlPath().IsMatch(http.Request.Path.Value ?? "")
-            && (hasStationId || !string.IsNullOrWhiteSpace(station)))
+        if (IsControlRequest(http) && (hasStationId || !string.IsNullOrWhiteSpace(station)))
         {
             await using var db = await factory.CreateDbContextAsync(http.RequestAborted);
             var rawId = http.Request.Headers[WorkstationIdHeader].ToString();

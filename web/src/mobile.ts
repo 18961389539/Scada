@@ -1,7 +1,14 @@
 import { ref } from 'vue'
 import { http } from './api/http'
+import { isMobileUserAgent } from './clientKind'
 
-// 移动端判定：窄屏或粗指针（触屏）。请求头 X-Scada-Client: mobile 由 http 拦截器附带，服务端据此执行移动端控制策略。
+export { isMobileUserAgent, MOBILE_UA } from './clientKind'
+
+// 与服务端 X-Scada-Client / http.ts 使用同一套 UA 判定：桌面缩窄窗口不能当成手机禁控，
+// 大屏平板（iPad 等）也不能因为窗口够宽而绕过限制。布局适配仍用下方的 isMobile（视口）。
+export const isMobileClient = ref(isMobileUserAgent())
+
+// 布局用的窄屏/触屏判定，不参与控制策略。
 const query = typeof window !== 'undefined' && window.matchMedia ? window.matchMedia('(max-width: 768px), (pointer: coarse) and (max-width: 1024px)') : null
 export const isMobile = ref(query?.matches ?? false)
 query?.addEventListener('change', (e) => { isMobile.value = e.matches })
@@ -13,7 +20,7 @@ export function loadClientPolicy(force = false): Promise<void> {
   if (!loaded || force) loaded = http.get<{ mobileControl: boolean }>('/client-policy').then(r => { mobileControl.value = r.data.mobileControl }).catch(() => { mobileControl.value = false; loaded = null })
   return loaded
 }
-export const controlBlockedOnMobile = () => isMobile.value && !mobileControl.value
+export const controlBlockedOnMobile = () => isMobileClient.value && !mobileControl.value
 
 // 双指缩放：返回解绑函数。仅处理两指手势，单指仍交给浏览器原生滚动。
 export function attachPinch(el: HTMLElement, get: () => number, set: (zoom: number) => void, min = .2, max = 4): () => void {

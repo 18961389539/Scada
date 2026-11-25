@@ -10,6 +10,7 @@
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="annunciator-load-error" />
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="ann-catalog-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="ann-action-error" />
+      <el-alert v-if="mobileBlocked" type="warning" :closable="false" show-icon :title="$t('screenRuntime.mobileControlBlocked')" data-test="mobile-control-blocked" />
       <div data-test="ann-table">
       <el-table :data="panels" size="small" v-loading="loading" :empty-text="loadError && !panels.length ? loadError : $t('annunciatorView.empty')">
         <el-table-column prop="name" :label="$t('annunciatorView.name')" min-width="140" show-overflow-tooltip />
@@ -38,9 +39,9 @@
         </el-table-column>
         <el-table-column :label="$t('annunciatorView.actions')" width="260" fixed="right">
           <template #default="{ row }">
-            <el-button v-if="canAckPanel(row.areaId)" link :type="statusOf(row.id)?.horn || statusOf(row.id)?.drivingLevel ? 'warning' : undefined" data-test="ann-silence" @click="silence(row)">{{ $t('annunciatorView.silence') }}</el-button>
-            <el-button v-if="canAckPanel(row.areaId) && statusOf(row.id)?.silenced" link @click="clearSilence(row)">{{ $t('annunciatorView.clearSilence') }}</el-button>
-            <el-button v-if="canAckPanel(row.areaId)" link :loading="testing === row.id" data-test="ann-test" @click="test(row)">{{ $t('annunciatorView.test') }}</el-button>
+            <el-button v-if="canAckPanel(row.areaId)" link :disabled="mobileBlocked" :type="statusOf(row.id)?.horn || statusOf(row.id)?.drivingLevel ? 'warning' : undefined" data-test="ann-silence" @click="silence(row)">{{ $t('annunciatorView.silence') }}</el-button>
+            <el-button v-if="canAckPanel(row.areaId) && statusOf(row.id)?.silenced" link :disabled="mobileBlocked" @click="clearSilence(row)">{{ $t('annunciatorView.clearSilence') }}</el-button>
+            <el-button v-if="canAckPanel(row.areaId)" link :disabled="mobileBlocked" :loading="testing === row.id" data-test="ann-test" @click="test(row)">{{ $t('annunciatorView.test') }}</el-button>
             <el-button v-if="canConfigurePanel(row.areaId)" link type="primary" data-test="ann-edit" @click="openEdit(row)">{{ $t('annunciatorView.edit') }}</el-button>
             <el-popconfirm v-if="canConfigurePanel(row.areaId)" :title="$t('annunciatorView.confirmDelete')" @confirm="remove(row.id)">
               <template #reference><el-button link type="danger">{{ $t('annunciatorView.delete') }}</el-button></template>
@@ -101,6 +102,7 @@ import { useAuthStore } from '../stores/auth'
 import { canActOnDevice, levelLabel, levelType } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { currentLocale, tr } from '../i18n'
+import { controlBlockedOnMobile, loadClientPolicy } from '../mobile'
 import type { Area, Device, Tag } from '../types'
 
 const auth = useAuthStore()
@@ -112,6 +114,7 @@ const isGlobalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const canConfigurePanel = (areaId?: number | null): boolean =>
   areaId == null ? isGlobalConfigure.value : can(auth.user, 'Configure', areaId)
 const canAckPanel = (areaId?: number | null): boolean =>
+const mobileBlocked = computed(() => controlBlockedOnMobile())
   areaId == null ? canAck.value : can(auth.user, 'AckAlarm', areaId)
 const loading = ref(false), saving = ref(false), dialog = ref(false), loadError = ref(''), catalogError = ref(''), actionError = ref(''), saveError = ref('')
 const panels = ref<AnnunciatorPanel[]>([])
@@ -209,11 +212,13 @@ async function remove(id: number) {
   catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.deleteFail')) }
 }
 async function silence(row: AnnunciatorPanel) {
+  if (controlBlockedOnMobile()) { actionError.value = tr('screenRuntime.mobileControlBlocked'); return }
   actionError.value = ''
   try { await annunciatorApi.silence(row.id); actionError.value = ''; await load(); ElMessage.success(tr('annunciatorView.silencedOk')) }
   catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.silenceFail')) }
 }
 async function clearSilence(row: AnnunciatorPanel) {
+  if (controlBlockedOnMobile()) { actionError.value = tr('screenRuntime.mobileControlBlocked'); return }
   actionError.value = ''
   try { await annunciatorApi.clearSilence(row.id); actionError.value = ''; await load() }
   catch (e) { actionError.value = errorMessage(e, tr('annunciatorView.silenceFail')) }
@@ -221,6 +226,7 @@ async function clearSilence(row: AnnunciatorPanel) {
 // 试验会真实写现场输出（服务端约 1.5 秒后交回正常联动），必须先说清楚影响
 const testing = ref<number | null>(null)
 async function test(row: AnnunciatorPanel) {
+  if (controlBlockedOnMobile()) { actionError.value = tr('screenRuntime.mobileControlBlocked'); return }
   if (testing.value !== null) return
   const outputs = (row.outputs ?? []).filter(o => o.enabled)
   const message = outputs.length
@@ -238,6 +244,7 @@ function formatClock(ts: number): string {
 }
 
 onMounted(async () => {
+  void loadClientPolicy()
   try {
     const [areaList, tags, deviceList] = await Promise.all([areaApi.list(), tagApi.list(), deviceApi.list()])
     areas.value = areaList

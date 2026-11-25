@@ -14,6 +14,7 @@ using Scada.Engine.Control;
 using Scada.Engine.History;
 using Scada.Server.Auth;
 using Scada.Server.Endpoints;
+using Scada.Server.Mcp;
 
 namespace Scada.Server.External.Rest;
 
@@ -122,7 +123,7 @@ public static class ExternalRestEndpoints
     {
         var group = app.MapGroup("/api/external").RequireAuthorization(AccessPolicies.GlobalSystem).AddEndpointFilter<AuditFailuresFilter>();
 
-        group.MapGet("/status", (HttpContext http, IOptionsMonitor<ExternalIntegrationOptions> opt) =>
+        group.MapGet("/status", async (HttpContext http, IOptionsMonitor<ExternalIntegrationOptions> opt, IOptions<McpOptions> mcpOptions, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var v = opt.CurrentValue;
             var tcpHost = http.RequestServices.GetService<Tcp.ExternalTcpHost>();
@@ -150,7 +151,8 @@ public static class ExternalRestEndpoints
                     running = iec104Host?.IsRunning ?? false,
                     connections = iec104Host?.ConnectionCount ?? 0,
                     mappedPoints = iec104Host?.MappedPoints ?? 0
-                }
+                },
+                mcp = await McpStatusAsync(mcpOptions.Value, runtimeFactory, ct)
             });
         });
 
@@ -246,6 +248,30 @@ public static class ExternalRestEndpoints
     public sealed record ExternalCommandRequest(int TagId, double Value = 0, Guid? RequestId = null, bool Confirmed = false, string? Text = null);
     public sealed record CreateKeyRequest(string Name, string[] Scopes, int[]? AreaIds, int? RateLimitPerMinute, string? Notes);
     public sealed record EnableKeyRequest(bool Enabled);
+
+    private static async Task<object> McpStatusAsync(McpOptions options, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct)
+    {
+        var anySource = options.AllowedCidrs.Any(rule => string.Equals(rule, McpSourceGuard.AnySource, StringComparison.Ordinal));
+        var sourceRestriction = anySource ? "any" : options.AllowedCidrs.Length == 0 ? "loopback" : "allowlist";
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var recent = await runtime.OperationLogs.AsNoTracking()
+            .Where(x => x.UserName == "mcp:lan")
+            .OrderByDescending(x => x.Ts)
+            .Take(8)
+            .Select(x => new { x.Ts, x.Action, x.TargetType, x.TargetId, x.Result })
+            .ToListAsync(ct);
+        return new
+        {
+            options.Enabled,
+            path = McpEndpoints.Path,
+            sourceRestriction,
+            allowedCidrs = options.AllowedCidrs,
+            options.AllowControlWrites,
+            options.AllowConfigurationWrites,
+            lastActivityTs = recent.Count > 0 ? recent[0].Ts : (long?)null,
+            recent
+        };
+    }
 }
 
 

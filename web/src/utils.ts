@@ -181,12 +181,17 @@ export function downloadBlob(blob: Blob, fileName: string): void {
   URL.revokeObjectURL(url)
 }
 
-export function exportCsv(fileName: string, headers: string[], rows: (string | number)[][]): void {
+export function exportCsv(fileName: string, headers: string[], rows: (string | number)[][], preamble?: string[]): void {
   const escape = (cell: string | number) => {
     const text = String(cell ?? '')
     return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text
   }
-  const lines = [headers.map(escape).join(',')]
+  const lines: string[] = []
+  for (const note of preamble ?? []) {
+    const text = String(note ?? '').replace(/\r?\n/g, ' ')
+    lines.push(text.startsWith('#') ? text : `# ${text}`)
+  }
+  lines.push(headers.map(escape).join(','))
   for (const row of rows) {
     lines.push(row.map(escape).join(','))
   }

@@ -1,6 +1,6 @@
 <template>
   <div class="region-screen" :data-test="`region-${region.id}`">
-    <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" :monitor-mode="monitorMode" toolbar-mode="embedded" navigate-mode="emit" compact fill initial-zoom="fit" @screen-loaded="screenLoaded" @navigate="navigate" @popup="id => $emit('popup', id)">
+    <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" :monitor-mode="monitorMode" :replay-at="replayAt" toolbar-mode="embedded" navigate-mode="emit" compact fill initial-zoom="fit" @screen-loaded="screenLoaded" @navigate="navigate" @popup="id => $emit('popup', id)">
       <template #toolbar-start>
         <div class="region-nav">
           <el-button-group size="small">
@@ -11,6 +11,9 @@
           <strong class="region-title" :title="regionLabel" data-test="region-current-screen">{{ regionLabel }}</strong>
           <el-button size="small" link :data-test="`region-focus-${region.id}`" @click="$emit('focus')">{{ focused ? $t('consoleUx.focusExit') : $t('consoleUx.focusRegion') }}</el-button>
           <WorkbenchTooltip :content="$t('workbenchTips.detach')"><el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button></WorkbenchTooltip>
+          <div class="region-replay" data-test="console-replay">
+            <ScreenReplayControls v-model="replayAt" size="small" />
+          </div>
         </div>
       </template>
     </ScreenRuntime>
@@ -23,6 +26,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight, House } from '@element-plus/icons-vue'
 import ScreenRuntime from '../ScreenRuntime.vue'
+import ScreenReplayControls from '../ScreenReplayControls.vue'
 import type { HmiRegion } from '../../api/hmiLayouts'
 const props = withDefaults(defineProps<{ region: HmiRegion; screenName: (id: number) => string; monitorMode?: boolean; focused?: boolean; layoutId?: number | null; monitorIndex?: number }>(), { monitorMode: false, focused: false, layoutId: null, monitorIndex: 0 })
 const route = useRoute(), router = useRouter()
@@ -42,6 +46,7 @@ function writeHistory(stack: number[], index: number): void {
 const stored = readHistory()
 const stack = ref<number[]>(stored?.stack ?? [props.region.screenId!]), index = ref(stored ? Math.max(0, Math.min(stored.stack.length - 1, stored.index)) : 0)
 const current = computed(() => stack.value[index.value]!)
+const replayAt = ref<number | null>(null)
 const loadedScreen = ref<{ id: number; name: string } | null>(null)
 const currentName = computed(() => loadedScreen.value?.id === current.value ? loadedScreen.value.name : props.screenName(current.value))
 const regionLabel = computed(() => props.region.title ? `${props.region.title} · ${currentName.value}` : currentName.value)
@@ -71,6 +76,7 @@ defineExpose({ navigate, current, history, restore })
 .region-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .region-nav .el-button-group, .region-nav > .el-button { flex-shrink: 0; }
 .region-nav > .el-button { color: #dce6f0; }
+.region-replay { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
 .region-screen :deep(.runtime) { flex: 1; min-height: 0; }
 .region-screen :deep(.runtime-toolbar.embedded) { align-items: center; gap: 8px; margin: 0; padding: 2px 4px; background: #1b2838; color: #cfd8e3; }
 .region-screen :deep(.runtime-stage) { margin: 0 4px 4px; }

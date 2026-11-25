@@ -16,6 +16,7 @@
       </div>
     </el-alert>
     <PageStatusBar :issues="pageIssues" @action="onStatusAction" />
+    <el-alert v-if="mobileBlocked" type="warning" :closable="false" show-icon :title="$t('screenRuntime.mobileControlBlocked')" data-test="mobile-control-blocked" style="margin-bottom: 8px" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('controlView.k4bcbaa', [pending.length])" name="requests">
         <p v-if="orderedRequests.length" class="tiny muted control-kbd-hint" data-test="control-kbd-hint">{{ $t('controlUx.kbdRequests') }}</p>
@@ -38,8 +39,8 @@
           <el-table-column :label="$t('controlView.k0a2c91')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.request.decidedBy ? `${row.request.decidedBy}：` : '' }}{{ row.request.resultMessage ?? row.request.comment ?? '' }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="190"><template #default="{ row }">
             <template v-if="requestStatus(row.request) === 'Pending'">
-              <el-button v-if="!row.mine" size="small" type="primary" :loading="deciding.has(row.request.id)" :data-test="`approve-${row.request.id}`" @click="decide(row, true)">{{ $t('controlView.kea39c9') }}</el-button>
-              <el-button size="small" :disabled="deciding.has(row.request.id)" :data-test="`reject-${row.request.id}`" @click="decide(row, false)">{{ row.mine ? $t('controlView.kf16418') : $t('controlView.k21ec78') }}</el-button>
+              <el-button v-if="!row.mine" size="small" type="primary" :disabled="mobileBlocked" :loading="deciding.has(row.request.id)" :data-test="`approve-${row.request.id}`" @click="decide(row, true)">{{ $t('controlView.kea39c9') }}</el-button>
+              <el-button size="small" :disabled="mobileBlocked || deciding.has(row.request.id)" :data-test="`reject-${row.request.id}`" @click="decide(row, false)">{{ row.mine ? $t('controlView.kf16418') : $t('controlView.k21ec78') }}</el-button>
             </template>
           </template></el-table-column>
         </el-table>
@@ -53,7 +54,7 @@
           </el-select>
           <el-select v-model="lockForm.kind" style="width: 120px"><el-option value="NoOperate" :label="$t('controlView.k7966a0')" /><el-option value="Maintenance" :label="$t('controlView.k3799ee')" /></el-select>
           <el-input v-model="lockForm.reason" :placeholder="$t('controlView.k3cfd71')" style="width: 240px" maxlength="200" data-test="lock-reason" />
-          <el-button type="danger" :disabled="!lockForm.target || !lockForm.reason.trim() || actionBusy.has('lock:place')" :loading="actionBusy.has('lock:place')" data-test="lock-place" @click="placeLock()">{{ $t('controlView.k8d2356') }}</el-button>
+          <el-button type="danger" :disabled="mobileBlocked || !lockForm.target || !lockForm.reason.trim() || actionBusy.has('lock:place')" :loading="actionBusy.has('lock:place')" data-test="lock-place" @click="placeLock()">{{ $t('controlView.k8d2356') }}</el-button>
           <span class="spacer" /><el-checkbox v-model="showRemoved" @change="loadLockouts()">{{ $t('controlView.k634f10') }}</el-checkbox>
         </div>
         <p v-if="lockouts.length" class="tiny muted control-kbd-hint">{{ $t('controlUx.kbdLockouts') }}</p>
@@ -64,7 +65,7 @@
           <el-table-column :label="$t('controlView.k8d2356')" min-width="160" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.placedBy }} · {{ formatTime(row.placedTs) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.k0e3083')" min-width="160"><template #default="{ row }">
             <span v-if="row.removedTs" class="tiny">{{ row.removedBy }} · {{ formatTime(row.removedTs) }} · {{ row.removeReason }}</span>
-            <el-button v-else-if="canRemoveLock(row)" size="small" :loading="actionBusy.has('lock:' + row.id)" :data-test="`unlock-${row.id}`" @click="removeLock(row)">{{ $t('controlView.k0e3083') }}</el-button>
+            <el-button v-else-if="canRemoveLock(row)" size="small" :disabled="mobileBlocked" :loading="actionBusy.has('lock:' + row.id)" :data-test="`unlock-${row.id}`" @click="removeLock(row)">{{ $t('controlView.k0e3083') }}</el-button>
           </template></el-table-column>
         </el-table>
         <el-button v-if="lockoutsMore" :loading="lockoutsLoadingOlder" data-test="lockouts-older" @click="loadOlderLockouts">{{ $t('designReview2.loadOlder') }}</el-button>
@@ -77,7 +78,7 @@
           <el-table-column :label="$t('controlView.k0e9ffe')" width="120" show-overflow-tooltip><template #default="{ row }"><el-tag size="small" :class="{ 'tag-quiet': modesReady && modeOf(row.id)?.mode !== 'Local' }" :type="!modesReady ? 'info' : modeOf(row.id)?.mode === 'Local' ? 'warning' : undefined" :data-test="`mode-state-${row.id}`">{{ !modesReady ? $t('operationsReview.modeUnknown') : modeOf(row.id)?.mode === 'Local' ? $t('controlView.kee521f') : $t('controlView.k801947') }}</el-tag></template></el-table-column>
           <el-table-column :label="$t('controlView.k0ca7ec')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span v-if="modeOf(row.id)" class="tiny">{{ modeOf(row.id)!.changedBy }} · {{ formatTime(modeOf(row.id)!.changedTs) }} · {{ modeOf(row.id)!.reason }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="140"><template #default="{ row }">
-            <el-button v-if="canControlDevice(row.id)" size="small" :disabled="!modesReady" :loading="changingModes.has(row.id)" :data-test="`mode-${row.id}`" @click="toggleMode(row.id)">{{ !modesReady ? $t('operationsReview.modeUnknown') : $t('controlView.kb3190e', [modeOf(row.id)?.mode === 'Local' ? $t('controlView.k801947') : $t('controlView.kee521f')]) }}</el-button>
+            <el-button v-if="canControlDevice(row.id)" size="small" :disabled="mobileBlocked || !modesReady" :loading="changingModes.has(row.id)" :data-test="`mode-${row.id}`" @click="toggleMode(row.id)">{{ !modesReady ? $t('operationsReview.modeUnknown') : $t('controlView.kb3190e', [modeOf(row.id)?.mode === 'Local' ? $t('controlView.k801947') : $t('controlView.kee521f')]) }}</el-button>
           </template></el-table-column>
         </el-table>
         <p class="tiny muted">{{ $t('controlView.k4ac15d') }}</p>
@@ -90,7 +91,7 @@
           <el-table-column :label="$t('controlView.kd13bfa')" min-width="260" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ stepsSummary(row.steps) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kb38c92')" width="80" show-overflow-tooltip><template #default="{ row }">{{ row.dualApproval ? $t('controlView.k1b5fdf') : '-' }}</template></el-table-column>
           <el-table-column :label="$t('controlView.kf3ea6d')" width="230"><template #default="{ row }">
-            <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :loading="actionBusy.has('start:' + row.id)" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">{{ $t('controlView.k28febb') }}</el-button>
+            <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :disabled="mobileBlocked" :loading="actionBusy.has('start:' + row.id)" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">{{ $t('controlView.k28febb') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editSequence(row)">{{ $t('controlView.ka7f814') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" type="danger" @click="removeSequence(row)">{{ $t('controlView.k3755f5') }}</el-button>
           </template></el-table-column>
@@ -104,7 +105,7 @@
             <div v-for="s in row.steps" :key="s.index" class="tiny"><el-tag size="small" :class="{ 'tag-quiet': listedType(stepType, s.status) == null }" :type="listedType(stepType, s.status)">{{ stepLabels[s.status] ?? s.status }}</el-tag> {{ s.stepId ?? s.index }}. {{ s.name }}<span v-if="(s.executions ?? 0) > 1" class="muted">{{ $t('controlView.k61803b', [s.executions]) }}</span> <span class="muted">{{ s.message }}</span></div>
           </template></el-table-column>
           <el-table-column :label="$t('controlView.k28febb')" min-width="170" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ row.startedBy }}{{ row.approvedBy ? $t('controlView.kabef81', [row.approvedBy]) : '' }} · {{ formatTime(row.startedTs) }}</span><div class="tiny muted">{{ row.message }}</div></template></el-table-column>
-          <el-table-column label="" width="190"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="(row.status === 'Failed' || row.status === 'Aborted') && sequences.some(s => s.id === row.sequenceId) && canControlArea(row.areaId)" size="small" link type="primary" :data-test="`run-rerun-${row.id}`" @click="rerunRun(row)">{{ $t('controlUx.rerun') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
+          <el-table-column label="" width="190"><template #default="{ row }"><el-button size="small" link :data-test="`run-flow-${row.id}`" @click="openRunFlow(row)">{{ $t('controlView.k3bffba') }}</el-button><el-button v-if="(row.status === 'Failed' || row.status === 'Aborted') && sequences.some(s => s.id === row.sequenceId) && canControlArea(row.areaId)" size="small" link type="primary" :disabled="mobileBlocked" :data-test="`run-rerun-${row.id}`" @click="rerunRun(row)">{{ $t('controlUx.rerun') }}</el-button><el-button v-if="row.status === 'Running' && canControlArea(row.areaId)" size="small" type="danger" :disabled="mobileBlocked" @click="abort(row)">{{ $t('controlView.k67847e') }}</el-button></template></el-table-column>
         </el-table>
         <el-button v-if="runsMore" :loading="runsLoadingOlder" data-test="runs-older" @click="loadOlderRuns">{{ $t('designReview2.loadOlder') }}</el-button>
       </el-tab-pane>
@@ -148,7 +149,7 @@
     <p v-else class="muted">{{ $t('controlView.kf65452') }}</p>
     <template #footer>
       <el-button @click="runFlowVisible = false">{{ $t('controlUx.close') }}</el-button>
-      <el-button v-if="runFlowFailure && runFlowSequence && canControlArea(runFlow!.areaId)" type="primary" data-test="run-rerun" @click="rerunRun(runFlow!)">{{ $t('controlUx.rerun') }}</el-button>
+      <el-button v-if="runFlowFailure && runFlowSequence && canControlArea(runFlow!.areaId)" type="primary" :disabled="mobileBlocked" data-test="run-rerun" @click="rerunRun(runFlow!)">{{ $t('controlUx.rerun') }}</el-button>
     </template>
   </el-dialog>
   </div>
@@ -165,6 +166,7 @@ import { isPendingControlRequest, usePendingApprovals } from '../composables/pen
 import { commandErrorMessage, continueFrom, errorMessage } from '../api/http'
 import type { RecipeDownload } from '../api/recipes'
 import { formatTime } from '../utils'
+import { controlBlockedOnMobile, loadClientPolicy } from '../mobile'
 import { can } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import SequenceFlow from '../components/sequence/SequenceFlow.vue'
@@ -181,6 +183,7 @@ interface NamedTag { id: number; name: string; deviceId: number | null; writable
 const auth = useAuthStore()
 const canConfigureArea = (areaId?: number | null) => can(auth.user, 'Configure', areaId)
 const canControlArea = (areaId?: number | null) => can(auth.user, 'Control', areaId)
+const mobileBlocked = computed(() => controlBlockedOnMobile())
 function deviceArea(deviceId?: number | null): number | null | undefined {
   return devices.value.find(x => x.id === deviceId)?.areaId
 }
@@ -367,7 +370,14 @@ async function refresh(): Promise<void> {
   }
 }
 
+function rejectMobileControl(): boolean {
+  if (!controlBlockedOnMobile()) return false
+  actionError.value = tr('screenRuntime.mobileControlBlocked')
+  return true
+}
+
 async function decide(row: ControlRequestRow, approve: boolean): Promise<void> {
+  if (rejectMobileControl()) return
   const r = row.request
   if (disposed || deciding.has(r.id) || !requestIsCurrent(r.id) || (approve && row.mine)) return
   deciding.add(r.id)
@@ -398,6 +408,7 @@ const lockForm = reactive({ target: '', kind: 'NoOperate', reason: '' })
 // 现场动作在确认框与请求在途期间都要锁住入口，否则同一挂牌/摘牌/顺控会被重复下发。
 const actionBusy = reactive(new Set<string>())
 async function placeLock(): Promise<void> {
+  if (rejectMobileControl()) return
   const key = 'lock:place'
   if (actionBusy.has(key)) return
   actionBusy.add(key)
@@ -409,6 +420,7 @@ async function placeLock(): Promise<void> {
   } finally { actionBusy.delete(key) }
 }
 async function removeLock(row: ControlLockout): Promise<void> {
+  if (rejectMobileControl()) return
   const key = `lock:${row.id}`
   if (actionBusy.has(key)) return
   actionBusy.add(key)
@@ -420,6 +432,7 @@ async function removeLock(row: ControlLockout): Promise<void> {
   } finally { actionBusy.delete(key) }
 }
 async function toggleMode(deviceId: number): Promise<void> {
+  if (rejectMobileControl()) return
   if (!modesReady.value || changingModes.has(deviceId) || disposed) return
   changingModes.add(deviceId)
   const next = modeOf(deviceId)?.mode === 'Local' ? 'Remote' : 'Local'
@@ -500,6 +513,7 @@ function fitRunFlow(): void {
 }
 // 失败后重跑：直接复用「执行」的确认流程，确认框里列出的是当前定义，不是当时那一版
 function rerunRun(row: ControlRun): void {
+  if (rejectMobileControl()) return
   const sequence = sequences.value.find(s => s.id === row.sequenceId)
   if (sequence) void startSequence(sequence)
 }
@@ -520,6 +534,7 @@ function describeStep(s: ControlStep): string {
 }
 function stepsSummary(steps: ControlStep[]): string { return steps.map(s => `${s.id}.${s.name}${s.type && s.type !== 'write' ? `[${stepTypeLabels[s.type] ?? s.type}]` : ''}`).join(' → ') }
 async function startSequence(row: ControlSequence): Promise<void> {
+  if (rejectMobileControl()) return
   const key = `start:${row.id}`
   if (actionBusy.has(key)) return
   actionBusy.add(key)
@@ -546,6 +561,7 @@ async function loadOlderRuns(): Promise<void> {
   finally { runsLoadingOlder.value = false }
 }
 async function abort(row: ControlRun): Promise<void> {
+  if (rejectMobileControl()) return
   try { await ElMessageBox.confirm(tr('controlView.k689787'), tr('controlView.kf11c45', [row.id]), { type: 'warning' }) } catch { return }
   await guardCommand(() => controlApi.abort(row.id), tr('controlView.k50cf66'), actionError); await refresh()
 }
@@ -647,6 +663,8 @@ function onControlKeyboard(event: KeyboardEvent): void {
 }
 let disposeShortcuts: (() => void) | undefined
 onMounted(async () => {
+  void loadClientPolicy()
+
   disposeShortcuts = registerShortcuts({
     id: 'control',
     titleKey: 'shortcuts.control',
