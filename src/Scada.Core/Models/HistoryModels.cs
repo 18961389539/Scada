@@ -3,9 +3,9 @@ using Scada.Core.Enums;
 namespace Scada.Core.Models;
 
 // 字符串测点的历史点只带 Text，Value 保持 0；数值点 Text 为 null。
-public sealed record HistoryValue(int TagId, long Ts, double Value, TagQuality Quality, string? Text = null);
+public sealed record HistoryValue(int TagId, long Ts, double Value, TagQuality Quality, string? Text = null, bool Simulated = false);
 
-public sealed record HistoryPoint(long Ts, double Value, TagQuality Quality, string? Text = null);
+public sealed record HistoryPoint(long Ts, double Value, TagQuality Quality, string? Text = null, bool Simulated = false);
 
 public sealed class HistorySeries
 {

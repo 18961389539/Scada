@@ -34,7 +34,8 @@ public sealed record ControlSubmissionResult(bool Success, string Message, doubl
 
 // 控制前检查结果（供界面确认框展示，也是下发前的强制检查）。
 public sealed record ControlCheck(int TagId, string TagName, double? Current, IReadOnlyList<string> Refusals, bool RequireConfirm, bool DualApproval,
-    double? LimitMin, double? LimitMax, double? MaxStep, string? Feedback, DeviceControlMode Mode, IReadOnlyList<string> Lockouts);
+    double? LimitMin, double? LimitMax, double? MaxStep, string? Feedback, DeviceControlMode Mode, IReadOnlyList<string> Lockouts,
+    TagQuality? CurrentQuality = null, string? QualityReason = null);
 
 // 现场控制闭环：检查（就地/远程、挂牌、限幅、变化率、许可互锁）→ 确认 → 双人复核 → 下发及同点回读 → 独立反馈等待 → 审计。
 // 操作员接口、运行画面、顺控和计算脚本的写入都走这里。
@@ -166,11 +167,14 @@ public sealed class ControlCommandService
         var refusals = new List<string>();
         if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
         var mode = DeviceControlMode.Remote; var lockoutTexts = new List<string>();
-        var current = _cache.Get(tag.Id) is { Quality: TagQuality.Good } v ? v.Value : (double?)null;
+        var cached = _cache.Get(tag.Id);
+        var current = cached is { Quality: TagQuality.Good } v ? v.Value : (double?)null;
+        var (currentQuality, qualityReason) = DescribeQuality(cached);
         if (tag.Kind != TagKind.Physical) refusals.Add("计算测点只读，不能下发现场控制");
         else if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled) refusals.Add("设备不存在或未启用");
         else
         {
+            if (QualityRefusal(cached) is string qualityRefusal) refusals.Add(qualityRefusal);
             if (!tag.Writable) refusals.Add("测点不可写");
             mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
             if (mode == DeviceControlMode.Local) refusals.Add($"设备 {device.Name} 处于就地控制，中心不能下发");
@@ -197,7 +201,7 @@ public sealed class ControlCommandService
                 refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
         }
         return new ControlCheck(tag.Id, tag.Name, current, refusals, point?.RequireConfirm ?? _confirmByDefault, point?.DualApproval ?? false,
-            point?.LimitMin, point?.LimitMax, point?.MaxStep, point?.FeedbackExpression, mode, lockoutTexts);
+            point?.LimitMin, point?.LimitMax, point?.MaxStep, point?.FeedbackExpression, mode, lockoutTexts, currentQuality, qualityReason);
     }
 
     public async Task<ControlCheck?> CheckAndGrantAsync(int tagId, double value, ControlActor actor, CancellationToken ct)
@@ -217,11 +221,14 @@ public sealed class ControlCommandService
         var lockoutTexts = new List<string>();
         if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
         var mode = DeviceControlMode.Remote;
+        var cached = _cache.Get(tag.Id);
+        var (currentQuality, qualityReason) = DescribeQuality(cached);
         if (tag.DataType != TagDataType.String) refusals.Add("测点不是字符串类型");
         if (tag.Kind != TagKind.Physical) refusals.Add("计算测点只读，不能下发现场控制");
         else if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled) refusals.Add("设备不存在或未启用");
         else
         {
+            if (QualityRefusal(cached) is string qualityRefusal) refusals.Add(qualityRefusal);
             if (!tag.Writable) refusals.Add("测点不可写");
             mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
             if (mode == DeviceControlMode.Local) refusals.Add($"设备 {device.Name} 处于就地控制，中心不能下发");
@@ -243,7 +250,28 @@ public sealed class ControlCommandService
         if (point is not null && !string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression) is var (ok, why) && !ok)
             refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
         return new ControlCheck(tag.Id, tag.Name, null, refusals, point?.RequireConfirm ?? _confirmByDefault, false,
-            null, null, null, point?.FeedbackExpression, mode, lockoutTexts);
+            null, null, null, point?.FeedbackExpression, mode, lockoutTexts, currentQuality, qualityReason);
+    }
+
+    internal static (TagQuality? Quality, string? Reason) DescribeQuality(TagValue? cached)
+    {
+        if (cached is null) return (null, "尚无采样值");
+        if (cached.Quality == TagQuality.Good) return (TagQuality.Good, null);
+        var detail = string.IsNullOrWhiteSpace(cached.Error) ? null : cached.Error.Trim();
+        var reason = cached.Quality switch
+        {
+            TagQuality.CommFailure => detail is null ? "通讯中断" : $"通讯中断（{detail}）",
+            TagQuality.Uncertain => detail is null ? "质量不确定" : $"质量不确定（{detail}）",
+            _ => detail is null ? "质量无效" : $"质量无效（{detail}）"
+        };
+        return (cached.Quality, reason);
+    }
+
+    internal static string? QualityRefusal(TagValue? cached)
+    {
+        if (cached is null || cached.Quality == TagQuality.Good) return null;
+        var (_, reason) = DescribeQuality(cached);
+        return $"测点{reason}，不能下发";
     }
 
     public async Task<ControlCheck?> CheckTextAndGrantAsync(int tagId, string text, ControlActor actor, CancellationToken ct)

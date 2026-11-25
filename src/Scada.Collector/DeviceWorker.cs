@@ -78,6 +78,8 @@ internal sealed class DeviceWorker
     private long _lastSummaryMs;
     private string? _summaryText;
     private string? _lastError;
+    private bool _suppressOfflineAlarm;
+    private string? _stopReason;
     private long _lastPollTs;
     private double _lastCycleMs;
 
@@ -111,6 +113,15 @@ internal sealed class DeviceWorker
     {
         if (Interlocked.Exchange(ref _reconnectRequested, 1) == 0) _diagnostics.ReconnectRequested();
         _wake.Writer.TryWrite(true);
+    }
+
+    /// <summary>
+    /// 角色降级或接管后重启采集时调用：测点仍标成通讯中断或“本机已停采”，但不拉起设备离线报警。
+    /// </summary>
+    public void SuppressOfflineAlarmOnStop(string reason = "本机已停采")
+    {
+        _suppressOfflineAlarm = true;
+        _stopReason = reason;
     }
 
     /// <summary>
@@ -174,7 +185,7 @@ internal sealed class DeviceWorker
                 backoffMs = Backoff.Next(backoffMs, 1000, 60_000);
             }
         }
-        await MarkStoppedAsync("采集已停止");
+        await MarkStoppedAsync(_stopReason ?? "采集已停止");
         _diagnostics.Stopped();
     }
 
@@ -349,7 +360,7 @@ internal sealed class DeviceWorker
                         var textQuality = raw.Quality == TagQuality.Good && raw.Text is null ? TagQuality.Bad : raw.Quality;
                         var text = textQuality == TagQuality.Good ? raw.Text : previous?.Text;
                         if (textQuality != TagQuality.Good) badPoints++;
-                        updates.Add(new TagValue(tag.Id, 0, textQuality, ts, raw.SourceTs, raw.Error, tag.CalculationRevision, text));
+                        updates.Add(new TagValue(tag.Id, 0, textQuality, ts, raw.SourceTs, raw.Error, tag.CalculationRevision, text, _device.SimulationEnabled));
                         continue;
                     }
 
@@ -360,7 +371,7 @@ internal sealed class DeviceWorker
                     var pointError = raw.Error;
                     if (!double.IsFinite(value)) { value = _cache.Get(tag.Id)?.Value ?? 0; quality = TagQuality.Bad; pointError = "工程量换算结果不是有限数值"; }
                     if (quality != TagQuality.Good) badPoints++;
-                    var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, pointError, tag.CalculationRevision);
+                    var tagValue = new TagValue(tag.Id, value, quality, ts, raw.SourceTs, pointError, tag.CalculationRevision, Simulated: _device.SimulationEnabled);
                     updates.Add(tagValue);
                 }
                 if (!await TryAppendJournalAsync(updates, cancellationToken))
@@ -395,11 +406,8 @@ internal sealed class DeviceWorker
                 _lastPollTs = ts;
                 _lastCycleMs = Stopwatch.GetElapsedTime(cycleStart).TotalMilliseconds;
 
-                if (_offlineAlarmId is int alarmId)
-                {
-                    await _alarmSink.RecoverDeviceOfflineAsync(alarmId, ts, cancellationToken);
-                    _offlineAlarmId = null;
-                }
+                await _alarmSink.RecoverOpenDeviceOfflineAsync(_device.Id, ts, cancellationToken);
+                _offlineAlarmId = null;
 
                 ReportStatus();
                 _diagnostics.Polled(readDurationMs, _lastError);
@@ -614,9 +622,9 @@ internal sealed class DeviceWorker
                 {
                     if (!map.TryGetValue(tag.Id, out var value)) throw new IOException($"设备未返回测点 #{tag.Id}");
                     if (tag.DataType == TagDataType.String)
-                        return new TagValue(tag.Id, 0, value.Quality, now, value.SourceTs, value.Error, tag.CalculationRevision, value.Text);
+                        return new TagValue(tag.Id, 0, value.Quality, now, value.SourceTs, value.Error, tag.CalculationRevision, value.Text, _device.SimulationEnabled);
                     var engineering = tag.DataType == TagDataType.Bool ? value.Value : value.Value * tag.Scale + tag.Offset;
-                    return new TagValue(tag.Id, engineering, double.IsFinite(engineering) ? value.Quality : TagQuality.Bad, now, value.SourceTs, value.Error, tag.CalculationRevision);
+                    return new TagValue(tag.Id, engineering, double.IsFinite(engineering) ? value.Quality : TagQuality.Bad, now, value.SourceTs, value.Error, tag.CalculationRevision, Simulated: _device.SimulationEnabled);
                 }).ToArray();
                 read.Completion.TrySetResult(values);
             }
@@ -675,7 +683,7 @@ internal sealed class DeviceWorker
         foreach (var tag in _tags)
         {
             var previous = _cache.Get(tag.Id);
-            var bad = new TagValue(tag.Id, previous?.Value ?? 0, TagQuality.CommFailure, ts, previous?.SourceTs, error, tag.CalculationRevision, previous?.Text);
+            var bad = new TagValue(tag.Id, previous?.Value ?? 0, TagQuality.CommFailure, ts, previous?.SourceTs, error, tag.CalculationRevision, previous?.Text, _device.SimulationEnabled);
             _cache.Set(bad);
             _diagnostics.Point(bad, null);
             if (!_lastPublished.TryGetValue(tag.Id, out var published) || published.Quality != TagQuality.CommFailure)
@@ -702,7 +710,7 @@ internal sealed class DeviceWorker
             await TryAppendJournalAsync(updates, cancellationToken);
         }
 
-        if (_offlineAlarmId is null)
+        if (!_suppressOfflineAlarm && _offlineAlarmId is null)
         {
             _offlineAlarmId = await _alarmSink.RaiseDeviceOfflineAsync(
                 _device,

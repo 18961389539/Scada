@@ -299,14 +299,17 @@ public static class ControlEndpoints
             await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         });
-        group.MapPost("/sequences/{id:int}/check-start", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, BatchConfirmationStore confirmations, CancellationToken ct) =>
+        group.MapPost("/sequences/{id:int}/check-start", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, BatchConfirmationStore confirmations, ControlWorkflowService workflow, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var sequence = await db.ControlSequences.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (sequence is null) return Results.NotFound();
             if (await CanRunAsync(http, sequence) is string denied) return await Audit.ForbidAsync(http, $"检查顺控 {sequence.Name}", denied, "ControlSequence", id);
+            var preflight = await workflow.CheckStartAsync(sequence, Actor(http), ct);
+            if (!preflight.Ok)
+                return Results.Ok(new { ok = false, refusals = preflight.Refusals, revision = sequence.Revision, challenge = (string?)null, expiresTs = (long?)null });
             var grant = confirmations.Grant(Actor(http).UserId, "sequence", id, SequenceFingerprint(sequence));
-            return Results.Ok(new { challenge = grant.Challenge, expiresTs = grant.ExpiresTs, revision = sequence.Revision });
+            return Results.Ok(new { ok = true, refusals = Array.Empty<string>(), challenge = grant.Challenge, expiresTs = grant.ExpiresTs, revision = sequence.Revision });
         }).RequireAuthorization(AccessPolicies.Control);
         group.MapPost("/sequences/{id:int}/start", async (int id, SequenceStartRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, ControlWorkflowService workflow, BatchConfirmationStore confirmations, CancellationToken ct) =>
         {

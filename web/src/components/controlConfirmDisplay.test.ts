@@ -18,5 +18,7 @@ describe('controlConfirmCurrentLabel', () => {
     expect(controlConfirmCurrentLabel('number', 12.5, 'unavailable')).toBe('12.5')
     expect(controlConfirmCurrentLabel('number', 0, 'unavailable')).toBe('0')
     expect(controlConfirmCurrentLabel('number', null, 'unavailable')).toBe('unavailable')
+    expect(controlConfirmCurrentLabel('number', null, 'unavailable', '通讯中断')).toBe('通讯中断')
+    expect(controlConfirmCurrentLabel('text', null, 'unavailable', '质量无效')).toBe('质量无效')
   })
 })

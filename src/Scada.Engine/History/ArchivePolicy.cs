@@ -4,7 +4,7 @@ using Scada.Core.Models;
 
 namespace Scada.Engine.History;
 
-public sealed record ArchiveState(long Ts, double Value, TagQuality Quality, string? Text = null);
+public sealed record ArchiveState(long Ts, double Value, TagQuality Quality, string? Text = null, bool Simulated = false);
 
 public static class ArchivePolicy
 {
@@ -20,7 +20,7 @@ public static class ArchivePolicy
             return true;
         }
 
-        if (current.Quality != lastStored.Quality)
+        if (current.Quality != lastStored.Quality || current.Simulated != lastStored.Simulated)
         {
             return true;
         }
@@ -58,7 +58,7 @@ public static class ArchivePolicy
         if (TagFreshness.IsStale(current, nowMs, tag, device)) return false;
         if (lastStored is not null && lastStored.Ts == current.Ts) return false;
         if (!ShouldStore(tag, current, lastStored, nowMs)) return false;
-        sample = new HistoryValue(tag.Id, current.Ts, current.Value, current.Quality, current.Text);
+        sample = new HistoryValue(tag.Id, current.Ts, current.Value, current.Quality, current.Text, current.Simulated);
         return true;
     }
 }

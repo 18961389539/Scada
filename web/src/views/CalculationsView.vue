@@ -56,7 +56,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { calculationApi, type CalculationInfo, type CalculationInput, type CalculationPreview } from '../api/calculations'
 import { areaApi, deviceApi, ruleApi } from '../api'
 import { errorMessage } from '../api/http'
-import { archiveModeLabels, formatTime, formatValue, qualityLabels } from '../utils'
+import { archiveModeLabels, formatTime, formatValue, qualityLabels, withSimulationLabel } from '../utils'
 import { can, canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import type { Area, Device, Tag, TagValue } from '../types'
@@ -93,7 +93,7 @@ function canEditCalc(row: CalculationInfo): boolean {
   return row.dependencies.every(id => tagConfigurable(inputs.value.find(t => t.id === id)))
 }
 const stale = computed(() => !!readError.value || !lastRead.value || tick.value - lastRead.value > 5000)
-function qualityLabel(value: TagValue | null): string { return qualityLabels[value?.quality ?? 'Uncertain'] }
+function qualityLabel(value: TagValue | null): string { return withSimulationLabel(qualityLabels[value?.quality ?? 'Uncertain'], value?.simulated) }
 let alive = true, generation = 0, previewGeneration = 0, readController: AbortController | undefined, previewController: AbortController | undefined
 // background=true 表示定时轮询：不点亮全表 loading 遮罩（遮罩会挡住点击，2 秒一次等于无法操作）
 async function refresh(force = false, background = false): Promise<boolean> {

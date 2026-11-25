@@ -52,6 +52,20 @@
           </span>
         </div>
       </div>
+      <div class="mcp-status" data-test="ext-modbus-quality">
+        <div class="mcp-head">
+          <span class="status-label">{{ $t('externalApiView.modbusQualityTitle') }}</span>
+        </div>
+        <p class="tiny muted">{{ $t('externalApiView.modbusQualityHint') }}</p>
+        <dl class="mcp-grid">
+          <dt>{{ $t('externalApiView.modbusBadQualityPolicy') }}</dt>
+          <dd data-test="ext-modbus-bad-quality">{{ modbusQualityPolicy }}</dd>
+          <dt>{{ $t('externalApiView.modbusQualityBits') }}</dt>
+          <dd>{{ $t('externalApiView.modbusNoQualityBits') }}</dd>
+          <dt>{{ $t('externalApiView.simulationExportQuality') }}</dt>
+          <dd data-test="ext-simulation-export-quality">{{ status?.modbusSlave?.simulationExportQuality || 'Uncertain' }}</dd>
+        </dl>
+      </div>
       <div v-if="status?.mcp" class="mcp-status" data-test="ext-mcp-status">
         <div class="mcp-head">
           <span class="status-label">{{ $t('externalApiView.mcp') }}</span>
@@ -212,6 +226,13 @@ const opcUaLabel = computed(() => {
 })
 
 const mappingWarnings = computed(() => status.value?.modbusSlave?.warnings?.filter(Boolean) ?? [])
+const modbusQualityPolicy = computed(() => {
+  const slave = status.value?.modbusSlave
+  if (!slave) return tr('externalApiView.modbusQualityUnknown')
+  if (slave.keepLastGood !== false && (slave.badQualityValue === null || slave.badQualityValue === undefined))
+    return tr('externalApiView.modbusKeepLastGood')
+  return tr('externalApiView.modbusSubstituteValue', [String(slave.badQualityValue)])
+})
 const mcpSourceLabel = computed(() => {
   const mcp = status.value?.mcp
   if (!mcp) return ''

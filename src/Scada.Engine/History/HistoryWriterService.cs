@@ -138,7 +138,7 @@ public sealed class HistoryWriterService : BackgroundService
         var last = LastAccepted(value.TagId);
         if (ArchivePolicy.ShouldStore(tag, value, last, value.Ts))
         {
-            Buffer(new HistoryValue(value.TagId, value.Ts, value.Value, value.Quality, value.Text));
+            Buffer(new HistoryValue(value.TagId, value.Ts, value.Value, value.Quality, value.Text, value.Simulated));
         }
     }
 
@@ -181,7 +181,7 @@ public sealed class HistoryWriterService : BackgroundService
     private void RememberBuffered(HistoryValue value)
     {
         if (!_lastBuffered.TryGetValue(value.TagId, out var existing) || value.Ts >= existing.Ts)
-            _lastBuffered[value.TagId] = new(value.Ts, value.Value, value.Quality, value.Text);
+            _lastBuffered[value.TagId] = new(value.Ts, value.Value, value.Quality, value.Text, value.Simulated);
     }
 
     private async Task FlushAsync(CancellationToken cancellationToken)
@@ -302,7 +302,7 @@ public sealed class HistoryWriterService : BackgroundService
                 continue;
             }
 
-            _lastStored[item.TagId] = new ArchiveState(item.Ts, item.Value, item.Quality, item.Text);
+            _lastStored[item.TagId] = new ArchiveState(item.Ts, item.Value, item.Quality, item.Text, item.Simulated);
         }
     }
 

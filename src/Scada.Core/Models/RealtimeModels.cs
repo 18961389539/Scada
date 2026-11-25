@@ -3,7 +3,7 @@ using Scada.Core.Enums;
 
 namespace Scada.Core.Models;
 
-public sealed record TagValue(int TagId, double Value, TagQuality Quality, long Ts, long? SourceTs = null, string? Error = null, long? DefinitionRevision = null, string? Text = null)
+public sealed record TagValue(int TagId, double Value, TagQuality Quality, long Ts, long? SourceTs = null, string? Error = null, long? DefinitionRevision = null, string? Text = null, bool Simulated = false)
 {
     public bool IsText => Text is not null;
 }
@@ -26,7 +26,7 @@ public sealed class ReadPlan
     public IReadOnlyList<Tag> Tags { get; init; } = Array.Empty<Tag>();
 }
 
-public sealed record RawTagValue(int TagId, double Value, TagQuality Quality = TagQuality.Good, long? SourceTs = null, string? Error = null, string? Text = null);
+public sealed record RawTagValue(int TagId, double Value, TagQuality Quality = TagQuality.Good, long? SourceTs = null, string? Error = null, string? Text = null, bool Simulated = false);
 
 public sealed record CommandExecutionResult(bool Success, string Message, double? ReadBack = null, GatewayCommandOutcome? Outcome = null, Guid? CommandId = null, string? ReadBackText = null);
 public sealed record CollectorCommandContext(Guid? RequestId, int? UserId, string UserName, bool Service = false);

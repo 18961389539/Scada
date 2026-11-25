@@ -69,6 +69,16 @@
         </ul>
       </section>
       <section>
+        <h2>{{ $t('dutyHandover.attention') }}</h2>
+        <RuntimeBanners :health="health" />
+        <p v-if="!attentionItems.length" data-test="handover-attention-empty">{{ $t('dutyHandover.noAttention') }}</p>
+        <ul v-else data-test="handover-attention">
+          <li v-for="item in attentionItems" :key="item.key">
+            <router-link :data-test="item.test" :to="item.to">{{ item.label }}</router-link>
+          </li>
+        </ul>
+      </section>
+      <section>
         <h2>{{ $t('dutyHandover.sound') }}</h2>
         <p data-test="handover-sound">{{ soundEnabled ? $t('dutyHandover.unmuted') : $t('dutyHandover.muted') }}</p>
       </section>
@@ -84,8 +94,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import RuntimeBanners from '../components/RuntimeBanners.vue'
 import { alarmApi, ruleApi } from '../api'
-import { controlApi, type ControlRun } from '../api/control'
+import { controlApi, type ControlLockout, type ControlRun, type DeviceControlState } from '../api/control'
 import { recipeApi, type RecipeDownload } from '../api/recipes'
 import { pendingControlRequests, type ControlRequestRow } from '../composables/pendingApprovals'
 import { useAlarmSound } from '../composables/useAlarmSound'
@@ -110,6 +121,10 @@ const suppressed = ref(0)
 const pending = ref<ControlRequestRow[]>([])
 const runningSequences = ref<ControlRun[]>([])
 const runningRecipes = ref<RecipeDownload[]>([])
+const lockouts = ref<ControlLockout[]>([])
+const localDevices = ref<DeviceControlState[]>([])
+const interruptedSequences = ref<ControlRun[]>([])
+const partialRecipes = ref<RecipeDownload[]>([])
 
 function kindLabel(kind: string): string {
   if (kind === 'command') return tr('dutyHandover.kindCommand')
@@ -124,10 +139,44 @@ function runStatusLabel(status: string): string {
     Completed: tr('controlView.k33246f'),
     Failed: tr('controlView.k3e3c80'),
     Aborted: tr('controlView.k5c1747'),
-    Pending: tr('controlView.k4607ba')
+    Pending: tr('controlView.k4607ba'),
+    PartiallyApplied: tr('dutyHandover.partiallyApplied'),
+    Unknown: tr('dutyHandover.unknownResult')
   }
   return labels[status] ?? status
 }
+
+function isInterruptedSequence(run: ControlRun): boolean {
+  if (run.status !== 'Failed' && run.status !== 'Aborted') return false
+  const message = (run as ControlRun & { message?: string }).message || ''
+  return message.includes('结果未知') || message.includes('顺控中断') // i18n-ignore: server run message
+}
+
+function isAttentionRecipe(download: RecipeDownload): boolean {
+  if (download.status === 'PartiallyApplied') return true
+  if (download.status !== 'Failed' && download.status !== 'Aborted') return false
+  const message = `${download.statusLabel || ''} ${download.message || ''}`
+  return message.includes('结果未知') || message.includes('配方下发中断') // i18n-ignore: server download message
+}
+
+const attentionItems = computed(() => {
+  const items: { key: string; to: { path: string; query?: Record<string, string>; hash?: string } | string; label: string; test: string }[] = []
+  for (const lock of lockouts.value) {
+    const target = lock.deviceId != null ? `${tr('dutyHandover.device')} #${lock.deviceId}` : `${tr('dutyHandover.tag')} #${lock.tagId}`
+    const kind = lock.kind === 'NoOperate' ? tr('dutyHandover.lockoutNoOperate') : tr('dutyHandover.lockoutMaintenance')
+    items.push({ key: `lock-${lock.id}`, to: { path: '/control', query: { tab: 'lockouts' } }, label: `${tr('dutyHandover.activeLockout')}：${kind} · ${target} · ${lock.placedBy}`, test: 'handover-lockout-link' })
+  }
+  for (const state of localDevices.value) {
+    items.push({ key: `local-${state.deviceId}`, to: { path: '/control', query: { tab: 'modes' } }, label: `${tr('dutyHandover.localDevice')}：#${state.deviceId}${state.reason ? ' · ' + state.reason : ''}`, test: 'handover-local-link' })
+  }
+  for (const run of interruptedSequences.value) {
+    items.push({ key: `seq-${run.id}`, to: { path: '/control', query: { tab: 'sequences' } }, label: `${tr('dutyHandover.interruptedSequence')}：${run.sequenceName} · ${runStatusLabel(run.status)}`, test: 'handover-interrupted-sequence-link' })
+  }
+  for (const download of partialRecipes.value) {
+    items.push({ key: `recipe-${download.id}`, to: '/recipes#downloads', label: `${tr('dutyHandover.partialRecipe')}：${download.recipeName || download.id} · ${download.statusLabel || runStatusLabel(download.status)}`, test: 'handover-partial-recipe-link' })
+  }
+  return items
+})
 
 const summaryLine = computed(() => {
   const total = unackedByLevel.value.reduce((sum, row) => sum + row.count, 0)
@@ -148,13 +197,15 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [events, summary, shelves, requests, runs, downloads] = await Promise.all([
+    const [events, summary, shelves, requests, runs, downloads, lockoutPage, modes] = await Promise.all([
       alarmApi.query({ live: true, unackedOnly: true, includeShelved: true, priorityFirst: true, limit: 2000 }),
       alarmApi.summary().catch(() => null),
       ruleApi.shelves().catch(() => []),
       controlApi.requests().catch(() => []),
       controlApi.runs().catch(() => ({ items: [] as ControlRun[] })),
       recipeApi.downloads().catch(() => ({ items: [] as RecipeDownload[] })),
+      controlApi.lockouts().catch(() => ({ items: [] as ControlLockout[] })),
+      controlApi.modes().catch(() => [] as DeviceControlState[]),
       refreshHealth()
     ])
     const counts: Record<string, number> = { Critical: 0, Warning: 0, Info: 0 }
@@ -175,7 +226,12 @@ async function load(): Promise<void> {
     const runItems = Array.isArray(runs) ? runs : (runs as { items?: ControlRun[] }).items ?? []
     const downloadItems = Array.isArray(downloads) ? downloads : (downloads as { items?: RecipeDownload[] }).items ?? []
     runningSequences.value = runItems.filter(run => run.status === 'Running')
+    interruptedSequences.value = runItems.filter(isInterruptedSequence)
     runningRecipes.value = downloadItems.filter(download => download.status === 'Pending' || download.status === 'Running')
+    partialRecipes.value = downloadItems.filter(isAttentionRecipe)
+    const lockoutItems = Array.isArray(lockoutPage) ? lockoutPage : (lockoutPage as { items?: ControlLockout[] }).items ?? []
+    lockouts.value = lockoutItems.filter(row => !row.removedTs)
+    localDevices.value = (modes as DeviceControlState[]).filter(row => row.mode === 'Local')
     generatedAt.value = formatTime(Date.now())
   } catch (err) {
     error.value = errorMessage(err, tr('dutyHandover.loadFailed'))

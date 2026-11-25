@@ -913,7 +913,8 @@
     "kd49433": "当前值 → 目标值",
     "kdee660": "控制确认",
     "kee521f": "就地",
-    "kf3ea6d": "操作"
+    "kf3ea6d": "操作",
+    "quality": "当前质量"
   },
   "controlView": {
     "areasLoadFailed": "区域列表加载失败",
@@ -1120,7 +1121,8 @@
     "requestSummary": "{0} · 申请人 {1} · {2} · {3}",
     "requestsLoadFailed": "待复核列表加载失败",
     "rules": "操作规则",
-    "runsLoadFailed": "顺控运行记录加载失败"
+    "runsLoadFailed": "顺控运行记录加载失败",
+    "startPreflightFailed": "顺控启动前复查未通过"
   },
   "devicesView": {
     "allProtocols": "全部协议",
@@ -1322,7 +1324,16 @@
     "mcpWritesOff": "已关闭",
     "mcpLastActivity": "最后活动",
     "mcpNoActivity": "暂无调用记录",
-    "mcpRecent": "近期调用"
+    "mcpRecent": "近期调用",
+    "modbusQualityTitle": "Modbus 从站质量策略",
+    "modbusQualityHint": "Modbus 无法带品质位。质量不是合格时，默认仍返回最后一次有效值，上级主站可能把它当成现场正常。仿真值默认按不确定品质上送，避免以合格值外送。",
+    "modbusBadQualityPolicy": "质量无效时的返回值",
+    "modbusKeepLastGood": "保持最后一次有效值（默认）",
+    "modbusSubstituteValue": "使用替代值 {0}",
+    "modbusQualityUnknown": "尚未读取到当前策略",
+    "modbusQualityBits": "品质位",
+    "modbusNoQualityBits": "Modbus 无法带品质位",
+    "simulationExportQuality": "仿真值上送品质"
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "设备",
@@ -4362,7 +4373,10 @@
     "analysisScopeHint": "图中是{0}，下方分析按原始采样计算，口径可能不同",
     "exportSource": "数据源：{0}；查询区间：{1}；测点数：{2}",
     "exportExactRaw": "本文件为未抽稀的原始采样",
-    "exportNotExactRaw": "本文件是当前图表所用数据，不是未抽稀的原始采样"
+    "exportNotExactRaw": "本文件是当前图表所用数据，不是未抽稀的原始采样",
+    "sourceColumn": "来源",
+    "sourceSimulation": "仿真",
+    "sourceField": "现场"
   },
   "userAssignmentsDialog": {
     "k215093": "选择角色",
@@ -4450,7 +4464,8 @@
     "kfe529c": "数据块 DB",
     "kfe8edb": "高高限",
     "kff8fce": "确认报警",
-    "kffe3f8": "已恢复未确认"
+    "kffe3f8": "已恢复未确认",
+    "simulation": "仿真"
   },
   "ux": {
     "events": {

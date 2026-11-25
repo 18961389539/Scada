@@ -68,7 +68,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 var rows = db.HistoryValues.AsNoTracking()
                     .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
                     .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
-                    .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality, x.Text));
+                    .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality, x.Text, x.Simulated));
                 await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
             }
             yield break;
@@ -114,7 +114,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 {
                     var row = await db.HistoryValues.AsNoTracking()
                         .Where(x => x.TagId == item.TagId && x.Ts == item.Ts)
-                        .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality, x.Text))
+                        .Select(x => new HistoryValue(x.TagId, x.Ts, x.Value, (TagQuality)x.Quality, x.Text, x.Simulated))
                         .FirstOrDefaultAsync(cancellationToken);
                     if (row is null) continue;
                     result.Add(row);
@@ -171,6 +171,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                     AddParameter(command, "$value" + index, value.Value);
                     AddParameter(command, "$quality" + index, (int)value.Quality);
                     AddParameter(command, "$text" + index, value.Text);
+                    AddParameter(command, "$simulated" + index, value.Simulated ? 1 : 0);
                 }
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -181,16 +182,18 @@ public partial class SqliteHistoryBackend : IHistoryBackend
     // 更差的质量覆盖先到的点。质量相同保持先写入的值，重放不会改历史。更好的质量不能把坏点洗成好点。
     private static string BuildHistoryInsert(int rows)
     {
-        var sql = new StringBuilder("INSERT INTO HistoryValue (TagId,Ts,Value,Quality,Text) VALUES ");
+        var sql = new StringBuilder("INSERT INTO HistoryValue (TagId,Ts,Value,Quality,Text,Simulated) VALUES ");
         for (var index = 0; index < rows; index++)
         {
             if (index > 0) sql.Append(',');
             sql.Append("($tag").Append(index).Append(",$ts").Append(index).Append(",$value").Append(index)
-               .Append(",$quality").Append(index).Append(",$text").Append(index).Append(')');
+               .Append(",$quality").Append(index).Append(",$text").Append(index).Append(",$simulated").Append(index).Append(')');
         }
         sql.Append(" ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality, Text = excluded.Text")
+           .Append(", Simulated = CASE WHEN excluded.Simulated OR HistoryValue.Simulated THEN 1 ELSE 0 END")
            .Append(" WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END")
-           .Append(" > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END");
+           .Append(" > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END")
+           .Append(" OR (excluded.Simulated AND NOT HistoryValue.Simulated)");
         return sql.ToString();
     }
 
@@ -229,7 +232,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
             foreach (var row in rows)
             {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Value, (TagQuality)row.Quality, row.Text));
+                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Value, (TagQuality)row.Quality, row.Text, row.Simulated));
             }
         }
 

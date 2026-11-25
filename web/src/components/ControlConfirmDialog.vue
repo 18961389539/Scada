@@ -5,6 +5,7 @@
         <el-descriptions-item :label="$t('controlConfirmDialog.kf3ea6d')">{{ title }}</el-descriptions-item>
         <el-descriptions-item :label="$t('controlConfirmDialog.k8cff1c')">{{ check.tagName }}（#{{ check.tagId }}）</el-descriptions-item>
         <el-descriptions-item :label="$t('controlConfirmDialog.kd49433')"><strong>{{ currentLabel }} → {{ value }}</strong></el-descriptions-item>
+        <el-descriptions-item v-if="check.qualityReason" :label="$t('controlConfirmDialog.quality')">{{ check.qualityReason }}</el-descriptions-item>
         <el-descriptions-item v-if="check.limitMin != null || check.limitMax != null" :label="$t('controlConfirmDialog.kb3bb3c')">[{{ check.limitMin ?? '-' }}, {{ check.limitMax ?? '-' }}]</el-descriptions-item>
         <el-descriptions-item v-if="check.maxStep != null" :label="$t('controlConfirmDialog.k2a415d')">{{ check.maxStep }}</el-descriptions-item>
         <el-descriptions-item v-if="check.feedback" :label="$t('controlConfirmDialog.k463dc4')">{{ check.feedback }}</el-descriptions-item>
@@ -33,7 +34,7 @@ import { errorMessage } from '../api/http'
 import { tr } from '../i18n'
 
 const visible = ref(false), loading = ref(false), check = ref<ControlCheck | null>(null), checkError = ref(''), title = ref(''), value = ref<number | string>(0)
-const currentLabel = computed(() => controlConfirmCurrentLabel(controlConfirmKind(value.value), check.value?.current, tr('controlConfirmDialog.kb20e33')))
+const currentLabel = computed(() => controlConfirmCurrentLabel(controlConfirmKind(value.value), check.value?.current, tr('controlConfirmDialog.kb20e33'), check.value?.qualityReason))
 let resolver: ((ok: boolean) => void) | null = null
 let generation = 0
 

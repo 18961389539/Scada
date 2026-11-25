@@ -255,7 +255,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
             {
                 foreach (var (ioa, slot) in _map.Iec.Points)
                 {
-                    var sample = _map.ReadIec(slot);
+                    var sample = _map.ReadIec(slot, (_optionsProvider?.Invoke().Iec ?? _options).SimulationExportQuality);
                     _lastSample[ioa] = new Iec104SampleState(sample.Value, sample.Quality);
                 }
                 _baselineDone = true;
@@ -264,7 +264,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
 
             foreach (var (ioa, slot) in _map.Iec.Points)
             {
-                var sample = _map.ReadIec(slot);
+                var sample = _map.ReadIec(slot, (_optionsProvider?.Invoke().Iec ?? _options).SimulationExportQuality);
                 var state = new Iec104SampleState(sample.Value, sample.Quality);
                 if (_lastSample.TryGetValue(ioa, out var previous) && !state.Differs(previous)) continue;
                 _lastSample[ioa] = state;
@@ -310,7 +310,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
             var buffer = new List<InfoObject>(MaxObjectsPerFrame);
             foreach (var slot in group.OrderBy(s => s.Ioa))
             {
-                var sample = _map.ReadIec(slot);
+                var sample = _map.ReadIec(slot, (_optionsProvider?.Invoke().Iec ?? _options).SimulationExportQuality);
                 var (_, element) = Iec104ServerCodec.Encode(slot, sample, _options.UseTimeTag);
                 buffer.Add(new InfoObject(slot.Ioa, element));
                 _lastSample[slot.Ioa] = new Iec104SampleState(sample.Value, sample.Quality);

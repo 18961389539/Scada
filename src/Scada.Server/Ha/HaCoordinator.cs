@@ -67,6 +67,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
     public IHaWitness? Witness => _witness;
     public bool Enabled => _options.Enabled;
     public bool IsActive => _primary;
+    public long PromotedTs => Interlocked.Read(ref _promotedTs);
     public long Generation => Interlocked.Read(ref _generation);
     public string StandbyMessage => $"本节点（{_options.NodeId}）为备机，不采集、不下发控制" + (string.IsNullOrEmpty(_peer?.SelfUrl) ? "" : $"；主机：{_peer!.SelfUrl}");
     public string? PrimaryUrl => _primary ? _options.SelfUrl : _peer?.Role == "Primary" ? _peer.SelfUrl ?? _options.PeerUrl : null;

@@ -87,6 +87,9 @@ namespace Scada.Data.Migrations.History
                     b.Property<int>("Quality")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Simulated")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Text")
                         .HasColumnType("TEXT");
 

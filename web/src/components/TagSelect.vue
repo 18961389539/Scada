@@ -40,7 +40,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { tagApi } from '../api'
 import { errorMessage } from '../api/http'
 import { useAuthStore } from '../stores/auth'
-import { formatValue, qualityLabels } from '../utils'
+import { formatValue, qualityLabels, withSimulationLabel } from '../utils'
 import { tr } from '../i18n'
 import type { Device, Tag, TagValue } from '../types'
 
@@ -138,7 +138,7 @@ function optionMeta(tag: Tag): string {
 function liveText(tag: Tag): string {
   const value = props.values[tag.id]
   if (!value) return ''
-  return `${formatValue(value.value)}${tag.unit ? ` ${tag.unit}` : ''} · ${qualityLabels[value.quality]}`
+  return `${formatValue(value.value)}${tag.unit ? ` ${tag.unit}` : ''} · ${withSimulationLabel(qualityLabels[value.quality], value.simulated)}`
 }
 function liveQuality(tag: Tag): string { return props.values[tag.id]?.quality ?? '' }
 

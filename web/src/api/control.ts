@@ -1,9 +1,11 @@
 import { http, readPage } from './http'
+import { tr } from '../i18n'
 import type { CommandSubmissionResult } from './commandTypes'
 
 export interface ControlCheck {
   tagId: number; tagName: string; current: number | null; refusals: string[]; requireConfirm: boolean; dualApproval: boolean
   limitMin: number | null; limitMax: number | null; maxStep: number | null; feedback: string | null; mode: 'Remote' | 'Local'; lockouts: string[]
+  currentQuality?: string | null; qualityReason?: string | null
 }
 export interface ControlPoint {
   id?: number; tagId: number; requireConfirm: boolean; dualApproval: boolean; approvalTimeoutSec: number; permitExpression: string | null; permitMessage: string | null
@@ -50,9 +52,12 @@ export const controlApi = {
   validateSequence: async (s: { name: string; areaId: number; dualApproval: boolean; description: string | null; steps: ControlStep[] }) =>
     (await http.post<{ ok: boolean; message: string | null; stepIds: string[] }>('/control/sequences/validate', s)).data,
   removeSequence: async (id: number) => http.delete(`/control/sequences/${id}`),
-  checkStart: async (id: number) => (await http.post<{ challenge: string; expiresTs: number; revision: number }>(`/control/sequences/${id}/check-start`, {})).data,
+  checkStart: async (id: number) => (await http.post<{ ok?: boolean; refusals?: string[]; challenge?: string | null; expiresTs?: number | null; revision: number }>(`/control/sequences/${id}/check-start`, {})).data,
   start: async (id: number) => {
     const grant = await controlApi.checkStart(id)
+    if (grant.ok === false || (grant.refusals && grant.refusals.length > 0) || !grant.challenge) {
+      throw new Error((grant.refusals && grant.refusals.length > 0) ? grant.refusals.join('；') : tr('controlView.startPreflightFailed'))
+    }
     return (await http.post<{ pending: boolean; approvalId: string | null; runId: number | null }>(`/control/sequences/${id}/start`, { confirmed: true, challenge: grant.challenge })).data
   },
   runs: async (sequenceId?: number, before?: number) => readPage(await http.get<ControlRun[]>('/control/runs', { params: { sequenceId, before } })),

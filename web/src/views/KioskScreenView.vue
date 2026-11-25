@@ -1,13 +1,15 @@
 <template>
   <div class="kiosk" role="main">
     <h1 class="kiosk-title">{{ $t('common.kiosk') }}</h1>
+    <RuntimeBanners :health="health" />
     <div v-if="invalidId" class="kiosk-error" role="alert" data-test="kiosk-invalid-id">
       {{ $t('screenUx.invalidScreen') }}
     </div>
     <ScreenRuntime v-else :key="current" :screen-id="current" :monitor-mode="monitorOnly" fill initial-zoom="fit" auto-refresh />
     <div v-if="showStatusBar" class="kiosk-status-bar" role="status" data-test="kiosk-status-bar">
       <span v-if="hubIssue" data-test="kiosk-hub-issue">{{ hubIssue }}</span>
-      <span v-if="isStandby" data-test="kiosk-standby">{{ $t('kioskStatus.standby') }}<template v-if="primaryUrl"> · {{ $t('kioskStatus.primary', [primaryUrl]) }}</template></span>
+      <span v-if="isStandby" data-test="kiosk-standby">{{ $t('kioskStatus.standby') }}<template v-if="primaryUrl"> · {{ $t('kioskStatus.primary', [primaryUrl]) }}</template>
+        <a v-if="primaryUrl" data-test="kiosk-open-primary" :href="primaryUrl" target="_blank" rel="noopener">{{ $t('runtimeBanners.openPrimary') }}</a></span>
       <span v-else-if="healthAbnormal" data-test="kiosk-health">{{ $t('kioskStatus.healthIssue') }}</span>
     </div>
     <div v-if="criticalBanner" class="kiosk-critical-banner" role="alert" data-test="kiosk-critical-banner">
@@ -38,6 +40,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import ScreenRuntime from '../components/ScreenRuntime.vue'
+import RuntimeBanners from '../components/RuntimeBanners.vue'
 import { useAlarmSession } from '../composables/useAlarmSession'
 import { applyKioskAlarmEvent, emptyKioskAlarmPause, type KioskAlarmPauseState } from '../composables/kioskAlarmPause'
 import { alarmApi } from '../api'
@@ -48,7 +51,7 @@ import type { AlarmEvent } from '../types'
 
 const route = useRoute()
 const { soundEnabled, missedCriticalNotice } = useAlarmSession()
-const { healthAbnormal, hubIssue, isStandby, primaryUrl, showServiceStatus, refreshHealth } = useServiceStatus()
+const { health, healthAbnormal, hubIssue, isStandby, primaryUrl, showServiceStatus, refreshHealth } = useServiceStatus()
 const showStatusBar = showServiceStatus
 const routeId = computed(() => {
   const value = Number(route.params.id)

@@ -201,10 +201,27 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 .SetProperty(x => x.ResultMessage, request.ResultMessage)
                 .SetProperty(x => x.RunId, request.RunId), CancellationToken.None);
 
+    public async Task<(bool Ok, IReadOnlyList<string> Refusals)> CheckStartAsync(ControlSequence sequence, ControlActor actor, CancellationToken ct)
+    {
+        var refusals = new List<string>();
+        foreach (var step in Steps(sequence))
+        {
+            if (step.Type != "write" || step.TagId is not int tagId) continue;
+            var label = string.IsNullOrWhiteSpace(step.Name) ? (step.Id ?? $"#{tagId}") : step.Name;
+            var check = await commands.CheckAsync(tagId, step.Value, actor, ct);
+            if (check is null) refusals.Add($"{label}：测点不存在");
+            else if (check.Refusals.Count > 0)
+                refusals.AddRange(check.Refusals.Select(reason => $"{label}：{reason}"));
+        }
+        return (refusals.Count == 0, refusals);
+    }
+
     public async Task<ControlSequenceRun> StartAsync(ControlSequence sequence, ControlActor actor, string? approvedBy, CancellationToken ct)
     {
         var steps = Steps(sequence);
         if (steps.Count == 0) throw new ControlWorkflowException("顺控没有步骤");
+        var preflight = await CheckStartAsync(sequence, actor, ct);
+        if (!preflight.Ok) throw new ControlWorkflowException("顺控启动前复查未通过，未执行任何步骤：" + string.Join("；", preflight.Refusals));
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         if (await runtime.ControlSequenceRuns.AnyAsync(x => x.SequenceId == sequence.Id && x.Status == ControlRunStatus.Running, ct)) throw new ControlWorkflowException("该顺控正在运行", 409);

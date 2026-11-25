@@ -31,6 +31,9 @@ export type ExternalEndpointStatus = {
   unitIds?: Array<number | string>
   commonAddresses?: Array<number | string>
   warnings?: string[]
+  badQualityValue?: number | null
+  keepLastGood?: boolean
+  simulationExportQuality?: string
 }
 
 export type McpRecentCall = {

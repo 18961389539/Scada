@@ -19,6 +19,8 @@ public sealed record HealthNotifications(long Sent, long Failed, long Dropped, s
 public sealed record HealthDisk(string Root, double TotalGb, double FreeGb);
 public sealed record HealthStorage(string ConfigDb, long ConfigDbBytes, long HistoryBytes);
 public sealed record HealthHistoryLoss(bool Persistent, int Windows, long? OldestFrom, string Note);
+public sealed record HealthSimulationDevice(int Id, string Name);
+public sealed record HealthTakeoverRecovery(bool Active, long PromotedTs, string Message);
 
 public sealed record HealthSnapshot(
     string Status,
@@ -45,7 +47,9 @@ public sealed record HealthSnapshot(
     HealthStorage Storage,
     SpaceReclaimStatus? SpaceReclaim = null,
     HealthHistoryLoss? HistoryLoss = null,
-    HealthTakeoverReview? TakeoverReview = null);
+    HealthTakeoverReview? TakeoverReview = null,
+    IReadOnlyList<HealthSimulationDevice>? SimulationDevices = null,
+    HealthTakeoverRecovery? TakeoverRecovery = null);
 
 // Shared by /api/health and the MCP query_health tool so both report the same snapshot.
 // 依赖通过 IHealthContributor 集合收集，不再用 IServiceProvider 反查具体服务类型：
@@ -173,7 +177,26 @@ public sealed class HealthSnapshotService(
             new HealthStorage(Path.GetFileName(configPath), File.Exists(configPath) ? new FileInfo(configPath).Length : 0, historyBytes),
             spaceReclaim?.Snapshot(),
             MapHistoryLoss(historyLoss),
-            takeoverReview is null ? null : takeoverReview.SnapshotAsync().GetAwaiter().GetResult());
+            takeoverReview is null ? null : takeoverReview.SnapshotAsync().GetAwaiter().GetResult(),
+            SimulationDevices(),
+            TakeoverRecovery(statuses));
+    }
+
+    private IReadOnlyList<HealthSimulationDevice> SimulationDevices() =>
+        config.Devices.Where(device => device.Enabled && device.SimulationEnabled)
+            .Select(device => new HealthSimulationDevice(device.Id, device.Name))
+            .ToList();
+
+    private HealthTakeoverRecovery? TakeoverRecovery(IReadOnlyList<CollectorDeviceStatus> statuses)
+    {
+        if (!ha.Enabled || !ha.IsActive || ha.PromotedTs <= 0) return null;
+        var age = ScadaTime.NowMs() - ha.PromotedTs;
+        var starting = statuses.Any(status =>
+            !status.Online && (status.Error == "等待连接"
+                || (status.Error is not null && status.Error.StartsWith("旧采集 I/O"))
+                || (status.Error is not null && status.Error.Contains("正在重新启动采集"))));
+        if (age > 120_000 && !starting) return null;
+        return new HealthTakeoverRecovery(true, ha.PromotedTs, "本机刚接管，采集正在恢复");
     }
 
     /// <summary>

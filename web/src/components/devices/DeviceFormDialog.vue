@@ -90,7 +90,7 @@
         <p v-if="form.protocol === 'Iec61850'" class="tiny" data-test="device-enable-locked">{{ currentDef?.notice }}</p>
       </el-form-item>
       <el-form-item :label="$t('simulation.switchLabel')">
-        <el-switch v-model="form.simulationEnabled" :disabled="simulationLocked" data-test="device-simulation" />
+        <el-switch v-model="form.simulationEnabled" :disabled="simulationLocked" data-test="device-simulation" @change="onSimulationToggle" />
         <p class="tiny muted">{{ $t('simulation.switchHint') }}</p>
       </el-form-item>
       <template v-if="form.simulationEnabled">
@@ -137,7 +137,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { deviceApi } from '../../api'
 import { channelUsesSerial, type ChannelInfo } from '../../api/channels'
 import { useAuthStore } from '../../stores/auth'
@@ -249,6 +249,18 @@ const channelBound = computed(() => form.channelId != null)
 const options = reactive<Record<string, string | number | boolean>>({})
 const defaultSimulation = () => ({ waveform: 'Sine', periodSec: 60, min: null as number | null, max: null as number | null, noisePercent: 0, seed: 0 })
 const simOptions = reactive(defaultSimulation())
+async function onSimulationToggle(enabled: string | number | boolean): Promise<void> {
+  if (enabled !== true) return
+  try {
+    await ElMessageBox.confirm(tr('simulation.enableConfirmBody'), tr('simulation.enableConfirmTitle'), {
+      type: 'warning',
+      confirmButtonText: tr('simulation.enableConfirmOk'),
+      cancelButtonText: tr('simulation.enableConfirmCancel')
+    })
+  } catch {
+    form.simulationEnabled = false
+  }
+}
 const simulationWaveforms = [
   { value: 'Sine', key: 'simulation.sine' },
   { value: 'Square', key: 'simulation.square' },

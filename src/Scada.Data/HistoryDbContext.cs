@@ -12,6 +12,8 @@ public class HistoryValue
     public int Quality { get; set; }
     // 字符串测点的历史文本；数值点为 null。文本点不参与聚合表。
     public string? Text { get; set; }
+    // 仿真来源标记：不改质量，历史与 CSV 用来源区分仿真值和现场值。
+    public bool Simulated { get; set; }
 }
 
 public class Agg5Min

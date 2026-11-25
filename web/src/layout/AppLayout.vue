@@ -132,6 +132,7 @@
         </div>
       </el-header>
       <el-main id="main-content" ref="mainRef" class="main" tabindex="-1" :style="mainStyle">
+        <RuntimeBanners :health="health" />
         <router-view :key="route.path" />
       </el-main>
     </el-container>
@@ -166,6 +167,7 @@ import { useAlarmSession } from '../composables/useAlarmSession'
 import { useServiceStatus } from '../composables/useServiceStatus'
 import { usePendingApprovals } from '../composables/pendingApprovals'
 import ServiceStatusChips from '../components/ServiceStatusChips.vue'
+import RuntimeBanners from '../components/RuntimeBanners.vue'
 import { readSidebarMiniPreference, rememberSidebarMiniPreference, sidebarMiniFromMedia } from '../composables/sidebarMini'
 import { errorMessage } from '../api/http'
 import { usePolling } from '../composables/usePolling'
@@ -238,7 +240,7 @@ function toggleSidebar(): void {
 
 const { soundEnabled, schedule: scheduleAnnunciatorSound } = useAlarmSession()
 const { pendingCount } = usePendingApprovals()
-const { healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
+const { health, healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
 const showHeaderStatus = computed(() =>
   healthAbnormal.value || alarmFlood.value ||
   !!hubIssue.value || isStandby.value || !soundEnabled.value)

@@ -158,23 +158,31 @@ public sealed class ExportPointMap
             ? kind
             : tag.DataType == TagDataType.Bool ? Iec104PointKind.SinglePoint : Iec104PointKind.MeasuredFloat;
 
-    /// <summary>读取测点当前值；质量不合格时按配置替换。</summary>
-    public ExportSample Read(ExportSlot slot, double? badQualityValue) => ReadCore(slot.TagId, badQualityValue);
+    /// <summary>读取测点当前值；质量不合格时按配置替换。仿真值不以 Good 上送。</summary>
+    public ExportSample Read(ExportSlot slot, double? badQualityValue, TagQuality simulationQuality = TagQuality.Uncertain) =>
+        ReadCore(slot.TagId, badQualityValue, simulationQuality);
 
-    /// <summary>IEC 104 侧没有"保持最后值"的语义要求，坏质量由品质位表达，因此不做替代。</summary>
-    public ExportSample ReadIec(IecSlot slot) => ReadCore(slot.TagId, null);
+    /// <summary>IEC 104 侧没有"保持最后值"的语义要求，坏质量由品质位表达，因此不做替代。仿真值仍不以 Good 上送。</summary>
+    public ExportSample ReadIec(IecSlot slot, TagQuality simulationQuality = TagQuality.Uncertain) =>
+        ReadCore(slot.TagId, null, simulationQuality);
 
-    private ExportSample ReadCore(int tagId, double? badQualityValue)
+    internal static TagQuality NormalizeSimulationQuality(TagQuality quality) =>
+        quality == TagQuality.Good ? TagQuality.Uncertain : quality;
+
+    private ExportSample ReadCore(int tagId, double? badQualityValue, TagQuality simulationQuality)
     {
         var v = _cache.Get(tagId);
         // 没有缓存值时用当前 Unix 毫秒，不能用 TickCount64：后者是开机以来的毫秒数，
         // 直接喂给 CP56Time2a 会得到 1970 年附近的时标，主站侧看起来像"时间同步坏了"。
         if (v is null) return new ExportSample(0, TagQuality.CommFailure, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        Device? device = null;
         if (_config.TryGetTag(tagId, out var tag))
         {
-            Device? device = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var found) ? found : null;
+            device = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var found) ? found : null;
             v = TagFreshness.Apply(v, ScadaTime.NowMs(), tag, device);
         }
+        if (v.Simulated || device is { SimulationEnabled: true })
+            return new ExportSample(v.Value, NormalizeSimulationQuality(simulationQuality), v.SourceTs ?? v.Ts);
         if (v.Quality == TagQuality.Good) return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);
         if (badQualityValue is double fallback) return new ExportSample(fallback, v.Quality, v.Ts);
         return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);

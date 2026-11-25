@@ -19,7 +19,7 @@ import { runtimeReturnPath } from '../screens/navigation'
 import { hmiLibraryApi } from '../api/hmiLibrary'
 import { useI18n } from 'vue-i18n'
 import type { Device, Tag } from '../types'
-import { formatTime, formatValue, qualityLabels } from '../utils'
+import { formatTime, formatValue, qualityLabels, withSimulationLabel } from '../utils'
 import { useDesignerTagValues } from '../composables/useDesignerTagValues'
 import { useDesignerDraft } from '../composables/useDesignerDraft'
 import { useDesignerGestures } from '../composables/useDesignerGestures'
@@ -421,7 +421,7 @@ export function useScreenDesigner(props: { embedded: boolean; modelValue?: Scree
   function tagLiveText(tagId: number | null | undefined, unit = ''): string {
     const value = tagId == null ? undefined : tagValues.value[tagId]
     if (!value) return ''
-    return `${formatValue(value.value)}${unit ? ` ${unit}` : ''} · ${qualityLabels[value.quality]}`
+    return `${formatValue(value.value)}${unit ? ` ${unit}` : ''} · ${withSimulationLabel(qualityLabels[value.quality], value.simulated)}`
   }
   function tagLiveClass(tagId: number | null | undefined): string {
     const quality = tagId == null ? undefined : tagValues.value[tagId]?.quality

@@ -139,6 +139,9 @@ public static class ExternalRestEndpoints
                 {
                     v.ModbusSlave.Enabled, v.ModbusSlave.ListenAddress, v.ModbusSlave.Port, v.ModbusSlave.UnitIds,
                     v.ModbusSlave.AutoAddressing, v.ModbusSlave.AllowWrite, v.ModbusSlave.IpAllowlist,
+                    badQualityValue = v.ModbusSlave.BadQualityValue,
+                    keepLastGood = v.ModbusSlave.BadQualityValue is null,
+                    simulationExportQuality = v.ModbusSlave.SimulationExportQuality.ToString(),
                     running = modbusHost?.IsRunning ?? false,
                     connections = modbusHost?.ConnectionCount ?? 0,
                     mappedPoints = modbusHost?.MappedPoints ?? 0,
@@ -148,6 +151,7 @@ public static class ExternalRestEndpoints
                 {
                     v.Iec104Server.Enabled, v.Iec104Server.ListenAddress, v.Iec104Server.Port, v.Iec104Server.CommonAddresses,
                     v.Iec104Server.K, v.Iec104Server.W, v.Iec104Server.AllowControl, v.Iec104Server.IpAllowlist,
+                    simulationExportQuality = v.Iec104Server.SimulationExportQuality.ToString(),
                     running = iec104Host?.IsRunning ?? false,
                     connections = iec104Host?.ConnectionCount ?? 0,
                     mappedPoints = iec104Host?.MappedPoints ?? 0

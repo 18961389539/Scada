@@ -60,6 +60,11 @@ export function qualityType(quality: TagQuality): 'warning' | 'danger' | undefin
   return 'danger'
 }
 
+/** 质量仍可为 Good 时，在测点旁标明仿真来源。 */
+export function withSimulationLabel(label: string, simulated?: boolean | null): string {
+  return simulated ? `${label} · ${tr('utils.simulation')}` : label
+}
+
 export const levelLabels: Record<AlarmLevel, string> = {
   Info: tr('utils.kab3656'),
   Warning: tr('utils.k5521e3'),

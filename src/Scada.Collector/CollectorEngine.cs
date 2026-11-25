@@ -322,6 +322,9 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         if (roleChanged)
         {
             _loadedRoleGeneration = _role.Generation;
+            var reason = _role.IsActive ? "本机刚接管，正在重新启动采集" : "本机已停采";
+            foreach (var worker in _workers.Values)
+                worker.SuppressOfflineAlarmOnStop(reason);
             await StopWorkersAsync();
         }
         _workerCts ??= CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

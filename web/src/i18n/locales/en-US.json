@@ -913,7 +913,8 @@
     "kd49433": "Current value → target value",
     "kdee660": "Control confirmation",
     "kee521f": "Local",
-    "kf3ea6d": "Actions"
+    "kf3ea6d": "Actions",
+    "quality": "Current quality"
   },
   "controlView": {
     "areasLoadFailed": "Area list could not be loaded",
@@ -1120,7 +1121,8 @@
     "requestSummary": "{0} · by {1} · {2} · {3}",
     "requestsLoadFailed": "Pending approvals could not be loaded",
     "rules": "Operating rules",
-    "runsLoadFailed": "Sequence runs could not be loaded"
+    "runsLoadFailed": "Sequence runs could not be loaded",
+    "startPreflightFailed": "Sequence start preflight failed"
   },
   "devicesView": {
     "allProtocols": "All protocols",
@@ -1322,7 +1324,16 @@
     "mcpWritesOff": "Off",
     "mcpLastActivity": "Last activity",
     "mcpNoActivity": "No calls recorded",
-    "mcpRecent": "Recent calls"
+    "mcpRecent": "Recent calls",
+    "modbusQualityTitle": "Modbus slave quality policy",
+    "modbusQualityHint": "Modbus cannot carry quality bits. When quality is not Good, the default is to return the last good value, which an upstream master may treat as a live field reading. Simulated values are exported as Uncertain by default so they are not sent as Good.",
+    "modbusBadQualityPolicy": "Value when quality is bad",
+    "modbusKeepLastGood": "Keep the last good value (default)",
+    "modbusSubstituteValue": "Use substitute value {0}",
+    "modbusQualityUnknown": "The current policy has not been loaded yet",
+    "modbusQualityBits": "Quality bits",
+    "modbusNoQualityBits": "Modbus cannot carry quality bits",
+    "simulationExportQuality": "Quality used for simulated values"
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "Device",
@@ -4362,7 +4373,10 @@
     "analysisScopeHint": "The chart shows {0}; analysis below uses raw samples, so the two may differ",
     "exportSource": "Source: {0}; range: {1}; tags: {2}",
     "exportExactRaw": "This file contains raw samples that have not been downsampled",
-    "exportNotExactRaw": "This file is the data shown in the chart, not the undownsampled raw samples"
+    "exportNotExactRaw": "This file is the data shown in the chart, not the undownsampled raw samples",
+    "sourceColumn": "Source",
+    "sourceSimulation": "Simulation",
+    "sourceField": "Field"
   },
   "userAssignmentsDialog": {
     "k215093": "Select role",
@@ -4450,7 +4464,8 @@
     "kfe529c": "Data block DB",
     "kfe8edb": "High-high limit",
     "kff8fce": "Acknowledge alarm",
-    "kffe3f8": "Cleared, unacknowledged"
+    "kffe3f8": "Cleared, unacknowledged",
+    "simulation": "Simulation"
   },
   "ux": {
     "events": {

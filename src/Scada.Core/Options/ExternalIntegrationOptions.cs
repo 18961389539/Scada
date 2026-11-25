@@ -80,6 +80,8 @@ public sealed class ModbusSlaveOptions
     public ByteOrder ByteOrder { get; set; } = ByteOrder.ABCD;
     // 质量不是 Good 时返回的替代值。null = 保持最后一次有效值（多数主站期望的行为）。
     public double? BadQualityValue { get; set; }
+    // 仿真值对外上送的品质。默认 Uncertain，避免上级主站把仿真值当成现场合格值。不能设为 Good。
+    public TagQuality SimulationExportQuality { get; set; } = TagQuality.Uncertain;
     // 默认只读：写回等于把外部网络接进控制闭环，必须在部署时显式打开。
     public bool AllowWrite { get; set; }
     // 单次读数量上限，同时用于拒绝异常请求；标准上限 125 寄存器 / 2000 位。
@@ -118,6 +120,8 @@ public sealed class Iec104ServerOptions
     public bool UseTimeTag { get; set; } = true;
     // 默认只读：遥控等于把调度网络接进控制闭环，必须在部署时显式打开。
     public bool AllowControl { get; set; }
+    // 仿真值对外上送的品质。默认 Uncertain，不能设为 Good。
+    public TagQuality SimulationExportQuality { get; set; } = TagQuality.Uncertain;
     // 可选选择-执行闭锁。默认关闭，保持现有“执行可直接下发”的行为。
     public bool RequireSelectExecute { get; set; }
     // 选择锁存超时，超时后必须重新选择才能执行。

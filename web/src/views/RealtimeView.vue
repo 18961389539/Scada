@@ -159,6 +159,7 @@ import {
   formatTime,
   formatValue,
   qualityLabels,
+  withSimulationLabel,
   qualityType
 } from '../utils'
 import { tr } from '../i18n'
@@ -308,7 +309,8 @@ function sampleStale(tag: Tag): boolean {
 }
 function qualityText(tag: Tag): string {
   const quality = qualityOf(tag.id)
-  return quality === 'Good' ? tr('realtimeMonitor.good') : qualityLabels[quality]
+  const label = quality === 'Good' ? tr('realtimeMonitor.good') : qualityLabels[quality]
+  return withSimulationLabel(label, values[tag.id]?.simulated)
 }
 function alarmsFor(tagId: number): AlarmEvent[] { return alarmIndex.value.get(tagId) ?? [] }
 function alarmText(tag: Tag): string {

@@ -63,6 +63,18 @@ public sealed class AlarmSink : IAlarmSink
         await NotifySafeAsync(alarm, "recover", cancellationToken);
     }
 
+    public async Task RecoverOpenDeviceOfflineAsync(int deviceId, long ts, CancellationToken cancellationToken = default)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var alarms = await db.AlarmEvents
+            .Where(x => x.DeviceId == deviceId && x.EndTs == null && x.Category == AlarmCategory.Diagnostic && x.Message.StartsWith("设备离线："))
+            .ToListAsync(cancellationToken);
+        if (alarms.Count == 0) return;
+        foreach (var alarm in alarms) alarm.EndTs = ts;
+        await db.SaveChangesAsync(cancellationToken);
+        foreach (var alarm in alarms) await NotifySafeAsync(alarm, "recover", cancellationToken);
+    }
+
     private async Task NotifySafeAsync(AlarmEvent alarm, string action, CancellationToken cancellationToken)
     {
         try

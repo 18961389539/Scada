@@ -743,7 +743,7 @@ function exportData(): void {
   const rows: (string | number)[][] = []
   for (const item of series.value) {
     for (const point of item.points) {
-      rows.push([formatTime(point.ts), tagName(item.tagId), point.value, point.quality])
+      rows.push([formatTime(point.ts), tagName(item.tagId), point.value, point.quality, point.simulated ? tr('trendsView.sourceSimulation') : tr('trendsView.sourceField')])
     }
   }
   const exactRaw = resolution.value === 'Raw' && !downsampled.value
@@ -756,7 +756,7 @@ function exportData(): void {
   ]
   exportCsv(
     `trend_${new Date().toISOString().slice(0, 10)}.csv`,
-    [tr('trendsView.k89b4aa'), tr('trendsView.k8cff1c'), tr('trendsView.k521523'), tr('trendsView.k82f516')],
+    [tr('trendsView.k89b4aa'), tr('trendsView.k8cff1c'), tr('trendsView.k521523'), tr('trendsView.k82f516'), tr('trendsView.sourceColumn')],
     rows,
     preamble
   )

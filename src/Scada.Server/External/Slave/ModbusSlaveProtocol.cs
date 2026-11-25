@@ -65,7 +65,7 @@ public static class ModbusSlaveProtocol
         for (var i = 0; i < quantity; i++)
         {
             if (!table.TryGetValue(start + i, out var slot) || !slot.IsBit) continue;
-            var sample = ctx.Map.Read(slot, ctx.Options.BadQualityValue);
+            var sample = ctx.Map.Read(slot, ctx.Options.BadQualityValue, ctx.Options.SimulationExportQuality);
             if (sample.Value != 0) bytes[i / 8] |= (byte)(1 << (i % 8));
         }
         return PackBits(pdu[0], bytes);
@@ -210,7 +210,7 @@ public static class ModbusSlaveProtocol
             if (!table.TryGetValue(start + i, out var slot)) continue;
             if (!cache.TryGetValue(slot, out var words))
             {
-                var sample = ctx.Map.Read(slot, ctx.Options.BadQualityValue);
+                var sample = ctx.Map.Read(slot, ctx.Options.BadQualityValue, ctx.Options.SimulationExportQuality);
                 // 坏质量替代值可能超出测点类型范围（例如给 UInt16 测点配 -9999）。这种点送 0 比让整段读失败好；
                 // 编码失败时缓冲区保持全 0。
                 var bytes = new byte[RegisterValueCodec.ByteCount(slot.DataType)];

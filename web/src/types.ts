@@ -435,6 +435,8 @@ export interface TagValue {
   definitionRevision?: number | null
   /** 字符串测点的文本；数值测点为 null。 */
   text?: string | null
+  /** 来自仿真设备的值，质量仍可为 Good。 */
+  simulated?: boolean
 }
 
 export interface HistoryPoint {
@@ -442,6 +444,7 @@ export interface HistoryPoint {
   value: number
   quality: TagQuality
   text?: string | null
+  simulated?: boolean
 }
 
 export interface HistorySeries {
@@ -609,6 +612,8 @@ export interface Health {
   disk: { root: string; totalGb: number; freeGb: number }
   storage: { configDb: string; configDbBytes: number; historyBytes: number }
   ha?: { node: string; role: 'Primary' | 'Standby'; primaryUrl: string | null } | null
+  simulationDevices?: { id: number; name: string }[]
+  takeoverRecovery?: { active: boolean; promotedTs: number; message: string } | null
   spaceReclaim?: {
     targets: { id: string; path: string; autoVacuumMode: string; pageSize: number; pageCount: number; freelistPages: number; fileBytes: number; freelistBytes: number }[]
     lastRuns: { targetId: string; action: string; ok: boolean; reason?: string | null; beforeBytes: number; afterBytes: number; durationMs: number; ts: string }[]
