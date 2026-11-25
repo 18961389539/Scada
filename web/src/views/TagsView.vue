@@ -281,6 +281,7 @@ import TagBatchDialog from '../components/tags/TagBatchDialog.vue'
 import TagPreviewDialog from '../components/tags/TagPreviewDialog.vue'
 import TagUsageDialog from '../components/tags/TagUsageDialog.vue'
 import { emptyTagInput, tagToInput } from '../components/tags/tagInput'
+import { confirmExcelImportPreview } from '../composables/importPreview'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -738,15 +739,18 @@ async function importTags(file: File): Promise<void> {
   importing.value = true
   actionError.value = ''
   try {
-    const result = await tagApi.import(file)
+    const preview = await tagApi.importPreview(file)
+    if (!await confirmExcelImportPreview(preview, tr('importPreview.titleTags'))) return
+    const result = await tagApi.importApply(preview.id)
     await ElMessageBox.alert(
-      tr('tagsView.kfc1164', [result.created, result.updated, result.skipped, result.errors.length ? tr('tagsView.k5a171b', [result.errors.join('；')]) : '']),
-      tr('tagsView.k747404'),
+      tr('importPreview.done', [result.created, result.updated, result.skipped, result.conflicts ?? 0])
+        + (result.errors.length ? `\n${result.errors.join('\n')}` : ''),
+      tr('importPreview.titleTags'),
       { type: result.errors.length ? 'warning' : 'success' }
     )
     await load(true)
   } catch (error) {
-    actionError.value = errorMessage(error, tr('tagsView.ka01a8d'))
+    actionError.value = errorMessage(error, tr('importPreview.applyFailed'))
   } finally { importing.value = false }
 }
 

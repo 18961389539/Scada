@@ -40,4 +40,5 @@ public sealed class QualityInspection
     public long CreatedTs { get; set; }
     public long UpdatedTs { get; set; }
     public string CreatedBy { get; set; } = "";
+    public string UpdatedBy { get; set; } = "";
 }

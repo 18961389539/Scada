@@ -1386,6 +1386,13 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<long>("Ts")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<long>("UpdatedTs")
                         .HasColumnType("INTEGER");
 

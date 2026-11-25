@@ -391,20 +391,21 @@ public sealed class ControlCommandService
         return Math.Clamp((await db.ControlPoints.AsNoTracking().SingleAsync(x => x.TagId == tagId, ct)).FeedbackTimeoutMs, 100, 600_000);
     }
 
-    // 等待条件为真，返回是否满足及最后一次不满足的原因。
+    // 等待条件为真。表达式为假时继续等；引用测点质量无效或结果非有限值时立即按无法判定失败，不再空等到超时。
     public async Task<(bool Ok, string Why)> WaitAsync(string expression, TimeSpan timeout, CancellationToken ct)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (true)
         {
-            var (ok, why) = Evaluate(expression);
-            if (ok) return (true, "");
+            var (value, why) = TryEvaluate(expression);
+            if (value is null) return (false, $"无法判定：{why}");
+            if (value.Value) return (true, "");
             if (DateTime.UtcNow >= deadline) return (false, $"{why}，等待 {timeout.TotalMilliseconds:0} 毫秒超时");
             await Task.Delay(FeedbackPollMs, ct);
         }
     }
 
-    // 用实时值计算条件表达式；引用测点无有效值视为不满足。
+    // 用实时值计算条件表达式；引用测点无有效值视为不满足（许可条件等同步判定仍用此口径）。
     public (bool Ok, string Why) Evaluate(string expression)
     {
         string? missing = null;

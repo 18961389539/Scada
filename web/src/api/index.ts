@@ -2,6 +2,7 @@ import { http, readPage } from './http'
 import type { CommandSubmissionResult, GatewayCommandStatus } from './commandTypes'
 import { createCommandId } from './commandTypes'
 import type {
+  ExcelImportPreview,
   Area,
   Permission,
   RoleCatalog,
@@ -182,7 +183,16 @@ export const tagApi = {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
     ).data
-  }
+  },
+  importPreview: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return (await http.post<ExcelImportPreview>('/tags/import/preview', form, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })).data
+  },
+  importApply: async (previewId: string) =>
+    (await http.post<ImportResult>(`/tags/import/${previewId}`)).data
 }
 
 export interface AlarmRuleSimulateResult {
@@ -239,6 +249,13 @@ export const ruleApi = {
     form.append('file', file)
     return (await http.post<ImportResult>('/alarm-rules/import', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data
   },
+  importPreview: async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return (await http.post<ExcelImportPreview>('/alarm-rules/import/preview', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data
+  },
+  importApply: async (previewId: string) =>
+    (await http.post<ImportResult>(`/alarm-rules/import/${previewId}`)).data,
   simulate: async (id: number, body: { value: number; quality?: string; previousValue?: number; references?: Record<number, number>; referenceQualities?: Record<number, string> }) =>
     (await http.post<AlarmRuleSimulateResult>(`/alarm-rules/${id}/simulate`, body)).data,
   shelves: async (history = false) => (await http.get<AlarmShelve[]>('/alarm-shelves', { params: { history } })).data
@@ -409,7 +426,12 @@ export const qualityApi = {
     (await http.put<QualityInspection>(`/quality/inspections/${id}`, input)).data,
   removeInspection: async (id: number) => http.delete(`/quality/inspections/${id}`),
   summary: async (params: { from?: number; to?: number; areaId?: number; deviceId?: number; product?: string; batchNo?: string }) =>
-    (await http.get<QualitySummary>('/quality/summary', { params })).data
+    (await http.get<QualitySummary>('/quality/summary', { params })).data,
+  exportUrl: (params: Record<string, unknown>) => {
+    const q = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') q.set(k, String(v)) })
+    return `/api/quality/export?${q}`
+  }
 }
 
 export const userApi = {

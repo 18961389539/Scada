@@ -58,6 +58,8 @@ public sealed class ExternalOpcUaOptions
     public bool ExposeAlarmConditions { get; set; } = true;
     // 报警状态扫描周期，决定上级系统看到 Active/Acked 变化的延迟。
     public int AlarmPublishIntervalMs { get; set; } = 500;
+    // 默认只读：外部写入等于把 OPC UA 网络接进控制闭环，必须在部署时显式打开。
+    public bool AllowWrite { get; set; }
 }
 
 // 对外 Modbus TCP 从站：让上级 SCADA/PLC/数采网关按标准 Modbus 读本系统的实时值，并可写回控制点。

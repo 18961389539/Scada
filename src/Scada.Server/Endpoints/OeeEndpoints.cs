@@ -278,6 +278,26 @@ public static class OeeEndpoints
             var fileName = $"oee-{DateTime.UtcNow:yyyyMMddHHmmss}.{(pdf ? "pdf" : "xlsx")}";
             return Results.File(bytes, pdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         });
+        group.MapGet("/shift-timezone", (ShiftTimeZoneService zones) => Results.Ok(zones.Get()));
+        group.MapPut("/shift-timezone", async (ShiftTimeZoneRequest request, HttpContext http, ShiftTimeZoneService zones, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "修改班次时区", "修改班次时区需要全部区域的配置权限");
+            try
+            {
+                var before = zones.Get();
+                var after = zones.Set(request.TimeZone);
+                await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+                runtime.OperationLogs.Add(Audit.Change(http, "修改班次时区", "ShiftTimeZone", null, before.Configured, after.Configured));
+                await runtime.SaveChangesAsync(ct);
+                return Results.Ok(after);
+            }
+            catch (ArgumentException ex)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization(AccessPolicies.GlobalConfigure);
+
         group.MapGet("/thresholds", async (OeeService oee, CancellationToken ct) =>
         {
             var (th, rev) = await oee.GetThresholdsAsync(ct);

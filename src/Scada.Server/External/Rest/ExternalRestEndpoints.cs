@@ -132,7 +132,7 @@ public static class ExternalRestEndpoints
             {
                 rest = new { v.Rest.Enabled, v.Rest.AllowJwt, cors = v.Rest.CorsOrigins, v.Rest.DefaultRateLimitPerMinute },
                 tcp = new { v.Tcp.Enabled, v.Tcp.ListenAddress, v.Tcp.Port, v.Tcp.Tls, v.Tcp.MaxConnections, v.Tcp.IpAllowlist, connections = tcpHost?.ConnectionCount ?? 0 },
-                opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword, running = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.IsRunning ?? false, endpoint = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.EndpointUrl },
+                opcUa = new { v.OpcUa.Enabled, v.OpcUa.EndpointUrl, v.OpcUa.SecurityModes, v.OpcUa.AllowAnonymous, v.OpcUa.AllowUsernamePassword, v.OpcUa.AllowWrite, running = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.IsRunning ?? false, endpoint = http.RequestServices.GetService<OpcUa.ExternalOpcUaHost>()?.EndpointUrl },
                 // 反向下行：从站对外暴露的地址数量与当前连接数，供运维确认"上级主站到底连上没有"。
                 modbusSlave = new
                 {

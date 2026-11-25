@@ -99,6 +99,9 @@
         <el-table-column v-if="showEngineering" :label="$t('devicesView.commFailures')" width="100" show-overflow-tooltip>
           <template #default="{ row }">{{ deviceHealth(row.id)?.commFailures ?? '--' }}</template>
         </el-table-column>
+        <el-table-column v-if="showEngineering" :label="$t('devicesView.lastError')" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ deviceHealth(row.id)?.error || '—' }}</template>
+        </el-table-column>
         <el-table-column :label="$t('devicesView.kd4e9ca')" width="80" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag :class="{ 'tag-quiet': row.enabled }" :type="row.enabled ? undefined : 'warning'" size="small">{{ row.enabled ? $t('devicesView.kd4e9ca') : $t('devicesView.kd989e5') }}</el-tag>
@@ -148,6 +151,8 @@ import type { Area, Device, DeviceInput, DeviceStatus } from '../types'
 import { can, canGlobal } from '../access/policies'
 import { protocolLabel } from '../protocols'
 import OpcCertificatesDialog from '../components/OpcCertificatesDialog.vue'
+import { opcApi } from '../api/opc'
+import { summarizeCertificateExpiry } from '../composables/opcCertificateExpiry'
 import OpcBrowserDialog from '../components/OpcBrowserDialog.vue'
 import CollectorDiagnosticsDialog from '../components/CollectorDiagnosticsDialog.vue'
 import GatewayAssignmentDialog from '../components/GatewayAssignmentDialog.vue'
@@ -236,11 +241,13 @@ const pageIssues = computed<PageIssue[]>(() => {
   if (areasError.value) issues.push({ id: 'areas', test: 'devices-areas-error', level: 'warning', message: areasError.value, action: tr('common.retry'), actionTest: 'devices-areas-retry' })
   if (healthError.value) issues.push({ id: 'health', test: 'devices-health-error', level: 'warning', message: healthError.value, action: tr('common.retry'), actionTest: 'devices-health-retry' })
   if (actionError.value) issues.push({ id: 'action', test: 'devices-action-error', level: 'error', message: actionError.value })
+  if (certWarning.value) issues.push({ id: 'certs', test: 'devices-cert-expiry', level: 'warning', message: certWarning.value, action: tr('devicesView.viewCertificates'), actionTest: 'devices-cert-open' })
   return issues
 })
 function onStatusAction(id: string): void {
   if (id === 'load' || id === 'areas') void load()
   if (id === 'health') void loadHealth()
+  if (id === 'certs') certificatesVisible.value = true
 }
 function onMoreCommand(command: string): void {
   if (command === 'certificates') certificatesVisible.value = true
@@ -253,9 +260,44 @@ const batchProgress = ref('')
 function onSelect(rows: Device[]): void { selected.value = rows }
 
 const certificatesVisible = ref(false), browseVisible = ref(false), browseDevice = ref<Device | null>(null)
+const certWarning = ref('')
+let certScan = 0
+let certController: AbortController | undefined
 watch(certificatesVisible, visible => { if (visible) void loadCertificateDevices() })
 async function loadCertificateDevices(): Promise<void> {
   try { certificateList.value = await deviceApi.list() } catch { /* 证书对话框保持上次列表；打不开时仍可看中心证书 */ }
+}
+async function scanCertificates(): Promise<void> {
+  if (!canOpenCertificates.value) { certWarning.value = ''; return }
+  const current = ++certScan
+  certController?.abort()
+  const request = certController = new AbortController()
+  try {
+    const expired: string[] = []
+    const expiring: string[] = []
+    const collect = (label: string, certs: { subject: string; notAfter: string; store: string }[]) => {
+      const summary = summarizeCertificateExpiry(certs)
+      if (summary.expired.length) expired.push(`${label}: ${summary.expired.map(x => x.subject || x.notAfter).join('、')}`)
+      if (summary.expiring.length) expiring.push(`${label}: ${summary.expiring.map(x => x.subject || x.notAfter).join('、')}`)
+    }
+    if (globalConfigure.value) {
+      try { collect(tr('opcCertificatesDialog.k3963d7'), await opcApi.certificates(undefined, request.signal)) }
+      catch { /* 中心证书读失败不挡住设备页 */ }
+    }
+    const remotes = devices.value.filter(d => d.protocol === 'OpcUa' && d.gatewayId != null && canConfigureDevice(d))
+    for (const device of remotes) {
+      if (request.signal.aborted || current !== certScan) return
+      try {
+        collect(tr('opcCertificatesDialog.kc3a1fc', [device.gatewayId, device.name]), await opcApi.certificates({ deviceId: device.id, gatewayId: device.gatewayId! }, request.signal))
+      } catch { /* 单台网关失败时继续扫其余证书 */ }
+    }
+    if (current !== certScan) return
+    if (expired.length) certWarning.value = tr('devicesView.certExpired', [expired.join('；')])
+    else if (expiring.length) certWarning.value = tr('devicesView.certExpiring', [expiring.join('；')])
+    else certWarning.value = ''
+  } catch {
+    if (current === certScan) certWarning.value = ''
+  }
 }
 const diagnosticsVisible = ref(false), diagnosticDevice = ref<Device | null>(null)
 const simulationVisible = ref(false), simulationDevice = ref<Device | null>(null)
@@ -290,7 +332,8 @@ function healthTagType(id: number): 'success' | 'danger' | 'info' | 'warning' | 
 function healthTooltip(device: Device): string {
   const status = deviceHealth(device.id)
   const poll = status?.lastPollTs ? formatTime(status.lastPollTs) : '--'
-  return tr('devicesView.healthTooltip', [healthLabel(device.id), poll, status?.commFailures ?? '--'])
+  const base = tr('devicesView.healthTooltip', [healthLabel(device.id), poll, status?.commFailures ?? '--'])
+  return status?.error ? `${base} · ${tr('devicesView.lastError')}: ${status.error}` : base
 }
 async function loadHealth(): Promise<void> {
   try {
@@ -403,6 +446,7 @@ async function load(): Promise<void> {
   const catalogTask = loadAreasAndChannels()
   if (filterHealth.value !== 'all') await healthTask
   await Promise.all([loadDevices(), catalogTask, healthTask])
+  void scanCertificates()
 }
 usePolling(loadHealth, 15000)
 
@@ -522,7 +566,7 @@ async function openDiagnoseFromQuery(): Promise<void> {
   }
   if (device && canConfigureDevice(device)) { diagnosticDevice.value = device; diagnosticsVisible.value = true }
 }
-onBeforeUnmount(() => { loadVersion++; catalogVersion++ })
+onBeforeUnmount(() => { loadVersion++; catalogVersion++; certScan++; certController?.abort() })
 onMounted(load)
 </script>
 

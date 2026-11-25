@@ -79,6 +79,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'traceability', path: '/traceability', titleKey: 'traceability.title', keywordsKey: 'traceability.keywords', icon: Aim, group: 'production', policy: 'any-view' },
   { id: 'trends', path: '/trends', titleKey: 'navMenu.k402be4', keywordsKey: 'nav.kw.trends', icon: TrendCharts, group: 'monitoring' },
   { id: 'alarms', path: '/alarms', titleKey: 'navMenu.k9f45b3', keywordsKey: 'nav.kw.alarms', icon: Bell, group: 'monitoring', quick: true },
+  { id: 'handover', path: '/handover', titleKey: 'dutyHandover.title', keywordsKey: 'dutyHandover.keywords', icon: Tickets, group: 'monitoring' },
   { id: 'alarm-analytics', path: '/alarm-analytics', titleKey: 'navMenu.kfce701', keywordsKey: 'nav.kw.alarmAnalytics', icon: PieChart, group: 'monitoring' },
   { id: 'oee', path: '/oee', titleKey: 'navMenu.oee', keywordsKey: 'nav.kw.oee', icon: Histogram, group: 'production' },
   { id: 'production-events', path: '/production/events', titleKey: 'ux.events.title', keywordsKey: 'ux.events.keywords', icon: Timer, group: 'production', policy: 'any-control' },

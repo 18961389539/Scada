@@ -15,7 +15,9 @@ export interface BackupRun {
   trigger: string; startedAt: string; finishedAt: string; fileName: string | null; bytes: number; ok: boolean; error: string | null
   drill: BackupDrill | null; targets: BackupTargetResult[]; pruned: string[]
 }
-export interface BackupSummary { fileName: string; bytes: number; createdAt: string }
+export interface BackupSummary { fileName: string; bytes: number; createdAt: string; encrypted?: boolean; path?: string }
+export interface BackupSecurity { development: boolean; passwordConfigured: boolean; plaintextRisk: boolean; warning?: string | null }
+export interface BackupVerification { valid: boolean; problems: string[]; manifest?: { createdAt?: string; devices?: number; tags?: number; historyFiles?: number } | null }
 export interface DesktopClient {
   clientId: string; machineName: string; windowsUser: string; userId: number | null; userName: string | null
   targetKind: string | null; targetId: number | null; targetName: string | null
@@ -42,6 +44,10 @@ export const opsApi = {
   switchover: async (reason: string) => (await http.post('/ha/switchover', { reason })).data,
   promote: async (reason: string, force: boolean) => (await http.post('/ha/promote', { reason, force })).data,
   backups: async () => (await http.get<BackupSummary[]>('/maintenance/backups')).data,
+  backupSecurity: async () => (await http.get<BackupSecurity>('/maintenance/backups/security')).data,
+  verify: async (fileName: string) => (await http.post<BackupVerification>(`/maintenance/backups/${encodeURIComponent(fileName)}/verify`, null, { timeout: 600000 })).data,
+  downloadUrl: (fileName: string) => `/api/maintenance/backups/${encodeURIComponent(fileName)}`,
+  diagnosticsUrl: () => '/api/maintenance/diagnostics',
   runs: async () => (await http.get<BackupRun[]>('/maintenance/backups/runs')).data,
   targets: async () => (await http.get<{ name: string; kind: string; keepLatest: number }[]>('/maintenance/backups/targets')).data,
   run: async () => (await http.post<BackupRun>('/maintenance/backups/run', null, { timeout: 600000 })).data,

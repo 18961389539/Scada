@@ -37,7 +37,34 @@
           <span class="status-label">{{ $t('externalApiView.openapi') }}</span>
           <span class="status-value mono">/openapi/v1.json</span>
         </div>
+        <div class="status-item">
+          <span class="status-label">{{ $t('externalApiView.modbus') }}</span>
+          <span class="status-value mono" :title="slaveTitle(status.modbusSlave)">
+            <span class="status-dot" :class="slaveDot(status.modbusSlave)" />
+            {{ slaveLabel(status.modbusSlave, 'allowWrite') }}
+          </span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">{{ $t('externalApiView.iec104') }}</span>
+          <span class="status-value mono" :title="slaveTitle(status.iec104Server)">
+            <span class="status-dot" :class="slaveDot(status.iec104Server)" />
+            {{ slaveLabel(status.iec104Server, 'allowControl') }}
+          </span>
+        </div>
       </div>
+      <el-alert
+        v-if="mappingWarnings.length"
+        type="warning"
+        :closable="false"
+        show-icon
+        data-test="ext-map-warnings"
+        :title="$t('externalApiView.mappingWarnings')"
+        style="margin-bottom: 12px"
+      >
+        <ul class="warn-list">
+          <li v-for="(warning, index) in mappingWarnings" :key="index">{{ warning }}</li>
+        </ul>
+      </el-alert>
 
       <div data-test="ext-table">
         <el-table :data="keys" size="small" v-loading="loading" :empty-text="loadError || undefined">
@@ -55,6 +82,13 @@
               <el-switch :model-value="row.enabled" :disabled="!!row.revokedTs" @change="(v: boolean) => toggle(row, v)" />
             </template>
           </el-table-column>
+          <el-table-column :label="$t('externalApiView.createdAt')" width="160" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.createdTs ? formatTime(row.createdTs) : '—' }}</template>
+          </el-table-column>
+          <el-table-column :label="$t('externalApiView.lastUsed')" width="160" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.lastUsedTs ? formatTime(row.lastUsedTs) : $t('externalApiView.neverUsed') }}</template>
+          </el-table-column>
+          <el-table-column prop="notes" :label="$t('externalApiView.notes')" min-width="140" show-overflow-tooltip />
           <el-table-column :label="$t('externalApiView.actions')" width="120" fixed="right">
             <template #default="{ row }">
               <el-popconfirm v-if="!row.revokedTs" :title="$t('externalApiView.confirmRevoke')" @confirm="revoke(row.id)">
@@ -112,8 +146,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { externalApi, type ExternalApiKey, type ExternalStatus } from '../api/external'
+import { externalApi, type ExternalApiKey, type ExternalEndpointStatus, type ExternalStatus } from '../api/external'
 import { http, errorMessage } from '../api/http'
+import { formatTime } from '../utils'
 import { tr } from '../i18n'
 import { useEditDialog } from '../composables/useEditDialog'
 
@@ -130,8 +165,36 @@ const opcUaLabel = computed(() => {
   const o = status.value?.opcUa
   if (!o?.enabled) return tr('externalApiView.off')
   const ep = o.endpoint || o.endpointUrl || ''
-  return o.running ? `${tr('externalApiView.running')} ${ep}` : `${tr('externalApiView.starting')} ${ep}`
+  const write = o.allowWrite ? tr('externalApiView.writeAllowed') : tr('externalApiView.writeDenied')
+  const state = o.running ? tr('externalApiView.running') : tr('externalApiView.starting')
+  return `${state} ${ep} · ${write}`
 })
+
+const mappingWarnings = computed(() => status.value?.modbusSlave?.warnings?.filter(Boolean) ?? [])
+
+function slaveDot(item?: ExternalEndpointStatus): string {
+  if (!item?.enabled) return 'is-off'
+  return item.running ? 'is-on' : 'is-warn'
+}
+
+function writeLabel(item: ExternalEndpointStatus | undefined, flag: 'allowWrite' | 'allowControl'): string {
+  const allowed = flag === 'allowControl' ? item?.allowControl : item?.allowWrite
+  return allowed ? tr('externalApiView.writeAllowed') : tr('externalApiView.writeDenied')
+}
+
+function slaveLabel(item: ExternalEndpointStatus | undefined, flag: 'allowWrite' | 'allowControl'): string {
+  if (!item?.enabled) return tr('externalApiView.off')
+  const endpoint = item.listenAddress && item.port != null ? `${item.listenAddress}:${item.port}` : ''
+  const state = item.running ? tr('externalApiView.running') : tr('externalApiView.starting')
+  const mapped = tr('externalApiView.mappedPoints', [item.mappedPoints ?? 0, item.connections ?? 0])
+  return `${state} ${endpoint} · ${writeLabel(item, flag)} · ${mapped}`
+}
+
+function slaveTitle(item?: ExternalEndpointStatus): string {
+  if (!item?.enabled) return ''
+  const warnings = item.warnings?.length ? ` · ${item.warnings.join('；')}` : ''
+  return `${slaveLabel(item, item.allowControl != null ? 'allowControl' : 'allowWrite')}${warnings}`
+}
 
 async function load() {
   loading.value = true
@@ -258,4 +321,6 @@ onMounted(load)
   box-shadow: 0 0 0 3px rgba(212, 136, 6, 0.14);
 }
 .muted { color: var(--scada-text-muted); }
+.warn-list { margin: 6px 0 0; padding-left: 1.1em; }
+
 </style>

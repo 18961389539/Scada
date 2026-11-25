@@ -129,4 +129,47 @@ public sealed class SpcQualityApiTests : IClassFixture<AuthorizationTests.Site>
         Assert.False(view.GetProperty("limitsProvisional").GetBoolean());
     }
 
+    [Fact]
+    public async Task BadQualityDoesNotJoinInterruptedPendingIntoTheSameSubgroup()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var name = Unique("SPC-GAP-");
+        var body = new
+        {
+            name, enabled = true, areaId = _site.AreaA, tagId = _site.TagA, chartType = "XbarR", subgroupSize = 3,
+            samplingIntervalSec = 5, baselineSubgroups = 5, autoLimits = false,
+            centerLine = 10.0, upperControlLimit = 20.0, lowerControlLimit = 0.0,
+            specUpperLimit = 30.0, specLowerLimit = 0.0,
+            ruleBeyond3Sigma = true, ruleTwoOfThreeBeyond2Sigma = false, ruleFourOfFiveBeyond1Sigma = false,
+            ruleEightOnOneSide = false, ruleRangeBeyondLimit = false, description = "", revision = 0
+        };
+        var created = await Json(await admin.PostAsJsonAsync("/api/spc/charts", body));
+        var chartId = created.GetProperty("id").GetInt32();
+        var cache = _site.Services.GetRequiredService<IRealtimeCache>();
+        var monitor = _site.Services.GetRequiredService<SpcMonitorService>();
+        var t0 = ScadaTime.NowMs();
+
+        cache.Set(new TagValue(_site.TagA, 1, TagQuality.Good, t0));
+        await monitor.SampleOnceAsync(t0, default, forceReload: true);
+        cache.Set(new TagValue(_site.TagA, 2, TagQuality.Good, t0 + 5_000));
+        await monitor.SampleOnceAsync(t0 + 5_000, default, forceReload: true);
+
+        cache.Set(new TagValue(_site.TagA, 99, TagQuality.Bad, t0 + 10_000));
+        await monitor.SampleOnceAsync(t0 + 10_000, default, forceReload: true);
+
+        cache.Set(new TagValue(_site.TagA, 10, TagQuality.Good, t0 + 15_000));
+        await monitor.SampleOnceAsync(t0 + 15_000, default, forceReload: true);
+        cache.Set(new TagValue(_site.TagA, 11, TagQuality.Good, t0 + 20_000));
+        await monitor.SampleOnceAsync(t0 + 20_000, default, forceReload: true);
+        cache.Set(new TagValue(_site.TagA, 12, TagQuality.Good, t0 + 25_000));
+        await monitor.SampleOnceAsync(t0 + 25_000, default, forceReload: true);
+
+        var samples = await Json(await admin.GetAsync($"/api/spc/charts/{chartId}/samples?from={t0 - 1000}&to={t0 + 30_000}"));
+        var rows = samples.EnumerateArray().ToArray();
+        var sample = Assert.Single(rows);
+        var values = System.Text.Json.JsonSerializer.Deserialize<double[]>(sample.GetProperty("valuesJson").GetString()!)!;
+        Assert.Equal(new[] { 10.0, 11.0, 12.0 }, values);
+        Assert.Equal(11.0, sample.GetProperty("mean").GetDouble());
+    }
+
 }

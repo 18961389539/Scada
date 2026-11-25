@@ -935,7 +935,12 @@ export default {
     confirmDeleteDefect: 'Delete defect code "{0}"? It will be rejected if inspections exist.',
     defectCount: 'Defects', cumulative: 'Cumulative %',
     loadFailed: 'Could not read quality data', saveFailed: 'Could not save', deleteFailed: 'Could not delete',
-    saved: 'Saved', deleted: 'Deleted', noAreas: 'Your account has no area where inspections can be recorded'
+    saved: 'Saved', deleted: 'Deleted', noAreas: 'Your account has no area where inspections can be recorded',
+    exportExcel: 'Export Excel',
+    exportPdf: 'Export PDF',
+    createdBy: 'Created by',
+    updated: 'Updated',
+    revised: 'Revised'
   },
   screenHandoff: {
     controlsPaused: 'A newer screen version was published. Controls are paused until you refresh.',
@@ -996,5 +1001,79 @@ export default {
     soundMuted: 'Muted',
     soundOn: 'Sound on',
     criticalTitle: 'Critical alarm'
+  },
+  importPreview: {
+    titleTags: 'Tag import preview',
+    titleRules: 'Alarm rule import preview',
+    summary: '{0} new, {1} updated, {2} skipped, {3} conflicts',
+    impact: 'Confirming writes the changes immediately and reloads collection. Writes are rejected during the reload, and devices whose fingerprint changed may reconnect.',
+    noChanges: 'There is nothing to apply. No data was written.',
+    errors: 'Errors ({0})',
+    confirm: 'Confirm import',
+    cancel: 'Cancel',
+    previewFailed: 'Preview failed',
+    applyFailed: 'Import failed',
+    done: 'Import finished: {0} new, {1} updated, {2} skipped, {3} conflicts'
+  },
+  soundMute: {
+    confirmTitle: 'Alarm sound is muted',
+    confirmBody: 'Alarm sound is muted for the user signed in on this computer. Unmute it if the incoming shift needs to hear alarms. Please confirm that you have seen this.',
+    acknowledge: 'Keep muted',
+    unmute: 'Unmute'
+  },
+  shiftZone: {
+    label: 'Shift time zone',
+    serverLocal: 'Not configured; using the server local time zone ({0})',
+    configured: 'Current shift time zone: {0}',
+    placeholder: 'Choose a time zone, or leave empty to use the server local time zone',
+    serverLocalOption: 'Use the server local time zone',
+    saved: 'Shift time zone updated',
+    saveFailed: 'Could not save the shift time zone',
+    loadFailed: 'Could not load the shift time zone',
+    notPersisted: 'The change is active in this process but was not written to the site settings file, so it may revert after a restart.',
+    needGlobal: 'Changing the shift time zone requires configure permission for all areas.'
+  },
+  dutyHandover: {
+    title: 'Shift summary',
+    keywords: 'handover shift summary duty unacked shelved pending',
+    hint: 'A printable snapshot of unacknowledged alarms, shelves, pending approvals, and running sequences or recipes. This is not a roster or attendance tool.',
+    print: 'Print',
+    refresh: 'Refresh',
+    loadFailed: 'Could not load the shift summary',
+    generatedAt: 'Generated at {0}',
+    operator: 'Current user: {0}',
+    unacked: 'Unacknowledged alarms',
+    unackedByLevel: 'By level',
+    rtnUnack: 'Returned unacknowledged',
+    shelved: 'Shelved',
+    suppressed: 'Suppressed',
+    pendingReview: 'Pending approval',
+    noPending: 'No pending control requests',
+    runningSequences: 'Running sequences',
+    runningRecipes: 'Running recipe downloads',
+    noneRunning: 'Nothing is running',
+    sound: 'Alarm sound on this computer',
+    muted: 'Muted',
+    unmuted: 'On',
+    dataFreshness: 'Data status',
+    stale: 'Data may be stale, or the health check failed',
+    fresh: 'Health check is normal',
+    unknown: 'Health status unknown',
+    standby: 'This node is standby. Primary: {0}',
+    emptyLevel: 'None'
+  },
+  alarmReconnect: {
+    missedTitle: 'Critical alarms during the disconnect',
+    missedBody: 'After reconnecting, {0} critical alarm(s) are still active or have returned but are unacknowledged. Please review them.',
+    open: 'Open alarms',
+    dismiss: 'Dismiss'
+  },
+  kioskStatus: {
+    reconnecting: 'Reconnecting',
+    disconnected: 'Disconnected',
+    standby: 'This node is standby',
+    primary: 'Primary {0}',
+    healthIssue: 'Service issue'
   }
+
 }

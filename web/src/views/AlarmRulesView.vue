@@ -370,13 +370,15 @@ async function onImportFile(event: Event): Promise<void> {
   importing.value = true
   actionError.value = ''
   try {
-    const result = await ruleApi.import(file)
-    const summary = tr('alarmRulesView.importDone', [result.created, result.updated, result.skipped])
-    if (result.errors.length) await ElMessageBox.alert(`${summary}\n${result.errors.join('\n')}`, tr('alarmRulesView.importRules'), { type: 'warning', confirmButtonText: tr('alarmRulesView.kcb63c6') })
+    const preview = await ruleApi.importPreview(file)
+    if (!await confirmExcelImportPreview(preview, tr('importPreview.titleRules'))) return
+    const result = await ruleApi.importApply(preview.id)
+    const summary = tr('importPreview.done', [result.created, result.updated, result.skipped, result.conflicts ?? 0])
+    if (result.errors.length) await ElMessageBox.alert(`${summary}\n${result.errors.join('\n')}`, tr('importPreview.titleRules'), { type: 'warning', confirmButtonText: tr('alarmRulesView.kcb63c6') })
     else ElMessage.success(summary)
     await load()
   } catch (error) {
-    actionError.value = errorMessage(error, tr('alarmRulesView.importFailed'))
+    actionError.value = errorMessage(error, tr('importPreview.applyFailed'))
   } finally {
     importing.value = false
   }

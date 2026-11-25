@@ -454,6 +454,58 @@ public static class TagEndpoints
                 $"tags_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
         }).RequireAuthorization(AccessPolicies.Configure);
 
+        group.MapPost("/import/preview", async (
+            IFormFile file,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            TagExcelService excel,
+            HttpContext http,
+            CancellationToken cancellationToken) =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "预览测点 Excel", "Excel 导入需要全部区域的配置权限");
+            if (http.User.GetUserId() is not int owner) return EndpointHelpers.BadRequest("无法识别当前用户");
+            var check = ValidateExcelUpload(file, xlsxOnly: true);
+            if (check is not null) return check;
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                return Results.Ok(await excel.PreviewAsync(stream, file.FileName, owner, contextFactory, runtimeFactory, cancellationToken));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
+        })
+            .DisableAntiforgery()
+            .RequireAuthorization(AccessPolicies.Configure)
+            .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
+
+        group.MapPost("/import/{previewId}", async (
+            string previewId,
+            IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            TagExcelService excel,
+            ConfigReloader reloader,
+            HttpContext http,
+            CancellationToken cancellationToken) =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "导入测点 Excel", "Excel 导入需要全部区域的配置权限");
+            if (http.User.GetUserId() is not int owner) return EndpointHelpers.BadRequest("无法识别当前用户");
+            try
+            {
+                var result = await excel.ApplyPreviewAsync(owner, previewId, contextFactory, runtimeFactory, owner, http.User.GetUserName(), cancellationToken);
+                await reloader.ReloadAsync(cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
+        })
+            .RequireAuthorization(AccessPolicies.Configure)
+            .Produces<ImportResult>(StatusCodes.Status200OK)
+            .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
+
         group.MapPost("/import", async (
             IFormFile file,
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
@@ -462,18 +514,11 @@ public static class TagEndpoints
             HttpContext http,
             CancellationToken cancellationToken) =>
         {
-            // Excel 导入可能涉及任意设备，要求全部区域的配置权限。
+            // 保留直接导入以兼容旧客户端；Web 界面改为先预览再应用。
             if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
                 return await Audit.ForbidAsync(http, "导入测点 Excel", "Excel 导入需要全部区域的配置权限");
-            if (file.Length == 0 || file.Length > 20 * 1024 * 1024)
-            {
-                return EndpointHelpers.BadRequest("文件为空或超过 20 MB");
-            }
-
-            if (!Path.GetExtension(file.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
-            {
-                return EndpointHelpers.BadRequest("仅支持 .xlsx 文件");
-            }
+            var check = ValidateExcelUpload(file, xlsxOnly: true);
+            if (check is not null) return check;
 
             await using var stream = file.OpenReadStream();
             var result = await excel.ImportAsync(stream, contextFactory, runtimeFactory, cancellationToken, http.User.GetUserId(), http.User.GetUserName(), file.FileName);
@@ -485,6 +530,18 @@ public static class TagEndpoints
             .Produces<ImportResult>(StatusCodes.Status200OK)
             // 万点级导入同样超过默认读超时，放宽到写超时。
             .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
+    }
+
+
+    private static IResult? ValidateExcelUpload(IFormFile file, bool xlsxOnly)
+    {
+        if (file.Length == 0 || file.Length > 20 * 1024 * 1024)
+            return EndpointHelpers.BadRequest("文件为空或超过 20 MB");
+        var extension = Path.GetExtension(file.FileName);
+        if (xlsxOnly)
+            return extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase) ? null : EndpointHelpers.BadRequest("仅支持 .xlsx 文件");
+        return extension.Equals(".xlsx", StringComparison.OrdinalIgnoreCase) || extension.Equals(".csv", StringComparison.OrdinalIgnoreCase)
+            ? null : EndpointHelpers.BadRequest("仅支持 .xlsx 或 .csv 文件");
     }
 
     private static Tag MapTag(TagRequest request) => new()

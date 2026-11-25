@@ -39,6 +39,7 @@
           </el-table>
         </el-tab-pane>
         <el-tab-pane v-if="!operationsOnly" :label="$t('oee.shifts')" name="shifts">
+          <ShiftTimeZoneBar />
           <el-button v-if="canConfigure" type="primary" size="small" data-test="oee-add-shift" @click="editShift()">{{ $t('oee.add') }}</el-button>
           <el-table :data="shifts" size="small" class="mt" data-test="oee-shifts">
             <el-table-column prop="name" :label="$t('oee.name')" min-width="120" show-overflow-tooltip />
@@ -181,6 +182,7 @@
 </template>
 
 <script setup lang="ts">
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'

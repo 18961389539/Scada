@@ -363,14 +363,15 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 if (!string.IsNullOrWhiteSpace(step.ConfirmExpression))
                 {
                     var (ok, why) = await commands.WaitAsync(step.ConfirmExpression, timeout, wait);
-                    if (!ok) return (false, $"完成条件未满足：{why}", null);
+                    if (!ok) return (false, why.Contains("无法判定", StringComparison.Ordinal) ? $"完成条件无法判定：{why}" : $"完成条件未满足：{why}", null);
                 }
                 return (true, result.Message, Fallthrough(ctx, i));
             }
             case "wait":
             {
                 var (ok, why) = await commands.WaitAsync(step.Expression!, timeout, wait);
-                return ok ? (true, "条件成立", Fallthrough(ctx, i)) : (false, $"等待条件超时：{why}", null);
+                if (ok) return (true, "条件成立", Fallthrough(ctx, i));
+                return (false, why.Contains("无法判定", StringComparison.Ordinal) ? $"等待条件无法判定：{why}" : $"等待条件超时：{why}", null);
             }
             case "condition":
             {

@@ -88,10 +88,12 @@
 
     <div class="panel" data-test="backup-panel">
       <el-alert type="info" show-icon :closable="false" :title="$t('opsView.fullBackupHint')" data-test="backup-kind-hint" style="margin-bottom: 8px" />
+      <el-alert v-if="backupSecurity?.plaintextRisk" type="warning" show-icon :closable="false" :title="$t('opsView.plaintextRisk')" data-test="backup-plaintext-risk" style="margin-bottom: 8px" />
       <div class="toolbar">
         <h3>{{ $t('opsView.k3199f6') }}</h3>
         <span class="hint">{{ $t('opsView.ka93a8d', [targets.length ? targets.map(t => $t('opsView.k86a85f', [t.name, targetKind(t.kind), t.keepLatest])).join('、') : $t('opsView.k63595e')]) }}</span>
         <span class="spacer" />
+        <el-button :loading="diagnosticsBusy" data-test="diagnostics-download" @click="downloadDiagnostics()">{{ $t('opsView.downloadDiagnostics') }}</el-button>
         <el-button type="primary" :loading="running" data-test="backup-run" @click="runBackup()">{{ $t('opsView.k982e93') }}</el-button>
       </div>
       <el-table :data="runs" size="small" :empty-text="readError && !runs.length ? readError : $t('opsView.ke8e754')" data-test="backup-runs">
@@ -108,10 +110,26 @@
         <el-table-column :label="$t('opsView.k26670d')" min-width="220" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ problems(row) }}</span></template></el-table-column>
       </el-table>
       <div class="toolbar" style="margin-top: 8px"><strong class="tiny">{{ $t('opsView.k82e94d') }}</strong></div>
-      <el-table :data="backups" size="small" max-height="240" :empty-text="readError && !backups.length ? readError : $t('opsView.k488e58')">
-        <el-table-column prop="fileName" :label="$t('opsView.k49deaf')" min-width="260" show-overflow-tooltip />
+      <el-table :data="backups" size="small" max-height="320" :empty-text="readError && !backups.length ? readError : $t('opsView.k488e58')" data-test="backup-list">
+        <el-table-column prop="fileName" :label="$t('opsView.k49deaf')" min-width="240" show-overflow-tooltip />
+        <el-table-column :label="$t('opsView.createdAt')" width="170" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.createdAt ? formatTime(Date.parse(row.createdAt)) : '—' }}</template>
+        </el-table-column>
         <el-table-column :label="$t('opsView.kfd2070')" width="110" show-overflow-tooltip><template #default="{ row }">{{ formatBytes(row.bytes) }}</template></el-table-column>
-        <el-table-column :label="$t('opsView.kf3ea6d')" width="120" show-overflow-tooltip><template #default="{ row }"><el-button size="small" :loading="drilling === row.fileName" :disabled="!!drilling && drilling !== row.fileName" data-test="backup-drill" @click="drill(row.fileName)">{{ $t('opsView.k971ee3') }}</el-button></template></el-table-column>
+        <el-table-column :label="$t('opsView.encryption')" width="90">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.encrypted ? 'success' : 'warning'" :data-test="row.encrypted ? 'backup-encrypted' : 'backup-plaintext'">
+              {{ row.encrypted ? $t('opsView.encrypted') : $t('opsView.plaintext') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('opsView.kf3ea6d')" width="260" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-button size="small" :loading="drilling === row.fileName" :disabled="!!drilling && drilling !== row.fileName" data-test="backup-drill" @click="drill(row.fileName)">{{ $t('opsView.k971ee3') }}</el-button>
+            <el-button size="small" :loading="verifying === row.fileName" :disabled="!!verifying && verifying !== row.fileName" data-test="backup-verify" @click="verify(row.fileName)">{{ $t('opsView.verify') }}</el-button>
+            <el-button size="small" :loading="downloading === row.fileName" :disabled="!!downloading && downloading !== row.fileName" data-test="backup-download" @click="downloadBackup(row.fileName)">{{ $t('opsView.download') }}</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <p class="tiny muted">{{ $t('opsView.k13006b') }} <code>/metrics</code>{{ $t('opsView.k84669a') }} <code>Scada:MetricsToken</code> {{ $t('opsView.k0d630f') }}</p>
     </div>
@@ -122,11 +140,14 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { opsApi } from '../api/ops'
-import type { BackupRun, BackupSummary, DesktopClient, DesktopClientList, HaStatus } from '../api/ops'
+import type { BackupRun, BackupSecurity, BackupSummary, DesktopClient, DesktopClientList, HaStatus } from '../api/ops'
 import { errorMessage } from '../api/http'
-import { formatBytes, formatTime } from '../utils'
+import { downloadBlob, formatBytes, formatTime } from '../utils'
 import { usePolling } from '../composables/usePolling'
+import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
+
+const auth = useAuthStore()
 
 const ha = ref<HaStatus | null>(null)
 const desktop = ref<DesktopClientList | null>(null)
@@ -149,7 +170,11 @@ const policyText = computed(() => {
 const runs = ref<BackupRun[]>([])
 const backups = ref<BackupSummary[]>([])
 const targets = ref<{ name: string; kind: string; keepLatest: number }[]>([])
+const backupSecurity = ref<BackupSecurity | null>(null)
 const running = ref(false)
+const verifying = ref('')
+const downloading = ref('')
+const diagnosticsBusy = ref(false)
 // 交接要等对端同步，期间再点一次会再发一次切换/接管（备机上还可能走到强制接管）
 const haBusy = ref(false)
 const drilling = ref('')
@@ -195,10 +220,30 @@ const roleLabel = computed(() => (ha.value ? roleText(ha.value.role) : ''))
 const roleType = computed(() => (ha.value?.role === 'Standby' ? 'warning' : undefined))
 const problems = (run: BackupRun) => [run.error, ...(run.drill?.problems ?? []), ...run.targets.filter(t => !t.ok).map(t => `${t.target}：${t.error}`)].filter(Boolean).join('；')
 
+async function authorizedDownload(url: string, method: 'GET' | 'POST', fallbackName: string): Promise<string> {
+  const token = auth.token
+  const r = await fetch(url, { method, headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!r.ok) {
+    const body = await r.text().catch(() => '')
+    let detail = body
+    try { detail = (JSON.parse(body) as { message?: string }).message ?? body } catch { /* 非 JSON 就按原文 */ }
+    throw new Error(detail.slice(0, 200) || tr('opsView.actionFailed'))
+  }
+  const blob = await r.blob()
+  const disposition = r.headers.get('content-disposition') ?? ''
+  const match = /filename\*?=(?:UTF-8'')?["']?([^";]+)/i.exec(disposition)
+  downloadBlob(blob, match ? decodeURIComponent(match[1]) : fallbackName)
+  return match ? decodeURIComponent(match[1]) : fallbackName
+}
+
 async function refresh(): Promise<void> {
   try {
-    const [s, r, b, t] = await Promise.all([opsApi.status(), opsApi.runs(), opsApi.backups(), opsApi.targets()])
+    const [s, r, b, t, security] = await Promise.all([
+      opsApi.status(), opsApi.runs(), opsApi.backups(), opsApi.targets(),
+      opsApi.backupSecurity().catch(() => null)
+    ])
     ha.value = s; runs.value = r; backups.value = b; targets.value = t
+    backupSecurity.value = security
     readError.value = ''; statusError.value = ''
   } catch (e) {
     readError.value = errorMessage(e, tr('opsView.actionFailed'))
@@ -257,6 +302,43 @@ async function drill(fileName: string): Promise<void> {
     else actionError.value = tr('opsView.k4b10df', [result.problems.join('；')])
   } catch (e) { actionError.value = errorMessage(e, tr('opsView.actionFailed')) }
   finally { drilling.value = '' }
+}
+
+async function verify(fileName: string): Promise<void> {
+  if (verifying.value) return
+  verifying.value = fileName
+  actionError.value = ''
+  try {
+    const result = await opsApi.verify(fileName)
+    if (result.valid) {
+      actionError.value = ''
+      ElMessage.success(tr('opsView.verifyOk', [fileName]))
+    } else actionError.value = tr('opsView.verifyFailed', [result.problems.join('；') || tr('opsView.verifyUnknown')])
+  } catch (e) { actionError.value = errorMessage(e, tr('opsView.actionFailed')) }
+  finally { verifying.value = '' }
+}
+
+async function downloadBackup(fileName: string): Promise<void> {
+  if (downloading.value) return
+  downloading.value = fileName
+  actionError.value = ''
+  try {
+    await authorizedDownload(opsApi.downloadUrl(fileName), 'GET', fileName)
+    actionError.value = ''
+  } catch (e) { actionError.value = errorMessage(e, tr('opsView.actionFailed')) }
+  finally { downloading.value = '' }
+}
+
+async function downloadDiagnostics(): Promise<void> {
+  if (diagnosticsBusy.value) return
+  diagnosticsBusy.value = true
+  actionError.value = ''
+  try {
+    await authorizedDownload(opsApi.diagnosticsUrl(), 'POST', `diag_${Date.now()}.zip`)
+    actionError.value = ''
+    ElMessage.success(tr('opsView.diagnosticsReady'))
+  } catch (e) { actionError.value = errorMessage(e, tr('opsView.actionFailed')) }
+  finally { diagnosticsBusy.value = false }
 }
 
 // HA 状态 5s 兜底轮询：主备切换要在页面上看得出来

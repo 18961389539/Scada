@@ -1,13 +1,41 @@
 import { effectScope, ref, watch } from 'vue'
+import { USER_KEY } from '../api/http'
 import { annunciatorApi } from '../api/annunciators'
 import { setAlarmMute, startAlarmLoop, stopAlarmLoop } from '../alarmAudio'
+
+const LEGACY_KEY = 'scada_sound'
+
+export function currentSoundUser(): string {
+  try {
+    return (JSON.parse(localStorage.getItem(USER_KEY) ?? '{}') as { userName?: string }).userName?.toLocaleLowerCase() ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function soundStorageKey(userName = currentSoundUser()): string {
+  return userName ? `${LEGACY_KEY}:${userName}` : LEGACY_KEY
+}
+
+export function readSoundEnabled(userName = currentSoundUser()): boolean {
+  try {
+    const keyed = localStorage.getItem(soundStorageKey(userName))
+    if (keyed === 'off') return false
+    if (keyed === 'on') return true
+    return localStorage.getItem(LEGACY_KEY) !== 'off'
+  } catch {
+    return true
+  }
+}
 
 /**
  * 报警声音：静音偏好、声光面板播音键同步、报警洪峰下的 300ms 合批重算。
  * 全应用共用一份状态，避免布局卸载后运行工作台/Kiosk 各自再造一份。
+ * 静音按登录用户保存在本机；未登录时仍使用旧的 scada_sound 键。
  */
 function createAlarmSound() {
-  const soundEnabled = ref(localStorage.getItem('scada_sound') !== 'off')
+  const soundEnabled = ref(readSoundEnabled())
+  let boundUser = currentSoundUser()
   let annunciatorTimer: number | undefined
   let annunciatorBusy = false
   let annunciatorQueued = false
@@ -50,15 +78,44 @@ function createAlarmSound() {
     }, 300)
   }
 
+  function persist(enabled: boolean): void {
+    const key = soundStorageKey(boundUser)
+    try {
+      localStorage.setItem(key, enabled ? 'on' : 'off')
+      if (key !== LEGACY_KEY && localStorage.getItem(LEGACY_KEY) != null) {
+        // 不再把上一班的偏好写回共享键，避免下一位未完成登录同步的页面读到过期值。
+      }
+    } catch {
+      // 本地存储不可用时仍保持内存中的开关。
+    }
+  }
+
   function onStorage(event: StorageEvent): void {
-    if (event.key !== 'scada_sound' || (event.storageArea && event.storageArea !== localStorage)) return
+    if (event.storageArea && event.storageArea !== localStorage) return
+    const key = soundStorageKey(boundUser)
+    if (event.key !== key && !(event.key === LEGACY_KEY && key === LEGACY_KEY) && event.key !== USER_KEY) return
+    if (event.key === USER_KEY) {
+      syncFromUser()
+      return
+    }
     const enabled = event.newValue !== 'off'
     if (soundEnabled.value !== enabled) soundEnabled.value = enabled
   }
 
+  function syncFromUser(): void {
+    const nextUser = currentSoundUser()
+    if (nextUser === boundUser) {
+      const enabled = readSoundEnabled(nextUser)
+      if (soundEnabled.value !== enabled) soundEnabled.value = enabled
+      return
+    }
+    boundUser = nextUser
+    soundEnabled.value = readSoundEnabled(nextUser)
+  }
+
   scope.run(() => {
     watch(soundEnabled, (enabled) => {
-      localStorage.setItem('scada_sound', enabled ? 'on' : 'off')
+      persist(enabled)
       setAlarmMute(!enabled)
       if (!enabled) stopAlarmLoop()
       else void refresh()
@@ -67,6 +124,7 @@ function createAlarmSound() {
   window.addEventListener('storage', onStorage)
 
   function start(): void {
+    syncFromUser()
     setAlarmMute(!soundEnabled.value)
   }
 
@@ -82,7 +140,7 @@ function createAlarmSound() {
     scope.stop()
   }
 
-  return { soundEnabled, refresh, schedule, start, dispose, reset }
+  return { soundEnabled, refresh, schedule, start, dispose, reset, syncFromUser }
 }
 
 let instance: ReturnType<typeof createAlarmSound> | undefined

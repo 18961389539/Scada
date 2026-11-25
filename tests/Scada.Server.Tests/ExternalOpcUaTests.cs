@@ -32,6 +32,7 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
         var status = await (await admin.GetAsync("/api/external/status")).Content.ReadFromJsonAsync<JsonElement>();
         Assert.True(status.GetProperty("opcUa").GetProperty("enabled").GetBoolean());
         Assert.True(status.GetProperty("opcUa").GetProperty("running").GetBoolean());
+        Assert.True(status.GetProperty("opcUa").GetProperty("allowWrite").GetBoolean());
         Assert.Contains(_site.OpcPort.ToString(), status.GetProperty("opcUa").GetProperty("endpoint").GetString());
     }
 
@@ -283,6 +284,7 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
             opt.OpcUa.SecurityModes = "None";
             opt.OpcUa.AllowAnonymous = true;
             opt.OpcUa.AllowUsernamePassword = true;
+            opt.OpcUa.AllowWrite = true;
             opt.OpcUa.PublishingIntervalMs = 200;
             var host = Services.GetRequiredService<ExternalOpcUaHost>();
             for (var i = 0; i < 100; i++)

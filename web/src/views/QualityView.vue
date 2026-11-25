@@ -6,6 +6,7 @@
         <span class="spacer" />
         <el-button data-test="quality-refresh" @click="refreshActive">{{ $t('quality.refresh') }}</el-button>
       </div>
+      <ShiftTimeZoneBar />
       <el-alert v-if="catalogError" :title="catalogError" type="error" :closable="false" show-icon data-test="quality-catalog-error" />
 
       <el-tabs v-model="tab" class="quality-tabs">
@@ -23,6 +24,8 @@
             </el-select>
             <el-date-picker v-model="recordRange" type="datetimerange" :start-placeholder="$t('quality.from')" :end-placeholder="$t('quality.to')" :aria-label="$t('common.timeRange')" style="width: 340px" @change="queryRecords" />
             <span class="spacer" />
+            <el-button :loading="exporting === 'records'" data-test="quality-export-records" @click="exportCurrent('records', 'xlsx')">{{ $t('quality.exportExcel') }}</el-button>
+            <el-button :loading="exporting === 'records-pdf'" data-test="quality-export-records-pdf" @click="exportCurrent('records', 'pdf')">{{ $t('quality.exportPdf') }}</el-button>
             <el-button v-if="canControlAny" type="primary" data-test="quality-add" @click="openInspection()">{{ $t('quality.addInspection') }}</el-button>
           </div>
           <el-alert v-if="recordError" :title="recordError" type="error" :closable="false" show-icon data-test="quality-record-error" />
@@ -50,6 +53,14 @@
             <el-table-column prop="deviceName" :label="$t('quality.device')" width="120" show-overflow-tooltip />
             <el-table-column prop="tagName" :label="$t('quality.tag')" width="130" show-overflow-tooltip />
             <el-table-column prop="inspector" :label="$t('quality.inspector')" width="100" show-overflow-tooltip />
+            <el-table-column prop="createdBy" :label="$t('quality.createdBy')" width="100" show-overflow-tooltip />
+            <el-table-column :label="$t('quality.updated')" width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span>{{ row.updatedTs ? formatTime(row.updatedTs) : '—' }}</span>
+                <span v-if="row.updatedBy" class="muted"> {{ row.updatedBy }}</span>
+                <el-tag v-if="isRevised(row)" type="warning" size="small" class="revised" data-test="quality-revised">{{ $t('quality.revised') }}</el-tag>
+              </template>
+            </el-table-column>
             <el-table-column :label="$t('quality.actions')" width="230" fixed="right">
               <template #default="{ row }">
                 <el-button v-if="row.tagId" link type="primary" data-test="quality-trend" @click="openTrend(row)">{{ $t('quality.viewTrend') }}</el-button>
@@ -77,6 +88,9 @@
             <el-input v-model="dashboardProduct" :placeholder="$t('quality.product')" clearable style="width: 150px" @keyup.enter="loadSummary" @clear="loadSummary" />
             <el-input v-model="dashboardBatchNo" :placeholder="$t('quality.batchNo')" clearable style="width: 150px" @keyup.enter="loadSummary" @clear="loadSummary" />
             <el-button @click="loadSummary">{{ $t('quality.query') }}</el-button>
+            <span class="spacer" />
+            <el-button :loading="exporting === 'dashboard'" data-test="quality-export-summary" @click="exportCurrent('dashboard', 'xlsx')">{{ $t('quality.exportExcel') }}</el-button>
+            <el-button :loading="exporting === 'dashboard-pdf'" data-test="quality-export-summary-pdf" @click="exportCurrent('dashboard', 'pdf')">{{ $t('quality.exportPdf') }}</el-button>
           </div>
           <el-alert v-if="summaryError" :title="summaryError" type="error" :closable="false" show-icon data-test="quality-summary-error" />
           <template v-if="summary">
@@ -180,6 +194,15 @@
           </el-col>
           <el-col :span="12"><el-form-item :label="$t('quality.inspector')"><el-input v-model="inspectionForm.inspector" /></el-form-item></el-col>
           <el-col :span="24"><el-form-item :label="$t('quality.note')"><el-input v-model="inspectionForm.note" type="textarea" :rows="2" /></el-form-item></el-col>
+          <el-col v-if="inspectionAudit" :span="24">
+            <p class="tiny muted" data-test="quality-audit">
+              {{ $t('quality.createdBy') }}：{{ inspectionAudit.createdBy || '—' }} · {{ formatTime(inspectionAudit.createdTs) }}
+              <template v-if="inspectionAudit.updatedTs">
+                · {{ $t('quality.updated') }}：{{ inspectionAudit.updatedBy || '—' }} · {{ formatTime(inspectionAudit.updatedTs) }}
+                <el-tag v-if="inspectionAudit.updatedTs > inspectionAudit.createdTs" type="warning" size="small">{{ $t('quality.revised') }}</el-tag>
+              </template>
+            </p>
+          </el-col>
         </el-row>
       </el-form>
       <template #footer>
@@ -206,6 +229,7 @@
 </template>
 
 <script setup lang="ts">
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
@@ -216,7 +240,7 @@ import { can } from '../access/policies'
 import { tr } from '../i18n'
 import { chartPalette, onThemeChanged } from '../theme'
 import { useAuthStore } from '../stores/auth'
-import { formatTime } from '../utils'
+import { downloadBlob, formatTime } from '../utils'
 import type {
   Area, Device, QualityDefectCode, QualityDefectCodeInput, QualityInspection, QualityInspectionInput,
   QualityResult, QualitySummary, Tag
@@ -233,6 +257,8 @@ const records = ref<QualityInspection[]>([])
 const summary = ref<QualitySummary | null>(null)
 const recordLoading = ref(false), defectLoading = ref(false), saving = ref(false)
 const recordError = ref(''), summaryError = ref(''), defectError = ref(''), catalogError = ref(''), dialogError = ref('')
+const exporting = ref('')
+const inspectionAudit = ref<{ createdBy: string; createdTs: number; updatedBy: string; updatedTs: number } | null>(null)
 
 const recordSearch = ref('')
 const recordResult = ref<QualityResult | ''>('')
@@ -338,6 +364,48 @@ function queryRecords() {
   recordPage.value = 1
   void loadRecords()
 }
+function isRevised(row: QualityInspection): boolean {
+  return !!row.updatedTs && row.updatedTs > (row.createdTs || 0)
+}
+async function exportCurrent(scope: 'records' | 'dashboard', format: 'xlsx' | 'pdf') {
+  const key = format === 'pdf' ? `${scope}-pdf` : scope
+  if (exporting.value) return
+  exporting.value = key
+  const targetError = scope === 'records' ? recordError : summaryError
+  targetError.value = ''
+  try {
+    const params: Record<string, unknown> = { format }
+    if (scope === 'records') {
+      params.search = recordSearch.value.trim() || undefined
+      params.result = recordResult.value || undefined
+      params.defectCodeId = recordDefectCodeId.value ?? undefined
+      params.areaId = recordAreaId.value ?? undefined
+      params.from = recordRange.value?.[0]?.getTime()
+      params.to = recordRange.value?.[1]?.getTime()
+    } else {
+      params.to = Date.now()
+      params.from = Number(params.to) - dashboardDays.value * 24 * 3600_000
+      params.areaId = dashboardAreaId.value ?? undefined
+      params.product = dashboardProduct.value.trim() || undefined
+      params.batchNo = dashboardBatchNo.value.trim() || undefined
+    }
+    const url = qualityApi.exportUrl(params)
+    const token = auth.token
+    const r = await fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    if (!r.ok) {
+      const body = await r.text().catch(() => '')
+      let detail = body
+      try { detail = (JSON.parse(body) as { message?: string }).message ?? body } catch { /* 非 JSON 就按原文 */ }
+      targetError.value = detail.slice(0, 200) || tr('quality.loadFailed')
+      return
+    }
+    downloadBlob(await r.blob(), `quality.${format}`)
+  } catch (e) {
+    targetError.value = errorMessage(e, tr('quality.loadFailed'))
+  } finally {
+    exporting.value = ''
+  }
+}
 async function loadSummary() {
   const seq = ++summarySeq
   try {
@@ -433,6 +501,7 @@ function openInspection(row?: QualityInspection) {
   inspectionForm.defectCodeId = row?.defectCodeId ?? null
   inspectionForm.inspector = row?.inspector ?? ''
   inspectionForm.note = row?.note ?? ''
+  inspectionAudit.value = row ? { createdBy: row.createdBy, createdTs: row.createdTs, updatedBy: row.updatedBy, updatedTs: row.updatedTs } : null
   dialogError.value = ''
   inspectionDialog.value = true
 }

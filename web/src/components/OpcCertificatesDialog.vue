@@ -11,7 +11,13 @@
     <el-table :data="rows.filter(x => x.store === tab)" v-loading="loading" max-height="500" :empty-text="error || $t('opcCertificatesDialog.kb6bb9c')">
       <el-table-column prop="subject" :label="$t('opcCertificatesDialog.ke848dd')" min-width="180" show-overflow-tooltip />
       <el-table-column prop="sha256" :label="$t('opcCertificatesDialog.kb1005a')" min-width="300" show-overflow-tooltip><template #default="{ row }"><span style="word-break: break-all; user-select: all">{{ row.sha256 }}</span></template></el-table-column>
-      <el-table-column :label="$t('opcCertificatesDialog.k37eb47')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(Date.parse(row.notAfter)) }}</template></el-table-column>
+      <el-table-column :label="$t('opcCertificatesDialog.k37eb47')" width="220" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span>{{ formatTime(Date.parse(row.notAfter)) }}</span>
+          <el-tag v-if="certificateExpiry(row.notAfter) === 'expired'" type="danger" size="small" class="cert-flag" data-test="cert-expired">{{ $t('opcCertificatesDialog.expired') }}</el-tag>
+          <el-tag v-else-if="certificateExpiry(row.notAfter) === 'expiring'" type="warning" size="small" class="cert-flag" data-test="cert-expiring">{{ $t('opcCertificatesDialog.expiring') }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column :label="$t('opcCertificatesDialog.kf3ea6d')" width="130"><template #default="{ row }">
         <el-button v-if="tab === 'rejected'" link type="primary" :disabled="loading" @click="change(row, true)">{{ $t('opcCertificatesDialog.k78d1be') }}</el-button>
         <el-button v-else-if="tab === 'trusted'" link type="danger" :disabled="loading" @click="change(row, false)">{{ $t('opcCertificatesDialog.k4c0c58') }}</el-button>
@@ -28,6 +34,7 @@ import { opcApi, type OpcCertificate, type OpcCertificateScope } from '../api/op
 import type { Device } from '../types'
 import { errorMessage, errorText } from '../api/http'
 import { downloadBlob, formatTime } from '../utils'
+import { certificateExpiry } from '../composables/opcCertificateExpiry'
 import { tr } from '../i18n'
 const visible = defineModel<boolean>({ required: true })
 const props = withDefaults(defineProps<{ devices?: Device[]; includeCenter?: boolean }>(), { devices: () => [], includeCenter: true })
@@ -68,3 +75,7 @@ async function download(cert: OpcCertificate): Promise<void> {
   } catch (e) { actionError.value = await errorText(e, tr('opcCertificatesDialog.actionFailed')) }
 }
 </script>
+
+<style scoped>
+.cert-flag { margin-left: 6px; }
+</style>

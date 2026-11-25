@@ -1,4 +1,7 @@
 using Scada.Server.Auth;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
+using Scada.Core.Options;
 using Scada.Engine.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http.Timeouts;
@@ -39,6 +42,19 @@ public static class MaintenanceEndpoints
         });
         group.MapGet("/runs", (BackupScheduler scheduler) => Results.Ok(scheduler.Runs()));
         group.MapGet("/targets", (BackupScheduler scheduler) => Results.Ok(scheduler.Targets().Select(x => new { name = x.Name, kind = x.Kind, keepLatest = x.KeepLatest })));
+        group.MapGet("/security", (IHostEnvironment environment, IOptions<ScadaSettings> settings) =>
+        {
+            var development = environment.IsDevelopment();
+            var configured = !string.IsNullOrWhiteSpace(settings.Value.BackupPassword);
+            var warning = BackupSecurity.UnencryptedWarning(development, settings.Value);
+            return Results.Ok(new
+            {
+                development,
+                passwordConfigured = configured,
+                plaintextRisk = warning is not null,
+                warning = warning?.Message
+            });
+        });
         group.MapPost("/{fileName}/drill", async (string fileName, BackupService backups, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken cancellationToken) =>
         {
             try { backups.Resolve(fileName); }

@@ -67,6 +67,13 @@
       <span>{{ $t('layoutMonitor.updateAvailable', [pendingLayout.revision]) }}</span>
       <WorkbenchTooltip :content="$t('workbenchTips.applyUpdate')"><el-button size="small" type="primary" @click="applyUpdate">{{ $t('layoutMonitor.applyUpdate') }}</el-button></WorkbenchTooltip>
     </div>
+    <div v-if="missedCriticalNotice && !previewLayout" class="missed-critical-notice" data-test="console-missed-critical" role="alert">
+      <strong>{{ $t('alarmReconnect.missedTitle') }}</strong>
+      <span>{{ $t('alarmReconnect.missedBody', [missedCriticalNotice.count]) }}</span>
+      <span class="spacer" />
+      <el-button size="small" type="primary" data-test="console-missed-open" @click="openMissedCritical">{{ $t('alarmReconnect.open') }}</el-button>
+      <el-button size="small" data-test="console-missed-dismiss" @click="dismissMissedCriticalNotice">{{ $t('alarmReconnect.dismiss') }}</el-button>
+    </div>
     </div>
         <div class="banner global-banner" :class="!alarmsUnavailable && topAlarm && topAlarm.endTs == null ? `lvl-${topAlarm.level}` : ''" data-test="alarm-banner" role="status">
           <button v-if="!alarmsUnavailable && topAlarm" type="button" class="banner-jump" data-test="alarm-banner-jump" :aria-label="$t('consoleUx.bannerJump')" @click="focusTopAlarm" @keydown="onBannerKey">
@@ -205,6 +212,7 @@ import { refreshActiveAlarms } from '../composables/useActiveAlarms'
 import { useAuthStore } from '../stores/auth'
 import { onCriticalAlarmRaise, useAlarmSession } from '../composables/useAlarmSession'
 import { useServiceStatus } from '../composables/useServiceStatus'
+import { onHubReconnected } from '../realtime/hub'
 import { pendingApprovalsPath, usePendingApprovals } from '../composables/pendingApprovals'
 import { alarmMessage, canAckAlarmEvent, formatTime, levelLabel } from '../utils'
 import type { AlarmEvent, AlarmSummary, AlarmTimeline, Area, Device } from '../types'
@@ -218,7 +226,11 @@ import { modalOpen } from '../ui/overlay'
 
 const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
-const { soundEnabled } = useAlarmSession()
+const { soundEnabled, missedCriticalNotice, dismissMissedCriticalNotice } = useAlarmSession()
+function openMissedCritical() {
+  dismissMissedCriticalNotice()
+  void router.push({ path: '/alarms', query: { state: 'unack' } })
+}
 const { pendingCount } = usePendingApprovals()
 const { healthError, healthAbnormal, healthHint, hubIssue, isStandby, primaryUrl, refreshHealth } = useServiceStatus()
 const canConfigure = computed(() => !props.previewLayout && canGlobal(auth.user, 'Configure'))
@@ -779,6 +791,7 @@ function syncPreferences(event: StorageEvent): void {
 usePolling(refreshAlarms, 3000)
 usePolling(checkVersion, 10000)
 usePolling(refreshHealth, 30000, { immediate: true })
+const disposeHealthReconnect = onHubReconnected(() => { void refreshHealth() })
 
 function onFullscreenChange(): void { fullscreen.value = document.fullscreenElement === document.documentElement }
 let unregisterShortcuts = () => {}
@@ -800,7 +813,8 @@ onMounted(async () => {
   })
   await load(); await refreshAlarms()
 })
-onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregisterShortcuts(); disposeCriticalRaise?.(); window.removeEventListener('storage', syncPreferences); document.removeEventListener('click', onMoreClick, true); document.removeEventListener('fullscreenchange', onFullscreenChange) })
+onBeforeUnmount(() => {
+  disposeHealthReconnect(); disposed = true; detachSequence++; timelineSeq++; unregisterShortcuts(); disposeCriticalRaise?.(); window.removeEventListener('storage', syncPreferences); document.removeEventListener('click', onMoreClick, true); document.removeEventListener('fullscreenchange', onFullscreenChange) })
 </script>
 
 <style scoped>
@@ -832,6 +846,7 @@ onBeforeUnmount(() => { disposed = true; detachSequence++; timelineSeq++; unregi
 .spacer { flex: 1; }
 .layout-select { width: 180px; }
 .update-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px 10px; font-size: 12px; background: #5c3b10; }
+.missed-critical-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 10px; font-size: 12px; background: #5c2020; color: #ffd9d9; }
 .console-status { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 4px 10px; background: #3a2a10; color: #ffe8c2; font-size: 12px; }
 .console-status-item { margin: 0; overflow-wrap: anywhere; }
 .control-lock { padding: 4px 10px; background: #3a2a10; color: #ffe8c2; font-size: 12px; }

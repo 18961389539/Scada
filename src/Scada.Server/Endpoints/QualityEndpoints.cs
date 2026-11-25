@@ -1,9 +1,14 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
 using Scada.Core.Models;
+using Scada.Core.Options;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Engine.Calculations;
 using Scada.Server.Auth;
+using Scada.Server.Localization;
+using Scada.Server.Reports;
 
 namespace Scada.Server.Endpoints;
 
@@ -16,7 +21,8 @@ public sealed record QualityDefectCodeView(int Id, string Code, string Name, str
 public sealed record QualityInspectionView(
     int Id, string Sn, string BatchNo, string Product, int AreaId, int? DeviceId, int? TagId,
     QualityResult Result, int? DefectCodeId, string? DefectCode, string? DefectName, string? DefectCategory,
-    string Inspector, long Ts, string Note, string CreatedBy, string? DeviceName, string? TagName);
+    string Inspector, long Ts, string Note, string CreatedBy, string? DeviceName, string? TagName,
+    long CreatedTs, long UpdatedTs, string UpdatedBy);
 public sealed record QualityDayPoint(string Date, int Total, int Passed, int Failed, int Rework, int Scrap, double? Yield);
 public sealed record QualityDefectPoint(int? DefectCodeId, string Code, string Name, string Category, int Count);
 public sealed record QualityAreaPoint(int AreaId, string AreaName, int Total, int Passed, int Failed, double? Yield);
@@ -147,7 +153,8 @@ public static class QualityEndpoints
 
         app.MapGet("/summary", async (
             int? areaId, int? deviceId, string? product, string? batchNo, long? from, long? to,
-            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IOptions<ScadaSettings> settings, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -177,21 +184,22 @@ public static class QualityEndpoints
             var scrap = resultCounts.Where(x => x.Result == QualityResult.Scrap).Sum(x => x.Count);
             double? Rate(int count) => total > 0 ? count / (double)total : null;
 
-            var offset = (long)TimeZoneInfo.Local.GetUtcOffset(DateTime.UtcNow).TotalMilliseconds;
-            var dayRows = await query.GroupBy(x => (x.Ts + offset) / 86_400_000L)
-                .Select(g => new
+            var zone = CalcJobEngine.ResolveZone(settings.Value.ShiftTimeZone);
+            var dayPoints = await query.Select(x => new { x.Ts, x.Result }).ToListAsync(ct);
+            var byDay = dayPoints
+                .GroupBy(x => ZoneTime.DayStart(x.Ts, zone))
+                .OrderBy(g => g.Key)
+                .Select(g =>
                 {
-                    Day = g.Key, Total = g.Count(),
-                    Passed = g.Count(x => x.Result == QualityResult.Passed),
-                    Failed = g.Count(x => x.Result == QualityResult.Failed),
-                    Rework = g.Count(x => x.Result == QualityResult.Rework),
-                    Scrap = g.Count(x => x.Result == QualityResult.Scrap)
+                    var total = g.Count();
+                    var passed = g.Count(x => x.Result == QualityResult.Passed);
+                    var failed = g.Count(x => x.Result == QualityResult.Failed);
+                    var rework = g.Count(x => x.Result == QualityResult.Rework);
+                    var scrap = g.Count(x => x.Result == QualityResult.Scrap);
+                    var date = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(g.Key), zone).ToString("yyyy-MM-dd");
+                    return new QualityDayPoint(date, total, passed, failed, rework, scrap, total > 0 ? passed / (double)total : null);
                 })
-                .OrderBy(g => g.Day).ToListAsync(ct);
-            var byDay = dayRows.Select(g => new QualityDayPoint(
-                DateTimeOffset.FromUnixTimeMilliseconds(g.Day * 86_400_000L - offset).ToLocalTime().ToString("yyyy-MM-dd"),
-                g.Total, g.Passed, g.Failed, g.Rework, g.Scrap,
-                g.Total > 0 ? g.Passed / (double)g.Total : null)).ToList();
+                .ToList();
 
             var codes = await db.QualityDefectCodes.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
             var defectRows = await query.Where(x => x.Result != QualityResult.Passed)
@@ -231,6 +239,115 @@ public static class QualityEndpoints
             return Results.Ok(new QualitySummaryView(total, passed, failed, rework, scrap,
                 Rate(passed), Rate(scrap), Rate(rework), Rate(failed + rework + scrap),
                 byDay, byDefect, byArea, byDevice));
+        });
+
+        app.MapGet("/export", async (
+            string? format, string? search, string? sn, string? batchNo, string? product, QualityResult? result, int? defectCodeId,
+            int? areaId, int? deviceId, long? from, long? to,
+            HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IOptions<ScadaSettings> settings, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            await using var db = await factory.CreateDbContextAsync(ct);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var now = ScadaTime.NowMs();
+            var start = from ?? now - 7L * 24 * 3600_000;
+            var end = to ?? now;
+            if (start >= end) return EndpointHelpers.BadRequest("时间范围无效");
+            if (end - start > 365L * 24 * 3600_000) return EndpointHelpers.BadRequest("时间范围不能超过 365 天");
+            var query = runtime.QualityInspections.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
+            if (access.AreasWith(Permission.View) is { } visible)
+            {
+                var visibleAreas = visible.ToArray();
+                query = query.Where(x => visibleAreas.Contains(x.AreaId));
+            }
+            if (areaId is int area) query = query.Where(x => x.AreaId == area);
+            if (deviceId is int device) query = query.Where(x => x.DeviceId == device);
+            if (result is QualityResult inspectionResult) query = query.Where(x => x.Result == inspectionResult);
+            if (defectCodeId is int code) query = query.Where(x => x.DefectCodeId == code);
+            if (!string.IsNullOrWhiteSpace(sn)) query = query.Where(x => x.Sn == sn.Trim());
+            if (!string.IsNullOrWhiteSpace(batchNo)) query = query.Where(x => x.BatchNo == batchNo.Trim());
+            if (!string.IsNullOrWhiteSpace(product)) query = query.Where(x => x.Product == product.Trim());
+            var keyword = search?.Trim();
+            if (keyword is { Length: > 0 })
+                query = query.Where(x => (x.Sn + " " + x.BatchNo + " " + x.Product + " " + x.Inspector + " " + x.Note).Contains(keyword));
+
+            var resultCounts = await query.GroupBy(x => x.Result)
+                .Select(g => new { Result = g.Key, Count = g.Count() }).ToListAsync(ct);
+            var total = resultCounts.Sum(x => x.Count);
+            var passed = resultCounts.Where(x => x.Result == QualityResult.Passed).Sum(x => x.Count);
+            var failed = resultCounts.Where(x => x.Result == QualityResult.Failed).Sum(x => x.Count);
+            var rework = resultCounts.Where(x => x.Result == QualityResult.Rework).Sum(x => x.Count);
+            var scrap = resultCounts.Where(x => x.Result == QualityResult.Scrap).Sum(x => x.Count);
+            double? Rate(int count) => total > 0 ? count / (double)total : null;
+            var zone = CalcJobEngine.ResolveZone(settings.Value.ShiftTimeZone);
+            var dayPoints = await query.Select(x => new { x.Ts, x.Result }).ToListAsync(ct);
+            var byDay = dayPoints
+                .GroupBy(x => ZoneTime.DayStart(x.Ts, zone))
+                .OrderBy(g => g.Key)
+                .Select(g =>
+                {
+                    var dayTotal = g.Count();
+                    var dayPassed = g.Count(x => x.Result == QualityResult.Passed);
+                    var dayFailed = g.Count(x => x.Result == QualityResult.Failed);
+                    var dayRework = g.Count(x => x.Result == QualityResult.Rework);
+                    var dayScrap = g.Count(x => x.Result == QualityResult.Scrap);
+                    var date = TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(g.Key), zone).ToString("yyyy-MM-dd");
+                    return new QualityDayPoint(date, dayTotal, dayPassed, dayFailed, dayRework, dayScrap, dayTotal > 0 ? dayPassed / (double)dayTotal : null);
+                })
+                .ToList();
+            var codes = await db.QualityDefectCodes.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
+            var defectRows = await query.Where(x => x.Result != QualityResult.Passed)
+                .GroupBy(x => x.DefectCodeId)
+                .Select(g => new { DefectCodeId = g.Key, Count = g.Count() })
+                .OrderByDescending(g => g.Count).ToListAsync(ct);
+            var byDefect = defectRows.Select(g =>
+            {
+                var defect = g.DefectCodeId is int id ? codes.GetValueOrDefault(id) : null;
+                return new QualityDefectPoint(g.DefectCodeId, defect?.Code ?? "", defect?.Name ?? "未分类", defect?.Category ?? "", g.Count);
+            }).ToList();
+            var areas = await db.Areas.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            var areaRows = await query.GroupBy(x => x.AreaId)
+                .Select(g => new
+                {
+                    AreaId = g.Key, Total = g.Count(),
+                    Passed = g.Count(x => x.Result == QualityResult.Passed),
+                    Failed = g.Count(x => x.Result == QualityResult.Failed)
+                })
+                .OrderByDescending(g => g.Total).ToListAsync(ct);
+            var byArea = areaRows.Select(g => new QualityAreaPoint(g.AreaId, areas.GetValueOrDefault(g.AreaId, $"#{g.AreaId}"),
+                g.Total, g.Passed, g.Failed, g.Total > 0 ? g.Passed / (double)g.Total : null)).ToList();
+            var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            var deviceRows = await query.Where(x => x.DeviceId != null).GroupBy(x => x.DeviceId!.Value)
+                .Select(g => new
+                {
+                    DeviceId = g.Key, Total = g.Count(),
+                    Passed = g.Count(x => x.Result == QualityResult.Passed),
+                    Failed = g.Count(x => x.Result == QualityResult.Failed)
+                })
+                .OrderByDescending(g => g.Total).ToListAsync(ct);
+            var byDevice = deviceRows.Select(g => new QualityDevicePoint(g.DeviceId, devices.GetValueOrDefault(g.DeviceId, $"#{g.DeviceId}"),
+                g.Total, g.Passed, g.Failed, g.Total > 0 ? g.Passed / (double)g.Total : null)).ToList();
+            var summary = new QualitySummaryView(total, passed, failed, rework, scrap,
+                Rate(passed), Rate(scrap), Rate(rework), Rate(failed + rework + scrap),
+                byDay, byDefect, byArea, byDevice);
+
+            var truncated = total > QualityExport.MaxRecords;
+            var rows = await query.OrderByDescending(x => x.Ts).ThenByDescending(x => x.Id)
+                .Take(QualityExport.MaxRecords).ToListAsync(ct);
+            var views = await ViewManyAsync(db, rows, ct);
+            var locale = Localizer.RequestLocale(http);
+            var title = Localizer.T("质量检验", locale);
+            var sections = QualityExport.Sections(summary, views, truncated, zone, locale);
+            var stamp = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, zone).ToString("yyyy-MM-dd HH:mm:ss");
+            var pdf = string.Equals(format, "pdf", StringComparison.OrdinalIgnoreCase);
+            var bytes = pdf
+                ? OeeExport.Pdf(title, sections, settings.Value.ReportFontPath, Localizer.T($"生成于 {stamp}", locale))
+                : OeeExport.Xlsx(title, sections);
+            runtime.OperationLogs.Add(Audit.Change(http, "导出质量检验", "QualityInspection", null, null, new { format = pdf ? "pdf" : "xlsx", from = start, to = end, total, truncated }));
+            await runtime.SaveChangesAsync(ct);
+            var fileName = $"quality-{DateTime.UtcNow:yyyyMMddHHmmss}.{(pdf ? "pdf" : "xlsx")}";
+            return Results.File(bytes, pdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
         });
 
         group.MapPost("", async (QualityInspectionRequest request, HttpContext http,
@@ -276,7 +393,7 @@ public static class QualityEndpoints
             Apply(inspection, request);
             inspection.AreaId = request.AreaId; inspection.DeviceId = request.DeviceId; inspection.TagId = request.TagId;
             inspection.Result = request.Result; inspection.DefectCodeId = request.DefectCodeId;
-            inspection.Ts = request.Ts ?? inspection.Ts; inspection.UpdatedTs = ScadaTime.NowMs();
+            inspection.Ts = request.Ts ?? inspection.Ts; inspection.UpdatedTs = ScadaTime.NowMs(); inspection.UpdatedBy = http.User.GetUserName();
             var validation = QualityValidation.Inspection(inspection);
             if (validation is not null) return EndpointHelpers.BadRequest(validation);
             runtime.OperationLogs.Add(Audit.Change(http, $"修改质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, before, inspection));
@@ -355,7 +472,8 @@ public static class QualityEndpoints
             return new QualityInspectionView(x.Id, x.Sn, x.BatchNo, x.Product, x.AreaId, x.DeviceId, x.TagId,
                 x.Result, x.DefectCodeId, code?.Code, code?.Name, code?.Category, x.Inspector, x.Ts, x.Note,
                 x.CreatedBy, x.DeviceId is int device ? devices.GetValueOrDefault(device) : null,
-                x.TagId is int tag ? tags.GetValueOrDefault(tag) : null);
+                x.TagId is int tag ? tags.GetValueOrDefault(tag) : null,
+                x.CreatedTs, x.UpdatedTs, x.UpdatedBy);
         }).ToList();
     }
 

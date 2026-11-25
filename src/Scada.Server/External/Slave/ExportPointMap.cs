@@ -76,23 +76,30 @@ public sealed class ExportPointMap
                 warnings.Add($"测点 {tag.Name}(#{tag.Id}) 的区 {area} 不是 Modbus 地址区，已跳过");
                 return;
             }
-            if (address is < 0 or > 65535)
-            {
-                warnings.Add($"测点 {tag.Name}(#{tag.Id}) 地址 {address} 超出 0–65535，已跳过");
-                return;
-            }
             var slot = new ExportSlot(tag.Id, tag.Name, tag.DataType, tag.Writable, address, unitId);
-            if (table.TryGetValue(address, out var existing))
+            var last = (long)address + slot.RegisterCount - 1;
+            if (address < 0 || last > 65535)
             {
-                warnings.Add($"Modbus {area} 地址 {address} 被 {existing.TagName}(#{existing.TagId}) 与 {tag.Name}(#{tag.Id}) 重复占用，保留前者");
+                warnings.Add($"测点 {tag.Name}(#{tag.Id}) 地址 {address} 起占用 {slot.RegisterCount} 个寄存器，超出 0–65535，已跳过");
                 return;
             }
-            // 多寄存器类型要占住后续地址，避免后续测点把它的低字覆盖掉。
-            table[address] = slot;
-            for (var i = 1; i < slot.RegisterCount; i++)
+            ExportSlot? conflict = null;
+            for (var i = 0; i < slot.RegisterCount; i++)
             {
-                if (!table.ContainsKey(address + i)) table[address + i] = slot;
+                if (table.TryGetValue(address + i, out var existing))
+                {
+                    conflict = existing;
+                    break;
+                }
             }
+            if (conflict is not null)
+            {
+                warnings.Add($"Modbus {area} 地址 {address}–{address + slot.RegisterCount - 1} 与 {conflict.TagName}(#{conflict.TagId}) 重叠，已跳过 {tag.Name}(#{tag.Id})");
+                return;
+            }
+            // 整段登记，避免宽类型只占住起始地址、读时与邻接点拼出错误值。
+            for (var i = 0; i < slot.RegisterCount; i++)
+                table[address + i] = slot;
         }
 
         if (modbus.AutoAddressing)

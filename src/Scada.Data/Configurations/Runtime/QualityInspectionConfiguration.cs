@@ -20,6 +20,7 @@ public sealed class QualityInspectionConfiguration : IEntityTypeConfiguration<Qu
         entity.Property(x => x.Inspector).HasMaxLength(100).HasDefaultValue("");
         entity.Property(x => x.Note).HasMaxLength(500).HasDefaultValue("");
         entity.Property(x => x.CreatedBy).HasMaxLength(100).HasDefaultValue("");
+        entity.Property(x => x.UpdatedBy).HasMaxLength(100).HasDefaultValue("");
         entity.HasIndex(x => new { x.AreaId, x.Ts });
         entity.HasIndex(x => new { x.Sn, x.Ts });
         entity.HasIndex(x => new { x.BatchNo, x.Ts });

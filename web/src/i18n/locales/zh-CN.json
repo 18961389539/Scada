@@ -1250,7 +1250,11 @@
     "healthFailed": "设备通讯状态读取失败",
     "lastPoll": "最近轮询",
     "commFailures": "通讯失败",
-    "healthTooltip": "{0} · 最近轮询 {1} · 通讯失败 {2}"
+    "healthTooltip": "{0} · 最近轮询 {1} · 通讯失败 {2}",
+    "lastError": "最后错误",
+    "viewCertificates": "查看证书",
+    "certExpired": "有已过期的受信任或本机 OPC 证书：{0}",
+    "certExpiring": "有 30 天内到期的受信任或本机 OPC 证书：{0}"
   },
   "editDialog": {
     "discard": "放弃修改",
@@ -1295,7 +1299,16 @@
     "secretTitle": "请立即复制密钥",
     "starting": "启动中",
     "subtitle": "REST / TCP / OPC UA 与 API 密钥",
-    "tcp": "TCP"
+    "tcp": "TCP",
+    "writeAllowed": "允许写入",
+    "writeDenied": "禁止写入",
+    "modbus": "Modbus 从站",
+    "iec104": "IEC 104 从站",
+    "mappedPoints": "映射 {0} 点 · 连接 {1}",
+    "mappingWarnings": "点表映射警告",
+    "createdAt": "创建时间",
+    "lastUsed": "最后使用",
+    "neverUsed": "尚未使用"
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "设备",
@@ -2523,7 +2536,9 @@
     "kf3ea6d": "操作",
     "kf90f47": "指纹已核对，信任",
     "kfff124": "撤销服务器信任",
-    "listFailed": "证书列表加载失败"
+    "listFailed": "证书列表加载失败",
+    "expired": "已过期",
+    "expiring": "30 天内到期"
   },
   "opsView": {
     "fullBackupHint": "这里列出的是完整备份包（full_*.zip / .zip.enc），包含配置库、运行库、历史和密钥。维护任务留下的 scada_*.db 只是配置库拷贝，不能当作完整恢复包。恢复请停服务后使用发布包里的 BackupTool 和 Restore-ScadaService.ps1 / restore.sh，没有在线一键恢复接口。",
@@ -2641,7 +2656,19 @@
       }
     },
     "targetDirectory": "目录",
-    "targetS3": "对象存储"
+    "targetS3": "对象存储",
+    "plaintextRisk": "当前未配置 Scada:BackupPassword，本地备份为明文，内含密钥与口令哈希。请使用离线工具 tools/deployment/Set-BackupPassword.ps1 设置口令并重启服务；也可用发布包中的 Scada.BackupTool 校验加密包。在此之前异地拷贝会被拒绝，已有明文包不会被改写。网页不会录入或保存备份口令，也没有在线一键恢复。",
+    "createdAt": "创建时间",
+    "encryption": "加密",
+    "encrypted": "已加密",
+    "plaintext": "明文",
+    "verify": "校验",
+    "download": "下载",
+    "verifyOk": "备份 {0} 校验通过",
+    "verifyFailed": "备份校验未通过：{0}",
+    "verifyUnknown": "未返回问题说明",
+    "downloadDiagnostics": "下载诊断包",
+    "diagnosticsReady": "诊断包已下载。包内含版本与配置规模、健康指标、数据库自检、通知状态和最近日志，不含设备凭据、令牌或任何口令。"
   },
   "overviewView": {
     "alarmListFailed": "报警列表加载失败",
@@ -4112,7 +4139,13 @@
     "takeoverReviewMessage": "说明",
     "takeoverReviewKind_command": "本机命令",
     "takeoverReviewKind_sequence": "顺控",
-    "takeoverReviewKind_recipe": "配方"
+    "takeoverReviewKind_recipe": "配方",
+    "notifications": "通知投递",
+    "notificationCounts": "失败 {0} · 待发 {1} · 最终失败 {2} · 丢弃 {3}",
+    "notificationFailedLink": "查看失败发件箱",
+    "webhookCounts": "Webhook {0}：已发送 {1}，失败 {2}，抑制 {3}，丢弃 {4}",
+    "webhookOn": "已启用",
+    "webhookOff": "未启用"
   },
   "tagPicker": {
     "calculated": "计算测点",

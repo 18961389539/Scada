@@ -47,6 +47,7 @@ const router = createRouter({
         { path: 'control', name: 'control', component: () => import('../views/ControlView.vue'), meta: { title: tr('index.k4eb87f'), policy: 'any-control' } },
         { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: tr('index.k402be4') } },
         { path: 'alarms', name: 'alarms', component: () => import('../views/AlarmsView.vue'), meta: { title: tr('index.k9f45b3') } },
+        { path: 'handover', name: 'handover', component: () => import('../views/HandoverView.vue'), meta: { title: tr('dutyHandover.title') } },
         { path: 'alarm-analytics', name: 'alarm-analytics', component: () => import('../views/AlarmAnalyticsView.vue'), meta: { title: tr('index.kfce701') } },
         { path: 'oee', name: 'oee', component: () => import('../views/OeeView.vue'), meta: { title: tr('navMenu.oee') } },
         { path: 'production/events', name: 'production-events', component: () => import('../views/OeeConfigView.vue'), props: { operationsOnly: true }, meta: { title: tr('ux.events.title'), policy: 'any-control' } },

@@ -32,6 +32,7 @@ public sealed class SpcMonitorService(
         public long NextDueTs { get; set; }
         public int Revision { get; set; }
         public List<double> Pending { get; } = [];
+        public int MissingCount { get; set; }
     }
 
     public async Task SampleOnceAsync(long now, CancellationToken ct = default, bool forceReload = false)
@@ -74,7 +75,13 @@ public sealed class SpcMonitorService(
             state.NextDueTs = now + chart.SamplingIntervalSec * 1000L;
 
             var value = cache.Get(chart.TagId);
-            if (value is not { Quality: TagQuality.Good } || !double.IsFinite(value.Value)) continue;
+            if (value is not { Quality: TagQuality.Good } || !double.IsFinite(value.Value))
+            {
+                // 质量无效的这一拍不计入子组；已有未完成样本作废，避免通讯恢复后把中断两端的值凑成同一组。
+                if (state.Pending.Count > 0) state.Pending.Clear();
+                state.MissingCount++;
+                continue;
+            }
 
             var size = chart.ChartType == SpcChartType.Individuals ? 1 : Math.Clamp(chart.SubgroupSize, 2, 10);
             state.Pending.Add(value.Value);

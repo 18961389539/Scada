@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using ClosedXML.Excel;
@@ -11,12 +12,15 @@ using Scada.Core.Configuration;
 
 namespace Scada.Server.Services;
 
-public sealed record AlarmRuleImportResult(int Created, int Updated, int Skipped, IReadOnlyList<string> Errors);
+public sealed record AlarmRuleImportResult(int Created, int Updated, int Skipped, IReadOnlyList<string> Errors, int Conflicts = 0);
 
 // 报警规则导入导出：列名即语义，导入按稳定键或规则 ID 匹配，避免重复生成；
 // 每行都走与接口相同的结构与目标校验，成功后由调用方热加载配置并写审计。
 public sealed class AlarmRuleExcelService
 {
+    private sealed record PreviewState(int Owner, byte[] Bytes, string FileName, string Fingerprint, ExcelImportPreview Preview);
+    private readonly ConcurrentDictionary<string, PreviewState> _previews = new();
+
     private static readonly string[] Headers =
     [
         "规则ID", "规则键", "测点ID", "测点名称", "类型", "触发条件", "阈值", "位号", "表达式",
@@ -82,13 +86,15 @@ public sealed class AlarmRuleExcelService
         IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
         int? userId,
         string userName,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool dryRun = false)
     {
         var rows = fileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase) ? ReadCsv(stream) : ReadXlsx(stream);
         var errors = new List<string>();
         var created = 0;
         var updated = 0;
         var skipped = 0;
+        var conflicts = 0;
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
@@ -150,6 +156,7 @@ public sealed class AlarmRuleExcelService
                 {
                     errors.Add($"第 {row.RowNumber} 行：同一工作簿中存在相同的报警规则");
                     skipped++;
+                    conflicts++;
                     continue;
                 }
 
@@ -182,6 +189,12 @@ public sealed class AlarmRuleExcelService
             }
         }
 
+        if (dryRun)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new AlarmRuleImportResult(created, updated, skipped, errors.Take(50).ToList(), conflicts);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         foreach (var (rule, before, action) in changes)
         {
@@ -195,7 +208,67 @@ public sealed class AlarmRuleExcelService
         await db.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         await runtime.SaveChangesAsync(cancellationToken);
-        return new AlarmRuleImportResult(created, updated, skipped, errors.Take(50).ToList());
+        return new AlarmRuleImportResult(created, updated, skipped, errors.Take(50).ToList(), conflicts);
+    }
+
+
+    public async Task<ExcelImportPreview> PreviewAsync(
+        Stream stream,
+        string fileName,
+        int owner,
+        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<RuntimeDbContext> runtimeFactory,
+        CancellationToken cancellationToken)
+    {
+        PrunePreviews();
+        if (_previews.Count >= 128) throw new InvalidOperationException("导入预览已达上限，请等待旧预览过期");
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        var bytes = buffer.ToArray();
+        buffer.Position = 0;
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var fingerprint = await FingerprintAsync(db, cancellationToken);
+        var plan = await ImportAsync(buffer, fileName, contextFactory, runtimeFactory, null, "preview", cancellationToken, dryRun: true);
+        var canApply = plan.Created + plan.Updated > 0;
+        var id = Guid.NewGuid().ToString("N");
+        var preview = new ExcelImportPreview(id, plan.Created, plan.Updated, plan.Skipped, plan.Conflicts, plan.Errors, [ExcelImportImpact.ReloadWarning], canApply, DateTime.UtcNow.AddMinutes(10));
+        _previews[id] = new(owner, bytes, fileName, fingerprint, preview);
+        return preview;
+    }
+
+    public async Task<AlarmRuleImportResult> ApplyPreviewAsync(
+        int owner,
+        string previewId,
+        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<RuntimeDbContext> runtimeFactory,
+        int? userId,
+        string userName,
+        CancellationToken cancellationToken)
+    {
+        if (!_previews.TryGetValue(previewId, out var saved) || saved.Owner != owner || saved.Preview.ExpiresAt < DateTime.UtcNow)
+            throw new InvalidOperationException("导入预览不存在或已过期，请重新预览");
+        if (!saved.Preview.CanApply) throw new InvalidOperationException("导入预览没有可应用的变更");
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        if (await FingerprintAsync(db, cancellationToken) != saved.Fingerprint)
+            throw new InvalidOperationException("报警规则已变化，请重新预览");
+        using var buffer = new MemoryStream(saved.Bytes);
+        var result = await ImportAsync(buffer, saved.FileName, contextFactory, runtimeFactory, userId, userName, cancellationToken);
+        _previews.TryRemove(previewId, out _);
+        return result;
+    }
+
+    private void PrunePreviews()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var (key, state) in _previews)
+            if (state.Preview.ExpiresAt < now) _previews.TryRemove(key, out _);
+    }
+
+    private static async Task<string> FingerprintAsync(ConfigDbContext db, CancellationToken ct)
+    {
+        var count = await db.AlarmRules.CountAsync(ct);
+        var maxId = count == 0 ? 0 : await db.AlarmRules.MaxAsync(x => x.Id, ct);
+        return $"rules:{count}:{maxId}";
     }
 
     private static AlarmRule Clone(AlarmRule source) => new()

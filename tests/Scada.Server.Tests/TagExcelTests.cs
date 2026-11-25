@@ -228,6 +228,53 @@ public class TagExcelTests
         Assert.DoesNotContain(logs, x => x.Action.StartsWith("导入计算测点："));
     }
 
+    [Fact]
+    public async Task PreviewDoesNotWriteAndApplyPersistsAfterConfirm()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection);
+        var device = new Device { Name = "modbus", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var service = new TagExcelService();
+        using var source = new MemoryStream(service.Export([device], [
+            new Tag { DeviceId = device.Id, Name = "flow", Area = TagArea.HoldingRegister, Address = 3, DataType = TagDataType.UInt16 }
+        ]));
+        var preview = await service.PreviewAsync(source, "tags.xlsx", owner: 7, factory, runtimeFactory, default);
+        Assert.Equal(1, preview.Created);
+        Assert.Equal(0, preview.Updated);
+        Assert.True(preview.CanApply);
+        Assert.Contains(ExcelImportImpact.ReloadWarning, preview.Warnings);
+        db.ChangeTracker.Clear();
+        Assert.Empty(await db.Tags.ToListAsync());
+        Assert.Empty(await runtimeFactory.CreateDbContext().OperationLogs.ToListAsync());
+
+        var applied = await service.ApplyPreviewAsync(7, preview.Id, factory, runtimeFactory, 7, "engineer", default);
+        Assert.Equal(1, applied.Created);
+        db.ChangeTracker.Clear();
+        Assert.Single(await db.Tags.ToListAsync());
+    }
+
+    [Fact]
+    public async Task ApplyPreviewRejectsWhenTagTableChangedAfterPreview()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection); await using var db = factory.CreateDbContext(); await db.Database.MigrateAsync();
+        await using var runtimeConnection = TestRuntime.Open(); var runtimeFactory = TestRuntime.Factory(runtimeConnection);
+        var device = new Device { Name = "modbus", Enabled = false }; db.Devices.Add(device); await db.SaveChangesAsync();
+        var service = new TagExcelService();
+        using var source = new MemoryStream(service.Export([device], [
+            new Tag { DeviceId = device.Id, Name = "flow", Area = TagArea.HoldingRegister, Address = 3, DataType = TagDataType.UInt16 }
+        ]));
+        var preview = await service.PreviewAsync(source, "tags.xlsx", owner: 7, factory, runtimeFactory, default);
+        db.Tags.Add(new Tag { DeviceId = device.Id, Name = "temp", Area = TagArea.HoldingRegister, Address = 1, DataType = TagDataType.UInt16 });
+        await db.SaveChangesAsync();
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.ApplyPreviewAsync(7, preview.Id, factory, runtimeFactory, 7, "engineer", default));
+        Assert.Contains("重新预览", ex.Message);
+        db.ChangeTracker.Clear();
+        Assert.DoesNotContain(await db.Tags.ToListAsync(), x => x.Name == "flow");
+    }
+
     private static Tag Physical(int deviceId, string name, int address, int? scanRateMs) => new()
     {
         DeviceId = deviceId, Name = name, Area = TagArea.HoldingRegister, Address = address,

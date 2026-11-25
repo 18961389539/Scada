@@ -37,6 +37,16 @@ public static class CollectionFingerprint
         return Convert.ToHexString(hash.GetHashAndReset());
     }
 
+    // 对外 OPC UA 地址空间指纹：测点树、区域/设备文件夹和可写标志变化时才会变；改报警规则不变。
+    public static string OfAddressSpace(IEnumerable<Device> devices, IEnumerable<Tag> tags, IEnumerable<Area> areas)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        AppendAll(hash, DeviceProperties, devices.OrderBy(x => x.Id));
+        AppendAll(hash, TagProperties, tags.OrderBy(x => x.Id));
+        AppendAll(hash, AreaProperties, areas.OrderBy(x => x.Id));
+        return Convert.ToHexString(hash.GetHashAndReset());
+    }
+
     private static PropertyInfo[] ScalarProperties(Type type) =>
         type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(x => x.GetIndexParameters().Length == 0 && IsScalar(x.PropertyType))

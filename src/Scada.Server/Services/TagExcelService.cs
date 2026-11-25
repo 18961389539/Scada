@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using ClosedXML.Excel;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
@@ -11,7 +12,23 @@ using Scada.Core.Configuration;
 
 namespace Scada.Server.Services;
 
-public sealed record ImportResult(int Created, int Updated, int Skipped, IReadOnlyList<string> Errors);
+public sealed record ImportResult(int Created, int Updated, int Skipped, IReadOnlyList<string> Errors, int Conflicts = 0);
+
+public sealed record ExcelImportPreview(
+    string Id,
+    int Created,
+    int Updated,
+    int Skipped,
+    int Conflicts,
+    IReadOnlyList<string> Errors,
+    IReadOnlyList<string> Warnings,
+    bool CanApply,
+    DateTime ExpiresAt);
+
+public static class ExcelImportImpact
+{
+    public const string ReloadWarning = "导入生效时会重新加载采集配置：期间写值会被拒绝；若设备指纹变化，相关设备可能重连。";
+}
 
 public sealed class TagExcelService
 {
@@ -20,6 +37,9 @@ public sealed class TagExcelService
     public TagExcelService(Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> options) => _settings = options.Value;
 
     public TagExcelService() : this(Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())) { }
+
+    private sealed record PreviewState(int Owner, byte[] Bytes, string FileName, string Fingerprint, ExcelImportPreview Preview);
+    private readonly ConcurrentDictionary<string, PreviewState> _previews = new();
 
     private static readonly System.Text.Json.JsonSerializerOptions AuditJson = new()
     {
@@ -107,7 +127,7 @@ public sealed class TagExcelService
     public async Task<ImportResult> ImportAsync(
         Stream stream,
         IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-        CancellationToken cancellationToken, int? userId = null, string userName = "system", string? fileName = null)
+        CancellationToken cancellationToken, int? userId = null, string userName = "system", string? fileName = null, bool dryRun = false)
     {
         // 导入是批量写：物理测点逐行审计没有意义，提交成功后由本方法记一条汇总。
         // 计算测点仍按行记录（见 ImportCalculationsAsync），汇总里注明范围，避免再展开一遍。
@@ -119,6 +139,8 @@ public sealed class TagExcelService
         var created = 0;
         var updated = 0;
         var skipped = 0;
+        var conflicts = 0;
+        var seenKeys = new HashSet<(int DeviceId, string Name)>();
 
         await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
@@ -180,6 +202,7 @@ public sealed class TagExcelService
 
                 var key = (device.Id, tagName);
                 if (hasCalculations && !physicalNames.Add(key)) throw new TagExpressionException("含计算定义的工作簿不能包含重复的物理测点名称");
+                if (!seenKeys.Add(key)) conflicts++;
                 var exists = tags.TryGetValue(key, out var tag);
                 // Validate a detached copy: a skipped invalid row must not change a tracked entity.
                 tag = tag?.Clone() ?? new Tag { DeviceId = device.Id, Name = tagName };
@@ -248,25 +271,30 @@ public sealed class TagExcelService
         // 档位是设备级约束，超限时不能部分入库，否则现场会先采到不完整点表。
         if (laneErrors.Count > 0)
             return new(0, 0, skipped + created + updated, errors.Take(50).ToList());
-        await db.SaveChangesAsync(cancellationToken);
+        if (!dryRun) await db.SaveChangesAsync(cancellationToken);
         var calculationCreated = 0;
         var calculationUpdated = 0;
         if (hasCalculations)
         {
             try
             {
-                var result = await ImportCalculationsAsync(db, runtime, calculationSheet!, idMap, userId, userName, cancellationToken);
+                var result = await ImportCalculationsAsync(db, runtime, calculationSheet!, idMap, userId, userName, cancellationToken, dryRun);
                 calculationCreated = result.Created;
                 calculationUpdated = result.Updated;
                 created += result.Created; updated += result.Updated;
             }
             catch (Exception ex) when (ex is TagExpressionException or ArgumentException or DbUpdateException)
-            { return new(0, 0, skipped, [$"计算工作簿校验失败，全部回滚：{(ex is DbUpdateException ? "名称或引用冲突" : ex.Message)}"]); }
+            { return new(0, 0, skipped, [$"计算工作簿校验失败，全部回滚：{(ex is DbUpdateException ? "名称或引用冲突" : ex.Message)}"], conflicts); }
+        }
+        if (dryRun)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ImportResult(created, updated, skipped, errors.Take(50).ToList(), conflicts);
         }
         await transaction.CommitAsync(cancellationToken);
         AddImportSummary(runtime, userId, userName, fileName, created, updated, skipped, errors, calculationCreated + calculationUpdated);
         await runtime.SaveChangesAsync(cancellationToken);
-        return new ImportResult(created, updated, skipped, errors.Take(50).ToList());
+        return new ImportResult(created, updated, skipped, errors.Take(50).ToList(), conflicts);
     }
 
     private static void AddImportSummary(RuntimeDbContext runtime, int? userId, string userName, string? fileName, int created, int updated, int skipped, IReadOnlyList<string> errors, int calculationRowLogs)
@@ -302,7 +330,7 @@ public sealed class TagExcelService
         });
     }
 
-    private static async Task<(int Created, int Updated)> ImportCalculationsAsync(ConfigDbContext db, RuntimeDbContext runtime, IXLWorksheet sheet, Dictionary<int, Tag> idMap, int? userId, string userName, CancellationToken ct)
+    private static async Task<(int Created, int Updated)> ImportCalculationsAsync(ConfigDbContext db, RuntimeDbContext runtime, IXLWorksheet sheet, Dictionary<int, Tag> idMap, int? userId, string userName, CancellationToken ct, bool dryRun = false)
     {
         if (sheet.Cell(1, 1).GetString() != "原测点ID" || sheet.Cell(1, 3).GetString() != "表达式") throw new TagExpressionException("计算工作表表头无效");
         var last = sheet.LastRowUsed()?.RowNumber() ?? 1;
@@ -330,6 +358,7 @@ public sealed class TagExcelService
             else { db.Tags.Add(tag); created++; }
             idMap.Add(oldId, tag); rows.Add((tag, expression, before));
         }
+        // 预览也要走过编号重写与计算图编译，借当前事务拿到临时 Id；预览结束会回滚，不写运行库审计。
         await db.SaveChangesAsync(ct);
         foreach (var row in rows)
             row.Tag.Expression = Regex.Replace(row.Expression, @"#([0-9]+)", match => idMap.TryGetValue(int.Parse(match.Groups[1].Value), out var target) ? $"#{target.Id}" : throw new TagExpressionException($"工作簿缺少输入 {match.Value} 的完整定义，不能按目标库编号猜测绑定"));
@@ -339,9 +368,72 @@ public sealed class TagExcelService
         {
             await db.TagDependencies.Where(x => x.TagId == row.Tag.Id).ExecuteDeleteAsync(ct);
             db.TagDependencies.AddRange(plan[row.Tag.Id].Expression.Dependencies.Select(x => new TagDependency { TagId = row.Tag.Id, InputTagId = x }));
-            runtime.OperationLogs.Add(new OperationLog { UserId = userId, UserName = userName, TagId = row.Tag.Id, Ts = ScadaTime.NowMs(), Action = $"导入计算测点：{row.Tag.Name}", OldValue = row.Before, NewValue = System.Text.Json.JsonSerializer.Serialize(row.Tag), Result = "成功" });
+            if (!dryRun)
+                runtime.OperationLogs.Add(new OperationLog { UserId = userId, UserName = userName, TagId = row.Tag.Id, Ts = ScadaTime.NowMs(), Action = $"导入计算测点：{row.Tag.Name}", OldValue = row.Before, NewValue = System.Text.Json.JsonSerializer.Serialize(row.Tag), Result = "成功" });
         }
-        await db.SaveChangesAsync(ct); await runtime.SaveChangesAsync(ct); return (created, updated);
+        await db.SaveChangesAsync(ct);
+        if (!dryRun) await runtime.SaveChangesAsync(ct);
+        return (created, updated);
+    }
+
+
+    public async Task<ExcelImportPreview> PreviewAsync(
+        Stream stream,
+        string fileName,
+        int owner,
+        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<RuntimeDbContext> runtimeFactory,
+        CancellationToken cancellationToken)
+    {
+        PrunePreviews();
+        if (_previews.Count >= 128) throw new InvalidOperationException("导入预览已达上限，请等待旧预览过期");
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer, cancellationToken);
+        var bytes = buffer.ToArray();
+        buffer.Position = 0;
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var fingerprint = await FingerprintAsync(db, cancellationToken);
+        var plan = await ImportAsync(buffer, contextFactory, runtimeFactory, cancellationToken, fileName: fileName, dryRun: true);
+        var canApply = plan.Created + plan.Updated > 0;
+        var id = Guid.NewGuid().ToString("N");
+        var preview = new ExcelImportPreview(id, plan.Created, plan.Updated, plan.Skipped, plan.Conflicts, plan.Errors, [ExcelImportImpact.ReloadWarning], canApply, DateTime.UtcNow.AddMinutes(10));
+        _previews[id] = new(owner, bytes, fileName, fingerprint, preview);
+        return preview;
+    }
+
+    public async Task<ImportResult> ApplyPreviewAsync(
+        int owner,
+        string previewId,
+        IDbContextFactory<ConfigDbContext> contextFactory,
+        IDbContextFactory<RuntimeDbContext> runtimeFactory,
+        int? userId,
+        string userName,
+        CancellationToken cancellationToken)
+    {
+        if (!_previews.TryGetValue(previewId, out var saved) || saved.Owner != owner || saved.Preview.ExpiresAt < DateTime.UtcNow)
+            throw new InvalidOperationException("导入预览不存在或已过期，请重新预览");
+        if (!saved.Preview.CanApply) throw new InvalidOperationException("导入预览没有可应用的变更");
+        await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+        if (await FingerprintAsync(db, cancellationToken) != saved.Fingerprint)
+            throw new InvalidOperationException("测点配置已变化，请重新预览");
+        using var buffer = new MemoryStream(saved.Bytes);
+        var result = await ImportAsync(buffer, contextFactory, runtimeFactory, cancellationToken, userId, userName, saved.FileName);
+        _previews.TryRemove(previewId, out _);
+        return result;
+    }
+
+    private void PrunePreviews()
+    {
+        var now = DateTime.UtcNow;
+        foreach (var (key, state) in _previews)
+            if (state.Preview.ExpiresAt < now) _previews.TryRemove(key, out _);
+    }
+
+    private static async Task<string> FingerprintAsync(ConfigDbContext db, CancellationToken ct)
+    {
+        var count = await db.Tags.CountAsync(ct);
+        var maxId = count == 0 ? 0 : await db.Tags.MaxAsync(x => x.Id, ct);
+        return $"tags:{count}:{maxId}";
     }
 
     private static bool TryParseEnum<TEnum>(string text, out TEnum value) where TEnum : struct, Enum

@@ -1250,7 +1250,11 @@
     "healthFailed": "Could not load device communication status",
     "lastPoll": "Last poll",
     "commFailures": "Comm failures",
-    "healthTooltip": "{0} · Last poll {1} · Comm failures {2}"
+    "healthTooltip": "{0} · Last poll {1} · Comm failures {2}",
+    "lastError": "Last error",
+    "viewCertificates": "View certificates",
+    "certExpired": "A trusted or own OPC certificate has expired: {0}",
+    "certExpiring": "A trusted or own OPC certificate expires within 30 days: {0}"
   },
   "editDialog": {
     "discard": "Discard changes",
@@ -1295,7 +1299,16 @@
     "secretTitle": "Copy the secret now",
     "starting": "Starting",
     "subtitle": "REST / TCP / OPC UA and API keys",
-    "tcp": "TCP"
+    "tcp": "TCP",
+    "writeAllowed": "Writes allowed",
+    "writeDenied": "Writes disabled",
+    "modbus": "Modbus slave",
+    "iec104": "IEC 104 slave",
+    "mappedPoints": "{0} mapped points · {1} connections",
+    "mappingWarnings": "Point-map warnings",
+    "createdAt": "Created",
+    "lastUsed": "Last used",
+    "neverUsed": "Never used"
   },
   "gatewayAssignmentDialog": {
     "k01f2c1": "Device",
@@ -2523,7 +2536,9 @@
     "kf3ea6d": "Actions",
     "kf90f47": "Fingerprint verified, trust",
     "kfff124": "Revoke server trust",
-    "listFailed": "Certificate list could not be loaded"
+    "listFailed": "Certificate list could not be loaded",
+    "expired": "Expired",
+    "expiring": "Expires in 30 days"
   },
   "opsView": {
     "fullBackupHint": "These are full backup packages (full_*.zip / .zip.enc) with configuration, runtime, history and keys. Daily maintenance scada_*.db files are configuration-database copies only and are not a complete restore. Restore offline with BackupTool and Restore-ScadaService.ps1 / restore.sh from the published package; there is no online one-click restore API.",
@@ -2641,7 +2656,19 @@
       }
     },
     "targetDirectory": "Directory",
-    "targetS3": "Object storage"
+    "targetS3": "Object storage",
+    "plaintextRisk": "Scada:BackupPassword is not set, so local backups are plaintext and include keys and password hashes. Set the password with the offline tool tools/deployment/Set-BackupPassword.ps1 and restart. You can also verify encrypted packs with Scada.BackupTool in the published package. Offsite copies are refused until then; existing plaintext packs are left unchanged. This page does not accept a backup password and has no one-click online restore.",
+    "createdAt": "Created",
+    "encryption": "Encryption",
+    "encrypted": "Encrypted",
+    "plaintext": "Plaintext",
+    "verify": "Verify",
+    "download": "Download",
+    "verifyOk": "Backup {0} verified",
+    "verifyFailed": "Backup verification failed: {0}",
+    "verifyUnknown": "No problem details were returned",
+    "downloadDiagnostics": "Download diagnostics",
+    "diagnosticsReady": "Diagnostics pack downloaded. It includes version and configuration size, health metrics, database checks, notification status and recent logs. It does not include device credentials, tokens, or passwords."
   },
   "overviewView": {
     "alarmListFailed": "Could not load alarms",
@@ -4112,7 +4139,13 @@
     "takeoverReviewMessage": "Detail",
     "takeoverReviewKind_command": "Local command",
     "takeoverReviewKind_sequence": "Sequence",
-    "takeoverReviewKind_recipe": "Recipe"
+    "takeoverReviewKind_recipe": "Recipe",
+    "notifications": "Notification delivery",
+    "notificationCounts": "Failed {0} · Pending {1} · Final failures {2} · Dropped {3}",
+    "notificationFailedLink": "Open failed outbox",
+    "webhookCounts": "Webhook {0}: sent {1}, failed {2}, suppressed {3}, dropped {4}",
+    "webhookOn": "enabled",
+    "webhookOff": "disabled"
   },
   "tagPicker": {
     "calculated": "Calculated tags",

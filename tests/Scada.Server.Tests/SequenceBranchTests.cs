@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -199,5 +200,84 @@ public sealed class SequenceBranchTests : IClassFixture<ControlTests.ControlSite
         var saved = await Ok(await SaveAsync(admin, "布局" + U(), [new { id = "s1", type = "write", name = "s1", tagId = a, value = 1, timeoutMs = 2000, x = 120.5, y = 40 }]));
         var step = saved.GetProperty("steps")[0];
         Assert.Equal(120.5, step.GetProperty("x").GetDouble()); Assert.Equal(40, step.GetProperty("y").GetDouble());
+    }
+
+    [Fact]
+    public async Task WaitAndCompleteConditionsFailImmediatelyOnBadQualityButStillWaitWhenFalse()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var cond = await TagAsync(admin, "等质");
+        var output = await TagAsync(admin, "等出");
+        var cache = _site.Services.GetRequiredService<IRealtimeCache>();
+        var workflow = _site.Services.GetRequiredService<ControlWorkflowService>();
+
+        cache.Set(new TagValue(cond, 1, TagQuality.Bad, ScadaTime.NowMs()));
+        var waitBad = await Ok(await SaveAsync(admin, "等坏" + U(), [
+            new { id = "w", type = "wait", name = "等", expression = $"#{cond} == 1", timeoutMs = 60_000 }
+        ]));
+        var sw = Stopwatch.StartNew();
+        var waitBadRun = await RunAsync(admin, waitBad.GetProperty("id").GetInt32());
+        sw.Stop();
+        Assert.Equal("Failed", waitBadRun.GetProperty("status").GetString());
+        Assert.Contains("无法判定", waitBadRun.GetProperty("message").GetString());
+        Assert.True(sw.ElapsedMilliseconds < 10_000, $"坏质量等待应立即失败，实际 {sw.ElapsedMilliseconds} ms");
+
+        Set(output, 0);
+        cache.Set(new TagValue(cond, 0, TagQuality.CommFailure, ScadaTime.NowMs()));
+        var confirmBad = await Ok(await SaveAsync(admin, "完成坏" + U(), [
+            Write("w", output, 1, confirm: $"#{cond} == 1", timeoutMs: 60_000)
+        ]));
+        sw.Restart();
+        var confirmBadRun = await RunAsync(admin, confirmBad.GetProperty("id").GetInt32());
+        sw.Stop();
+        Assert.Equal("Failed", confirmBadRun.GetProperty("status").GetString());
+        Assert.Contains("无法判定", confirmBadRun.GetProperty("message").GetString());
+        Assert.True(sw.ElapsedMilliseconds < 10_000, $"坏质量完成条件应立即失败，实际 {sw.ElapsedMilliseconds} ms");
+
+        Set(cond, 0);
+        var waitTimeout = await Ok(await SaveAsync(admin, "等假" + U(), [
+            new { id = "w", type = "wait", name = "等", expression = $"#{cond} == 1", timeoutMs = 400 }
+        ]));
+        sw.Restart();
+        var timedOut = await RunAsync(admin, waitTimeout.GetProperty("id").GetInt32());
+        sw.Stop();
+        Assert.Equal("Failed", timedOut.GetProperty("status").GetString());
+        Assert.DoesNotContain("无法判定", timedOut.GetProperty("message").GetString());
+        Assert.Contains("超时", timedOut.GetProperty("message").GetString());
+        Assert.True(sw.ElapsedMilliseconds >= 300, $"假条件应等到超时，实际 {sw.ElapsedMilliseconds} ms");
+
+        Set(output, 0);
+        Set(cond, 0);
+        var confirmTimeout = await Ok(await SaveAsync(admin, "完成假" + U(), [
+            Write("w", output, 1, confirm: $"#{cond} == 1", timeoutMs: 400)
+        ]));
+        sw.Restart();
+        var confirmTimedOut = await RunAsync(admin, confirmTimeout.GetProperty("id").GetInt32());
+        sw.Stop();
+        Assert.Equal("Failed", confirmTimedOut.GetProperty("status").GetString());
+        Assert.DoesNotContain("无法判定", confirmTimedOut.GetProperty("message").GetString());
+        Assert.Contains("未满足", confirmTimedOut.GetProperty("message").GetString());
+        Assert.True(sw.ElapsedMilliseconds >= 300, $"假完成条件应等到超时，实际 {sw.ElapsedMilliseconds} ms");
+
+        Set(cond, 0);
+        var waitOkSeq = await Ok(await SaveAsync(admin, "等到" + U(), [
+            new { id = "w", type = "wait", name = "等", expression = $"#{cond} == 1", timeoutMs = 5000 }
+        ]));
+        var waitOkId = (await Ok(await admin.StartSequenceAsync(waitOkSeq.GetProperty("id").GetInt32()))).GetProperty("runId").GetInt32();
+        _ = Task.Run(async () => { await Task.Delay(250); Set(cond, 1); });
+        await workflow.WaitAsync(waitOkId);
+        var waitOkRun = await Ok(await admin.GetAsync($"/api/control/runs/{waitOkId}"));
+        Assert.Equal("Completed", waitOkRun.GetProperty("status").GetString());
+
+        Set(output, 0);
+        Set(cond, 0);
+        var confirmOkSeq = await Ok(await SaveAsync(admin, "完成到" + U(), [
+            Write("w", output, 1, confirm: $"#{cond} == 1", timeoutMs: 5000)
+        ]));
+        var confirmOkId = (await Ok(await admin.StartSequenceAsync(confirmOkSeq.GetProperty("id").GetInt32()))).GetProperty("runId").GetInt32();
+        _ = Task.Run(async () => { await Task.Delay(250); Set(cond, 1); });
+        await workflow.WaitAsync(confirmOkId);
+        var confirmOkRun = await Ok(await admin.GetAsync($"/api/control/runs/{confirmOkId}"));
+        Assert.Equal("Completed", confirmOkRun.GetProperty("status").GetString());
     }
 }

@@ -19,6 +19,23 @@ public sealed class BackupSecurityTests
         Assert.DoesNotContain(logger.Messages, x => x.Contains("test-password-only"));
     }
 
+    [Theory]
+    [InlineData(false, null, true)]
+    [InlineData(true, null, false)]
+    [InlineData(false, "test-password-only", false)]
+    public void UnencryptedWarningIsActionableWithoutSecret(bool development, string? password, bool expected)
+    {
+        var warning = BackupSecurity.UnencryptedWarning(development, new() { BackupPassword = password });
+        Assert.Equal(expected, warning is not null);
+        if (expected)
+        {
+            Assert.Equal(BackupSecurity.UnencryptedWarningCode, warning!.Code);
+            Assert.Contains("Set-BackupPassword.ps1", warning.Message);
+            Assert.Contains("Scada:BackupPassword", warning.Message);
+            Assert.DoesNotContain("test-password-only", warning.Message);
+        }
+    }
+
     [Fact]
     public async Task PlaintextDoesNotConstructTargetOrDeleteOldRemoteBackups()
     {

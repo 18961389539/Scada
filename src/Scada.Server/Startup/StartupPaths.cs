@@ -131,6 +131,47 @@ internal static class StartupPaths
     // 站点配置里的相对路径统一以数据根为基准，避免落到进程工作目录（服务场景是 System32）。
     // 用追加一层内存配置而不是改写已有 provider 的索引器：后者会就地篡改 JSON provider 的值，
     // 与 IOptionsMonitor 的缓存和"配置文件没变"的判断都不一致，排查时很难看出这个值是被改过的。
+    public static string? ExistingSiteSettingsPath(IConfiguration configuration, string dataRoot)
+    {
+        var explicitPath = configuration["SiteSettings"];
+        if (!string.IsNullOrWhiteSpace(explicitPath))
+        {
+            var path = Path.GetFullPath(explicitPath);
+            return File.Exists(path) ? path : null;
+        }
+
+        foreach (var candidate in new[]
+                 {
+                     Path.Combine(AppContext.BaseDirectory, "appsettings.Site.json"),
+                     Path.Combine(dataRoot, "appsettings.Site.json")
+                 })
+        {
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
+    public static bool TryWriteScadaProperty(string path, string name, string? value)
+    {
+        var json = File.Exists(path) ? File.ReadAllText(path) : "{}";
+        var root = System.Text.Json.Nodes.JsonNode.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json) as System.Text.Json.Nodes.JsonObject
+            ?? new System.Text.Json.Nodes.JsonObject();
+        var scada = root["Scada"] as System.Text.Json.Nodes.JsonObject ?? new System.Text.Json.Nodes.JsonObject();
+        root["Scada"] = scada;
+        if (string.IsNullOrWhiteSpace(value)) scada.Remove(name);
+        else scada[name] = value;
+        var payload = root.ToJsonString(new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+        });
+        var temp = path + $".{Environment.ProcessId}.tmp";
+        File.WriteAllText(temp, payload, new UTF8Encoding(false));
+        File.Move(temp, path, overwrite: true);
+        return true;
+    }
+
     public static void ApplyDataRoot(IConfigurationManager configuration, string dataRoot)
     {
         var defaults = new Dictionary<string, string>

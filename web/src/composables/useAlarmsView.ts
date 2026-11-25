@@ -584,8 +584,21 @@ export function useAlarmsView() {
   async function applyPendingPush(): Promise<void> {
     pendingNotice.value = ''
     pushedCritical = false
-    if (tab.value === 'history') return
+    if (tab.value === 'history') {
+      tab.value = 'live'
+      await onTabChange()
+      return
+    }
     await load(true)
+  }
+
+  function handleReconnect(): void {
+    if (disposed) return
+    if (tab.value === 'history' || editingOpen() || filterTimer !== undefined) {
+      if (pendingNotice.value !== 'critical') pendingNotice.value = 'update'
+      return
+    }
+    void backgroundRefresh()
   }
 
   async function loadHistory(useDraftRange = false): Promise<void> {
@@ -889,7 +902,7 @@ export function useAlarmsView() {
     await reload()
     if (disposed) return
     registerAlarmHandler()
-    disposeReconnect = onHubReconnected(() => { void backgroundRefresh() })
+    disposeReconnect = onHubReconnected(() => { handleReconnect() })
   })
 
   onBeforeUnmount(() => {

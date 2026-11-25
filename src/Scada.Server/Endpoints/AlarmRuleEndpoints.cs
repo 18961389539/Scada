@@ -312,7 +312,60 @@ public static class AlarmRuleEndpoints
                 : Results.File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", name);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        // 导入：与测点导入一致，要求全部区域配置权限；逐行校验，成功行提交后整库热加载并写审计。
+        group.MapPost("/import/preview", async (IFormFile file, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            AlarmRuleExcelService excel, CancellationToken cancellationToken) =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "预览报警规则导入", "导入报警规则需要全部区域的配置权限");
+            if (http.User.GetUserId() is not int owner) return EndpointHelpers.BadRequest("无法识别当前用户");
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (extension is not (".xlsx" or ".csv")) return EndpointHelpers.BadRequest("仅支持 .xlsx 或 .csv 文件");
+            if (file.Length == 0 || file.Length > 20 * 1024 * 1024) return EndpointHelpers.BadRequest("文件为空或超过 20 MB");
+            try
+            {
+                await using var stream = file.OpenReadStream();
+                return Results.Ok(await excel.PreviewAsync(stream, file.FileName, owner, contextFactory, runtimeFactory, cancellationToken));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
+        }).DisableAntiforgery().RequireAuthorization(AccessPolicies.Configure)
+            .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
+
+        group.MapPost("/import/{previewId}", async (string previewId, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            AlarmRuleExcelService excel, ConfigReloader reloader, CancellationToken cancellationToken) =>
+        {
+            if (!(await http.GetAccessAsync()).HasGlobal(Permission.Configure))
+                return await Audit.ForbidAsync(http, "导入报警规则", "导入报警规则需要全部区域的配置权限");
+            if (http.User.GetUserId() is not int owner) return EndpointHelpers.BadRequest("无法识别当前用户");
+            try
+            {
+                var result = await excel.ApplyPreviewAsync(owner, previewId, contextFactory, runtimeFactory, owner, http.User.GetUserName(), cancellationToken);
+                await reloader.ReloadAsync(cancellationToken);
+                await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+                runtime.OperationLogs.Add(new OperationLog
+                {
+                    UserId = owner, UserName = http.User.GetUserName(), Ts = ScadaTime.NowMs(),
+                    Action = "导入报警规则", Result = "成功", TargetType = "AlarmRule",
+                    Details = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        previewId, result.Created, result.Updated, result.Skipped, result.Conflicts,
+                        errors = result.Errors.Take(10).ToArray()
+                    })
+                });
+                await runtime.SaveChangesAsync(cancellationToken);
+                return Results.Ok(result);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
+        }).RequireAuthorization(AccessPolicies.Configure)
+            .Produces<AlarmRuleImportResult>(StatusCodes.Status200OK)
+            .WithMetadata(new Microsoft.AspNetCore.Http.Timeouts.RequestTimeoutAttribute(Startup.ScadaResilience.WriteTimeoutPolicy));
+
+        // 导入：与测点导入一致，要求全部区域配置权限；Web 界面先预览再应用，本接口保留给旧客户端。
         group.MapPost("/import", async (IFormFile file, HttpContext http, IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             AlarmRuleExcelService excel, ConfigReloader reloader, CancellationToken cancellationToken) =>
         {

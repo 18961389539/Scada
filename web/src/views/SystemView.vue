@@ -154,6 +154,16 @@
                 <div class="value">{{ health.storage ? formatBytes(health.storage.historyBytes) : '--' }}</div>
                 <div class="sub">{{ health.storage ? $t('systemView.k287238', [formatBytes(health.storage.configDbBytes)]) : '--' }}</div>
               </div>
+              <div class="stat-card" data-test="health-notifications">
+                <div class="label">{{ $t('systemView.notifications') }}</div>
+                <div class="value" :class="{ bad: notificationAlert }">{{ health.alarmNotifications?.sent ?? health.alarmWebhook?.sent ?? 0 }}</div>
+                <div class="sub">
+                  {{ $t('systemView.notificationCounts', [health.alarmNotifications?.failed ?? 0, health.alarmNotifications?.pending ?? 0, health.alarmNotifications?.finalFailed ?? 0, health.alarmNotifications?.dropped ?? 0]) }}
+                  <router-link class="notif-link" to="/config/notifications?tab=failed">{{ $t('systemView.notificationFailedLink') }}</router-link>
+                </div>
+                <div v-if="health.alarmWebhook" class="sub">{{ $t('systemView.webhookCounts', [health.alarmWebhook.enabled ? $t('systemView.webhookOn') : $t('systemView.webhookOff'), health.alarmWebhook.sent, health.alarmWebhook.failed, health.alarmWebhook.suppressed, health.alarmWebhook.dropped]) }}</div>
+                <div v-if="health.alarmNotifications?.lastError || health.alarmWebhook?.lastError" class="sub bad">{{ health.alarmNotifications?.lastError || health.alarmWebhook?.lastError }}</div>
+              </div>
             </div>
 
             <section v-if="health.historyCapacity" class="history-capacity" data-test="history-capacity">
@@ -369,6 +379,7 @@ const logTotal = ref(0)
 const health = ref<Health | null>(null)
 const healthLoading = ref(false)
 const healthError = ref('')
+const notificationAlert = computed(() => ((health.value?.alarmNotifications?.failed ?? 0) + (health.value?.alarmNotifications?.finalFailed ?? 0) + (health.value?.alarmWebhook?.failed ?? 0)) > 0)
 let healthRefreshing = false
 
 const durationText = (total: number): string => {
@@ -624,4 +635,5 @@ onMounted(async () => {
 .bus-dropped { color: var(--el-color-danger); margin-left: 6px; }
 .app-meta { margin: 18px 0 0; text-align: right; letter-spacing: 0.02em; }
 @media (max-width: 680px) { .capacity-grid { grid-template-columns: minmax(0, 1fr); } }
+.notif-link { margin-left: 8px; }
 </style>

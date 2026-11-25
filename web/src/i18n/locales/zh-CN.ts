@@ -935,7 +935,12 @@ export default {
     confirmDeleteDefect: '确认删除缺陷代码「{0}」？已有检验记录时会被拒绝。',
     defectCount: '缺陷数', cumulative: '累计占比',
     loadFailed: '质量数据读取失败', saveFailed: '保存失败', deleteFailed: '删除失败',
-    saved: '已保存', deleted: '已删除', noAreas: '当前账号没有可录入检验的区域'
+    saved: '已保存', deleted: '已删除', noAreas: '当前账号没有可录入检验的区域',
+    exportExcel: '导出 Excel',
+    exportPdf: '导出 PDF',
+    createdBy: '创建人',
+    updated: '更新',
+    revised: '已修订'
   },
   screenHandoff: {
     controlsPaused: '画面已发布新版本，控制已暂停，刷新后继续操作。',
@@ -996,5 +1001,79 @@ export default {
     soundMuted: '已静音',
     soundOn: '播音',
     criticalTitle: '严重报警'
+  },
+  importPreview: {
+    titleTags: '导入测点预览',
+    titleRules: '导入报警规则预览',
+    summary: '新增 {0}，更新 {1}，跳过 {2}，冲突 {3}',
+    impact: '确认后立即写入并重新加载采集配置：期间写值会被拒绝；若设备指纹变化，相关设备可能重连。',
+    noChanges: '没有可应用的变更，未写入任何数据。',
+    errors: '错误（{0}）',
+    confirm: '确认导入',
+    cancel: '取消',
+    previewFailed: '预览失败',
+    applyFailed: '导入失败',
+    done: '导入完成：新增 {0}，更新 {1}，跳过 {2}，冲突 {3}'
+  },
+  soundMute: {
+    confirmTitle: '报警声当前为静音',
+    confirmBody: '本机当前登录用户已关闭报警声。交班后若需听到报警，请取消静音。请确认已知悉。',
+    acknowledge: '已知悉，保持静音',
+    unmute: '取消静音'
+  },
+  shiftZone: {
+    label: '班次时区',
+    serverLocal: '未配置，按服务器本地时区（{0}）',
+    configured: '当前班次时区：{0}',
+    placeholder: '选择时区，或留空使用服务器本地时区',
+    serverLocalOption: '使用服务器本地时区',
+    saved: '班次时区已更新',
+    saveFailed: '保存班次时区失败',
+    loadFailed: '读取班次时区失败',
+    notPersisted: '已在当前进程生效，但未写入站点配置文件，重启后可能恢复原值。',
+    needGlobal: '修改班次时区需要全部区域的配置权限。'
+  },
+  dutyHandover: {
+    title: '值班摘要',
+    keywords: '交班 值班 摘要 交班单 handover shift summary',
+    hint: '汇总当前未确认报警、暂挂、待复核以及进行中的顺控与配方，可打印后用于交班。不是排班或考勤。',
+    print: '打印',
+    refresh: '刷新',
+    loadFailed: '值班摘要读取失败',
+    generatedAt: '生成时间：{0}',
+    operator: '当前用户：{0}',
+    unacked: '未确认报警',
+    unackedByLevel: '按等级',
+    rtnUnack: '已恢复未确认',
+    shelved: '暂挂',
+    suppressed: '抑制',
+    pendingReview: '待复核',
+    noPending: '没有待复核的控制请求',
+    runningSequences: '进行中的顺控',
+    runningRecipes: '进行中的配方下发',
+    noneRunning: '没有进行中的任务',
+    sound: '本机报警声',
+    muted: '静音',
+    unmuted: '已开启',
+    dataFreshness: '数据状态',
+    stale: '数据可能过期或健康检查异常',
+    fresh: '健康检查正常',
+    unknown: '健康状态未知',
+    standby: '当前节点为备机，主机：{0}',
+    emptyLevel: '无'
+  },
+  alarmReconnect: {
+    missedTitle: '断线期间的紧急报警',
+    missedBody: '重连后发现 {0} 条仍活动或刚恢复但未确认的紧急报警，请查看。',
+    open: '查看报警',
+    dismiss: '知道了'
+  },
+  kioskStatus: {
+    reconnecting: '正在重新连接',
+    disconnected: '已断开连接',
+    standby: '当前为备机',
+    primary: '主机 {0}',
+    healthIssue: '服务状态异常'
   }
+
 }

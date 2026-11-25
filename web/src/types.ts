@@ -627,13 +627,42 @@ export interface Health {
     interruptedRecipes: number
     items: { kind: string; id: string; name: string; message: string; ts?: number | null }[]
   } | null
+  alarmWebhook?: {
+    enabled: boolean
+    sent: number
+    suppressed: number
+    failed: number
+    dropped: number
+    lastError: string | null
+  }
+  alarmNotifications?: {
+    sent: number
+    failed: number
+    dropped: number
+    lastError: string | null
+    pending: number
+    finalFailed: number
+  } | null
 }
 
 export interface ImportResult {
   created: number
   updated: number
   skipped: number
+  conflicts?: number
   errors: string[]
+}
+
+export interface ExcelImportPreview {
+  id: string
+  created: number
+  updated: number
+  skipped: number
+  conflicts: number
+  errors: string[]
+  warnings: string[]
+  canApply: boolean
+  expiresAt: string
 }
 
 export interface Paged<T> {
@@ -852,6 +881,9 @@ export interface QualityInspection {
   createdBy: string
   deviceName: string | null
   tagName: string | null
+  createdTs: number
+  updatedTs: number
+  updatedBy: string
 }
 
 export interface QualityInspectionInput {

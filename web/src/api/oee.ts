@@ -78,7 +78,20 @@ export const oeeApi = {
   thresholds: async () => (await http.get<{ thresholds: OeeThresholds; revision: number; defaults: OeeThresholds }>('/oee/thresholds')).data,
   saveThresholds: async (thresholds: OeeThresholds, revision: number) => (await http.put('/oee/thresholds', { thresholds, revision })).data,
   rollups: async () => (await http.get('/oee/rollups')).data,
-  rebuild: async (days: number) => (await http.post('/oee/rollups/rebuild', { days })).data
+  rebuild: async (days: number) => (await http.post('/oee/rollups/rebuild', { days })).data,
+  shiftTimezone: async () => (await http.get<ShiftTimeZoneView>('/oee/shift-timezone')).data,
+  saveShiftTimezone: async (timeZone: string | null) =>
+    (await http.put<ShiftTimeZoneView>('/oee/shift-timezone', { timeZone })).data
+}
+
+export interface ShiftTimeZoneOption { id: string; display: string }
+export interface ShiftTimeZoneView {
+  configured: string | null
+  effectiveId: string
+  effectiveDisplay: string
+  usesServerLocal: boolean
+  persisted: boolean
+  options: ShiftTimeZoneOption[]
 }
 
 export const oeeKpiMetrics = ['availability', 'performance', 'quality', 'oee', 'plannedHours', 'runHours', 'downHours', 'good', 'reject', 'scrap', 'total', 'scrapRate', 'mtbfHours', 'mttrHours', 'faultCount', 'productionVsTarget', 'target'] as const

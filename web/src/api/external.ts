@@ -15,10 +15,30 @@ export type ExternalApiKey = {
   notes?: string
 }
 
+export type ExternalEndpointStatus = {
+  enabled?: boolean
+  listenAddress?: string
+  port?: number
+  tls?: boolean
+  maxConnections?: number
+  ipAllowlist?: string[]
+  connections?: number
+  running?: boolean
+  mappedPoints?: number
+  allowWrite?: boolean
+  allowControl?: boolean
+  autoAddressing?: boolean
+  unitIds?: Array<number | string>
+  commonAddresses?: Array<number | string>
+  warnings?: string[]
+}
+
 export type ExternalStatus = {
-  rest?: { enabled?: boolean }
-  tcp?: { enabled?: boolean; listenAddress?: string; port?: number }
-  opcUa?: { enabled?: boolean; running?: boolean; endpoint?: string; endpointUrl?: string }
+  rest?: { enabled?: boolean; allowJwt?: boolean; cors?: string[]; defaultRateLimitPerMinute?: number }
+  tcp?: ExternalEndpointStatus
+  opcUa?: { enabled?: boolean; running?: boolean; endpoint?: string; endpointUrl?: string; allowWrite?: boolean }
+  modbusSlave?: ExternalEndpointStatus
+  iec104Server?: ExternalEndpointStatus
 }
 
 export const externalApi = {

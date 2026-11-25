@@ -26,7 +26,8 @@ const mocks = vi.hoisted(() => ({
   alert: vi.fn(),
   success: vi.fn(),
   registerShortcuts: vi.fn(() => () => {}),
-  onHubEvent: vi.fn(() => () => {})
+  onHubEvent: vi.fn(() => () => {}),
+  onHubReconnected: vi.fn(() => () => {})
 }))
 
 vi.mock('../api', () => ({
@@ -51,7 +52,7 @@ vi.mock('../api/http', () => ({
   errorMessage: (error: unknown, fallback?: string) => fallback ?? (error instanceof Error ? error.message : String(error))
 }))
 vi.mock('../stores/auth', () => ({ useAuthStore: () => mocks.auth }))
-vi.mock('../realtime/hub', () => ({ onHubEvent: mocks.onHubEvent }))
+vi.mock('../realtime/hub', () => ({ onHubEvent: mocks.onHubEvent, onHubReconnected: mocks.onHubReconnected }))
 vi.mock('../shortcuts/registry', () => ({
   registerShortcuts: mocks.registerShortcuts,
   openShortcutHelp: vi.fn()
@@ -251,6 +252,20 @@ describe('useAlarmsView', () => {
     view.focusedId.value = 1
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
     expect(view.ackDialog.visible).toBe(true)
+    unmount()
+  })
+
+  it('leaves a pending update notice on reconnect when the history tab is open', async () => {
+    const { view, unmount } = await mountView()
+    view.tab.value = 'history'
+    const handler = mocks.onHubReconnected.mock.calls.at(-1)?.[0] as (() => void) | undefined
+    expect(handler).toEqual(expect.any(Function))
+    handler?.()
+    expect(view.pendingNotice.value).toBe('update')
+    expect(view.tab.value).toBe('history')
+    await view.applyPendingPush()
+    expect(view.tab.value).toBe('live')
+    expect(view.pendingNotice.value).toBe('')
     unmount()
   })
 

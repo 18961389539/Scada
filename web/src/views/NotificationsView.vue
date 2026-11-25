@@ -212,7 +212,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, toRef } from 'vue'
+import { computed, onMounted, reactive, ref, toRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import { areaApi, notificationApi, type OutboxFailure } from '../api'
@@ -227,7 +228,18 @@ import { tr } from '../i18n'
 const auth = useAuthStore()
 const globalConfigure = computed(() => canGlobal(auth.user, 'Configure'))
 const canRoute = (areaId: number | null) => areaId == null ? globalConfigure.value : can(auth.user, 'Configure', areaId)
-const tab = ref('routes')
+const pageRoute = useRoute()
+const pageRouter = useRouter()
+const notificationTabs = ['routes', 'channels', 'shifts', 'failed'] as const
+const tab = ref<(typeof notificationTabs)[number]>(notificationTabs.includes(pageRoute.query.tab as (typeof notificationTabs)[number]) ? pageRoute.query.tab as (typeof notificationTabs)[number] : 'routes')
+watch(tab, value => {
+  if (pageRoute.query.tab !== value) void pageRouter.replace({ query: { ...pageRoute.query, tab: value } })
+})
+watch(() => pageRoute.query.tab, value => {
+  if (typeof value === 'string' && (notificationTabs as readonly string[]).includes(value) && tab.value !== value) {
+    tab.value = value as (typeof notificationTabs)[number]
+  }
+})
 const dayNames = [tr('notificationsView.kc34057'), tr('notificationsView.k792c34'), tr('notificationsView.k8f0344'), tr('notificationsView.k254556'), tr('notificationsView.k18f1fd'), tr('notificationsView.k4344fc'), tr('notificationsView.kf0c619')]
 const loading = ref(true)
 const loadError = ref(''), actionError = ref(''), routeError = ref(''), channelError = ref(''), shiftError = ref('')

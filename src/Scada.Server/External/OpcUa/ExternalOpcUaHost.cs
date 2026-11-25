@@ -51,13 +51,18 @@ public sealed class ExternalOpcUaHost(
             }
             try
             {
-                var boundVersion = config.Version;
+                var boundHost = ExternalOpcUaReload.HostFingerprint(opt);
+                var boundSpace = ExternalOpcUaReload.AddressSpaceFingerprint(config);
                 await StartServerAsync(opt, stoppingToken);
                 while (!stoppingToken.IsCancellationRequested && options.CurrentValue.OpcUa.Enabled)
                 {
-                    if (config.Version != boundVersion)
+                    var current = options.CurrentValue.OpcUa;
+                    var currentHost = ExternalOpcUaReload.HostFingerprint(current);
+                    var currentSpace = ExternalOpcUaReload.AddressSpaceFingerprint(config);
+                    var reason = ExternalOpcUaReload.DescribeRestart(boundHost, currentHost, boundSpace, currentSpace);
+                    if (reason is not null)
                     {
-                        logger.LogInformation("配置变更，重建对外 OPC UA 地址空间（{Old} → {New}）", boundVersion, config.Version);
+                        logger.LogInformation("对外 OPC UA 需要重建：{Reason}", reason);
                         break;
                     }
                     await Task.Delay(1000, stoppingToken);
@@ -151,7 +156,7 @@ public sealed class ExternalOpcUaHost(
         var interval = Math.Clamp(opt.PublishingIntervalMs, 100, 10_000);
 
         serverBuilder.AddNodeManager("urn:scada:external:tags", nodes =>
-            BindAddressSpace(nodes, cache, config, scopes, keys, logger, publishCts.Token, interval, opt.ExposeAlarmConditions, opt.AlarmPublishIntervalMs));
+            BindAddressSpace(nodes, cache, config, scopes, keys, logger, publishCts.Token, interval, opt.ExposeAlarmConditions, opt.AlarmPublishIntervalMs, opt.AllowWrite));
 
         _host = builder.Build();
         await _host.StartAsync(ct);
@@ -206,7 +211,8 @@ public sealed class ExternalOpcUaHost(
         CancellationToken publishCt,
         int publishIntervalMs,
         bool exposeAlarms,
-        int alarmIntervalMs)
+        int alarmIntervalMs,
+        bool allowWrite)
     {
         var root = nodes.AddFolder("Scada");
         var byArea = new Dictionary<int, INodeBuilder>();
@@ -242,7 +248,7 @@ public sealed class ExternalOpcUaHost(
                     : nodes.AddVariable<double>(SafeName(tag.Name) + "_" + tag.Id, parent.Node.NodeId);
                 var state = (BaseVariableState)variable.Node;
                 state.Description = new LocalizedText(tag.Description ?? tag.Name);
-                state.AccessLevel = tag.Writable ? AccessLevels.CurrentReadOrWrite : AccessLevels.CurrentRead;
+                state.AccessLevel = tag.Writable && allowWrite ? AccessLevels.CurrentReadOrWrite : AccessLevels.CurrentRead;
                 state.UserAccessLevel = state.AccessLevel;
                 var initial = cache.Get(tag.Id);
                 state.Value = isText ? new Variant(initial?.Text ?? "") : new Variant(initial?.Value ?? 0d);
@@ -266,7 +272,7 @@ public sealed class ExternalOpcUaHost(
                         v is null ? DateTimeUtc.MinValue : ToTimestamp(v)));
                 });
 
-                if (tag.Writable)
+                if (tag.Writable && allowWrite)
                 {
                     variable.OnWrite(async (ctx, node, range, value, ct) =>
                     {
@@ -428,5 +434,35 @@ public sealed class ExternalOpcUaHost(
         if (string.IsNullOrWhiteSpace(name)) return "Item";
         var chars = name.Trim().Select(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-' ? ch : '_').ToArray();
         return new string(chars);
+    }
+}
+
+/// <summary>
+/// 决定对外 OPC UA 何时必须拆掉宿主：只有监听/安全/证书/写开关变化，或测点/区域树/可写标志变化时才重启。
+/// 仅改报警规则会让 ConfigSnapshot.Version 加一，但不应断开已有客户端。
+/// </summary>
+public static class ExternalOpcUaReload
+{
+    public static string AddressSpaceFingerprint(IConfigSnapshot config) =>
+        CollectionFingerprint.OfAddressSpace(config.Devices, config.Tags, config.Areas);
+
+    public static string HostFingerprint(ExternalOpcUaOptions opt) => string.Join("\u001f",
+        opt.EndpointUrl ?? "",
+        opt.SecurityModes ?? "",
+        opt.AllowAnonymous,
+        opt.AllowUsernamePassword,
+        opt.AllowCertificateUser,
+        opt.AutoAcceptUntrustedCertificates,
+        opt.ServerCertPath ?? "",
+        opt.ServerCertPassword ?? "",
+        opt.MaxSessionCount,
+        opt.AllowWrite,
+        opt.ExposeAlarmConditions);
+
+    public static string? DescribeRestart(string boundHost, string currentHost, string boundSpace, string currentSpace)
+    {
+        if (boundHost != currentHost) return "监听地址、安全模式、证书或写开关已变更，整站重启";
+        if (boundSpace != currentSpace) return "测点、区域树或可写标志已变更，重建地址空间";
+        return null;
     }
 }
