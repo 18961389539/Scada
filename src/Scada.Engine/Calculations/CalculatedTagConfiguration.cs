@@ -6,6 +6,7 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 
 namespace Scada.Engine.Calculations;
 
@@ -97,8 +98,7 @@ public sealed class CalculatedTagConfiguration(IDbContextFactory<ConfigDbContext
         await transaction.CommitAsync(ct);
         await runtime.SaveChangesAsync(ct);
         cache.Remove(id);
-        var now = ScadaTime.NowMs();
-        await runtime.AlarmEvents.Where(x => x.TagId == id && x.EndTs == null).ExecuteUpdateAsync(set => set.SetProperty(x => x.EndTs, now).SetProperty(x => x.EndReason, "删除计算测点"), ct);
+        await RuntimeCleanupExecutor.AfterDeletedAsync(runtime, "Tag", [id], ct);
     }
     private static void Audit(RuntimeDbContext runtime, Tag tag, string action, string? before, string? after, int userId, string userName) => runtime.OperationLogs.Add(new OperationLog
     {

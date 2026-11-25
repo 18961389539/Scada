@@ -4,6 +4,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
@@ -240,6 +241,13 @@ public static class SpcEndpoints
                 return denied;
             db.SpcCharts.Remove(chart);
             await db.SaveChangesAsync(ct);
+            var cleanup = http.RequestServices.GetService<RuntimeCleanupRunner>();
+            if (cleanup is not null) await cleanup.AfterDeletedAsync("SpcChart", [id], ct);
+            else
+            {
+                await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+                await RuntimeCleanupExecutor.AfterDeletedAsync(runtime, "SpcChart", [id], ct);
+            }
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
     }

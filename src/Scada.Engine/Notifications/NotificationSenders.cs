@@ -5,6 +5,8 @@ using System.Text;
 using System.Text.Json;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Options;
+using Scada.Core.Protocols;
 
 namespace Scada.Engine.Notifications;
 
@@ -42,7 +44,7 @@ public sealed class NotificationChannelSettings
 
     public int EffectiveTimeoutMs(NotificationChannelType type) => Math.Clamp(TimeoutMs, 500, MaxTimeoutMs(type));
 
-    public string? Validate(NotificationChannelType type)
+    public string? Validate(NotificationChannelType type, ScadaSettings? settings = null)
     {
         switch (type)
         {
@@ -50,11 +52,10 @@ public sealed class NotificationChannelSettings
                 if (string.IsNullOrWhiteSpace(Host)) return "邮件通道必须填写 SMTP 服务器";
                 if (Port is < 1 or > 65535) return "SMTP 端口无效";
                 if (string.IsNullOrWhiteSpace(From) || !MailAddress.TryCreate(From, out _)) return "发件人地址无效";
+                if (NotificationOutboundPolicy.ValidateHost(Host, settings) is { } hostError) return hostError;
                 break;
             default:
-                if (!Uri.TryCreate(Url, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-                    return "通道地址必须是 http/https URL";
-                if (!string.IsNullOrEmpty(uri.UserInfo)) return "URL 中不能包含账号口令，请改用鉴权头";
+                if (NotificationOutboundPolicy.ValidateHttpUrl(Url, settings) is { } urlError) return urlError;
                 break;
         }
         if (!string.IsNullOrWhiteSpace(HeaderName) && !System.Text.RegularExpressions.Regex.IsMatch(HeaderName, "^[A-Za-z0-9-]{1,64}$"))
@@ -83,6 +84,7 @@ public sealed class EmailNotificationSender : INotificationSender
 
     public async Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct)
     {
+        if (settings.Validate(NotificationChannelType.Email) is { } emailError) throw new InvalidOperationException(emailError);
         var to = recipients.Where(x => MailAddress.TryCreate(x, out _)).ToList();
         if (to.Count == 0) throw new InvalidOperationException("没有有效的收件邮箱");
         using var client = new SmtpClient(settings.Host, settings.Port) { EnableSsl = settings.UseSsl, Timeout = settings.EffectiveTimeoutMs(NotificationChannelType.Email), DeliveryMethod = SmtpDeliveryMethod.Network };
@@ -102,6 +104,7 @@ public abstract class HttpNotificationSender(HttpClient http) : INotificationSen
 
     public async Task SendAsync(NotificationChannelSettings settings, string? secret, IReadOnlyList<string> recipients, NotificationMessage message, CancellationToken ct)
     {
+        if (settings.Validate(Type) is { } httpError) throw new InvalidOperationException(httpError);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(settings.EffectiveTimeoutMs(Type));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(Body(recipients, message), NotificationChannelSettings.Json);

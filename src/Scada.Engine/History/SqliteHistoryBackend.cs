@@ -130,7 +130,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
     public async Task WriteRawAsync(IReadOnlyCollection<HistoryValue> values, CancellationToken cancellationToken)
     {
-        if (values.Count == 0)
+        if (values.Count == 0 || !Role.IsActive)
         {
             return;
         }

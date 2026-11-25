@@ -6,6 +6,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Scripting;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 using Scada.Core.Configuration;
 
 namespace Scada.Engine.Calculations;
@@ -431,6 +432,7 @@ public sealed class CalcJobConfiguration(IDbContextFactory<ConfigDbContext> fact
         db.CalcJobs.Remove(job);
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
         await runtime.SaveChangesAsync(ct);
+        await RuntimeCleanupExecutor.AfterDeletedAsync(runtime, "CalcJob", [id], ct);
         try { await CloseRemovedAlarmsAsync(removed, "计算任务输出移除", ct); }
         finally { engine.RequestReload(); }
     }

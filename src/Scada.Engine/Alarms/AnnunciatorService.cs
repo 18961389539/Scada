@@ -10,6 +10,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 using Scada.Engine.Control;
 
 namespace Scada.Engine.Alarms;
@@ -273,9 +274,8 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         var panel = await db.AnnunciatorPanels.SingleOrDefaultAsync(x => x.Id == id, ct);
         if (panel is null) return "not found";
         db.AnnunciatorPanels.Remove(panel);
-        var silence = await runtime.AnnunciatorSilences.SingleOrDefaultAsync(x => x.PanelId == id, ct);
-        if (silence is not null) runtime.AnnunciatorSilences.Remove(silence);
         await db.SaveChangesAsync(ct);
+        await RuntimeCleanupExecutor.AfterDeletedAsync(runtime, "AnnunciatorPanel", [id], ct);
         await runtime.SaveChangesAsync(ct);
         _latched.TryRemove(id, out _);
         _last.TryRemove(id, out _);

@@ -3,6 +3,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 
 namespace Scada.Server.Services;
 
@@ -18,7 +19,7 @@ namespace Scada.Server.Services;
 /// 授权与返回形态不属于本服务：区域权限、HTTP 状态码、MCP 的 success=false / 异常
 /// 由各入口自己决定（两者鉴权模型不同）。
 /// </summary>
-public sealed class TagCommandService(ConfigReloader reloader, TagUsageService usage)
+public sealed class TagCommandService(ConfigReloader reloader, TagUsageService usage, RuntimeCleanupRunner? cleanup = null)
 {
     public const string DuplicateNameMessage = "同一设备下测点名称已存在";
 
@@ -110,6 +111,8 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
                 [new ValidationIssue("tag.conflict", null, "测点引用已变化，请重新读取后修改依赖定义")]);
         }
 
+        if (cleanup is not null)
+            await cleanup.AfterDeletedAsync("Tag", [tag.Id], cancellationToken);
         await ReloadAsync(cancellationToken);
         return TagCommandResult.Succeeded(tag);
     }

@@ -6,7 +6,9 @@ using System.Security.Authentication;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Scada.Core;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Net;
@@ -20,11 +22,15 @@ public sealed class ExternalTcpHost(
     IOptionsMonitor<ExternalIntegrationOptions> options,
     ExternalApiKeyService keys,
     IRealtimeCache cache,
+    IConfigSnapshot config,
     IServiceScopeFactory scopes,
-    ILogger<ExternalTcpHost> logger) : BackgroundService
+    ILogger<ExternalTcpHost> logger,
+    INodeRole? role = null) : BackgroundService
 {
+    private readonly INodeRole _role = role ?? new StandaloneNodeRole();
     private readonly ConcurrentDictionary<Guid, Session> _sessions = new();
     private TcpListener? _listener;
+    private CancellationTokenSource? _runCts;
     private X509Certificate2? _tlsCert;
     // 推送失败是客户端断开时的常态，但持续失败意味着订阅端收不到更新；按累计数限流记录，不刷屏。
     private long _pushFailures;
@@ -37,10 +43,10 @@ public sealed class ExternalTcpHost(
         while (!stoppingToken.IsCancellationRequested)
         {
             var opt = options.CurrentValue.Tcp;
-            if (!opt.Enabled)
+            if (!opt.Enabled || !_role.IsActive)
             {
                 await StopListenerAsync();
-                await Task.Delay(1500, stoppingToken);
+                await Task.Delay(_role.IsActive ? 1500 : 1000, stoppingToken);
                 continue;
             }
             try { await AcceptLoopAsync(opt, stoppingToken); }
@@ -67,15 +73,25 @@ public sealed class ExternalTcpHost(
         _listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         _listener.Start(Math.Clamp(opt.MaxConnections, 1, 1000));
         logger.LogInformation("对外 TCP 监听 {Addr}:{Port} tls={Tls}", opt.ListenAddress, opt.Port, opt.Tls);
-        while (!ct.IsCancellationRequested && options.CurrentValue.Tcp.Enabled)
+        using var run = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _runCts = run;
+        while (!run.IsCancellationRequested && options.CurrentValue.Tcp.Enabled && _role.IsActive)
         {
-            var client = await _listener.AcceptTcpClientAsync(ct);
-            _ = Task.Run(() => HandleClientAsync(client, ct), ct);
+            var accept = _listener.AcceptTcpClientAsync(run.Token).AsTask();
+            var done = await Task.WhenAny(accept, Task.Delay(200, run.Token));
+            if (done != accept)
+            {
+                if (!_role.IsActive || !options.CurrentValue.Tcp.Enabled) break;
+                continue;
+            }
+            var client = await accept;
+            _ = Task.Run(() => HandleClientAsync(client, run.Token), run.Token);
         }
     }
 
     private Task StopListenerAsync()
     {
+        try { _runCts?.Cancel(); } catch { }
         try { _listener?.Stop(); } catch { }
         _listener = null;
         return Task.CompletedTask;
@@ -164,6 +180,14 @@ public sealed class ExternalTcpHost(
 
     private async Task DispatchAsync(Session session, byte[] payload, CancellationToken ct)
     {
+        if (!_role.IsActive)
+        {
+            TcpMessage? denied = null;
+            try { denied = JsonSerializer.Deserialize<TcpMessage>(payload, TcpFraming.Json); } catch { }
+            await SendAsync(session, Err(denied?.Id, TcpErrorCodes.NotPrimary, _role.StandbyMessage), ct);
+            return;
+        }
+
         TcpMessage? msg;
         try { msg = JsonSerializer.Deserialize<TcpMessage>(payload, TcpFraming.Json); }
         catch
@@ -200,7 +224,7 @@ public sealed class ExternalTcpHost(
                     EnsureAuth(session);
                     EnsureScope(session, ExternalApiScope.ReadTags);
                     var ids = msg.TagIds is { Length: > 0 } ? FilterTags(session, msg.TagIds) : session.Subscriptions.ToArray();
-                    var values = cache.GetMany(ids).Select(v => new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts });
+                    var values = ids.Select(Fresh).OfType<TagValue>().Select(v => new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts });
                     await SendAsync(session, new TcpMessage { Type = "snapshot", Id = msg.Id, Data = values }, ct);
                     break;
                 case "write":
@@ -299,7 +323,17 @@ public sealed class ExternalTcpHost(
         }, ct);
     }
 
+    private TagValue? Fresh(int tagId)
+    {
+        var v = cache.Get(tagId);
+        if (v is null) return null;
+        if (!config.TryGetTag(tagId, out var tag)) return v;
+        Device? device = tag.DeviceId is int deviceId && config.TryGetDevice(deviceId, out var found) ? found : null;
+        return TagFreshness.Apply(v, ScadaTime.NowMs(), tag, device);
+    }
+
     private async Task PushLoopAsync(CancellationToken ct)
+
     {
         var last = new ConcurrentDictionary<(Guid Sid, int TagId), (double Value, long Ts, string? Text)>();
         while (!ct.IsCancellationRequested)
@@ -313,7 +347,7 @@ public sealed class ExternalTcpHost(
                     var updates = new List<object>();
                     foreach (var tagId in session.Subscriptions.ToArray())
                     {
-                        var v = cache.Get(tagId);
+                        var v = Fresh(tagId);
                         if (v is null) continue;
                         var key = (session.Id, tagId);
                         if (last.TryGetValue(key, out var prev) && prev.Value == v.Value && prev.Ts == v.Ts && prev.Text == v.Text) continue;

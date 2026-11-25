@@ -118,6 +118,10 @@ public sealed class Iec104ServerOptions
     public bool UseTimeTag { get; set; } = true;
     // 默认只读：遥控等于把调度网络接进控制闭环，必须在部署时显式打开。
     public bool AllowControl { get; set; }
+    // 可选选择-执行闭锁。默认关闭，保持现有“执行可直接下发”的行为。
+    public bool RequireSelectExecute { get; set; }
+    // 选择锁存超时，超时后必须重新选择才能执行。
+    public int SelectTimeoutMs { get; set; } = 15_000;
     // 变化扫描周期：越小越实时，但会增加 CPU 与报文数量。
     public int ChangeScanMs { get; set; } = 200;
     public List<Iec104ServerPoint> Points { get; set; } = [];

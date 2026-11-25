@@ -65,4 +65,5 @@ public static class TcpErrorCodes
     public const string NotFound = "not_found";
     public const string Internal = "internal";
     public const string FrameTooLarge = "frame_too_large";
+    public const string NotPrimary = "not_primary";
 }

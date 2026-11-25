@@ -39,6 +39,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
     private long _generation, _promotedTs, _peerSeenTs, _switchovers, _localLeaseDeadline, _configDue, _historyDue, _runtimeDue;
     private readonly long _startedTick = Environment.TickCount64;
     private HaPeerStatus? _peer;
+    private SystemWarning? _peerClockSkew;
     private HaLease? _lease;
     private string? _witnessError;
     private bool _initialized;
@@ -90,6 +91,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
         if (!_options.Enabled) yield break;
         if (HaPeerTransport.InsecureWarning(_options) is { } insecure) yield return insecure;
         var now = ScadaTime.NowMs();
+        if (_peerClockSkew is { } skew) yield return skew;
         if (_peer is null) yield return new("ha_peer_down", $"主备对端 {_options.PeerUrl} 不可达" + (_primary ? "，当前无热备" : ""));
         if (_witnessError is not null) yield return new("ha_witness_unreachable", $"仲裁不可用：{_witnessError}");
         if (!_primary && _peer?.Role == "Primary" && _replication.LastError is { } error) yield return new("ha_replication_failed", $"主备复制失败：{error}");
@@ -152,12 +154,37 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
     private async Task TickAsync(CancellationToken ct)
     {
         var peer = await _peerClient!.StatusAsync(ct);
-        if (peer is not null) { _peer = peer; _peerSeenTs = ScadaTime.NowMs(); }
-        else if (ScadaTime.NowMs() - _peerSeenTs > _options.LeaseMs) _peer = null;
+        if (peer is not null)
+        {
+            _peer = peer;
+            _peerSeenTs = ScadaTime.NowMs();
+            _peerClockSkew = PeerClockSkewWarning(peer, _peerSeenTs, _options.ClockSkewMs);
+        }
+        else if (ScadaTime.NowMs() - _peerSeenTs > _options.LeaseMs)
+        {
+            _peer = null;
+            _peerClockSkew = null;
+        }
         if (_witness is not null) await WitnessTickAsync(peer, ct);
         else await PeerOnlyTickAsync(peer, ct);
         _initialized = true;
     }
+
+
+    /// <summary>
+    /// 用心跳里的对端时间与本机时间比较。阈值为 ClockSkewMs 的 3 倍，避免把网络时延当成时钟故障。
+    /// 只告警，不修改系统时钟。
+    /// </summary>
+    internal static SystemWarning? PeerClockSkewWarning(HaPeerStatus peer, long localTs, int clockSkewMs)
+    {
+        var skew = Math.Abs(peer.Ts - localTs);
+        var limit = Math.Max(clockSkewMs, 0) * 3;
+        if (limit < 1000) limit = 1000;
+        if (skew <= limit) return null;
+        return new SystemWarning("ha_clock_skew",
+            $"主备时钟偏差 {skew} 毫秒，超过允许的 {limit} 毫秒。请检查两节点对时，应用不会自动修改系统时钟");
+    }
+
 
     private async Task WitnessTickAsync(HaPeerStatus? peer, CancellationToken ct)
     {

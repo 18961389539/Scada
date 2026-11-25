@@ -31,6 +31,16 @@ public sealed class RuntimeCleanupCatalogTests
             Assert.NotEmpty(entry.ConfigEntities);
         });
 
+        RuntimeCleanupHooks.Register();
+        Assert.DoesNotContain(RuntimeCleanupCatalog.Entries, x =>
+            x.RuntimeEntity == nameof(Scada.Core.Entities.OeeRollupState) && x.Policy == RuntimeCleanupPolicy.MustClean);
+        Assert.All(must, entry =>
+        {
+            var registered = RuntimeCleanupCatalog.TryGetHook(entry.Hook!, out _)
+                || entry.ConfigEntities.Any(config => RuntimeCleanupCatalog.TryGetHook(entry.Hook + ":" + config, out _));
+            Assert.True(registered, entry.Hook);
+        });
+
         var called = 0;
         RuntimeCleanupCatalog.Register("catalog-test-hook", (_, _, _) =>
         {

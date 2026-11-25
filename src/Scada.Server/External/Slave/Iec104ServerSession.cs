@@ -36,6 +36,7 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     // 总召唤在读循环里写基线，变化扫描在另一个循环里写，二者必须并发安全。
     private readonly ConcurrentDictionary<int, Iec104SampleState> _lastSample = new();
+    private readonly Dictionary<int, (double Value, long ExpiresAt)> _selects = new();
     private readonly int[] _commonAddresses;
 
     private readonly object _seqLock = new();
@@ -354,13 +355,20 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
         var sco = obj.Element[0];
         var select = (sco & 0x80) != 0;
         var on = (sco & 0x01) != 0;
+        var value = on ? 1d : 0d;
         if (select)
         {
             // 选择阶段只回确认；执行阶段才真正下发，避免"选择即动作"的误动。
+            RememberSelect(obj.Ioa, value);
             await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, false), ct);
             return;
         }
-        await ExecuteCommandAsync(request, obj, on ? 1d : 0d, ct);
+        if (!AcceptExecute(obj.Ioa, value))
+        {
+            await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, true), ct);
+            return;
+        }
+        await ExecuteCommandAsync(request, obj, value, ct);
     }
 
     private async Task DoubleCommandAsync(Asdu request, CancellationToken ct)
@@ -377,19 +385,26 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
             return;
         }
         var dco = obj.Element[0];
+        var state = (byte)(dco & 0x03);
+        var value = state == 1 ? 1d : 0d;
         if ((dco & 0x80) != 0)
         {
+            if (state is 1 or 2) RememberSelect(obj.Ioa, value);
             await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, false), ct);
             return;
         }
-        var state = (byte)(dco & 0x03);
         // DCS：1=ON，2=OFF，0=中间态，3=不确定。后两者不是有效命令，拒绝而不是猜一个。
         if (state is not (1 or 2))
         {
             await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, true), ct);
             return;
         }
-        await ExecuteCommandAsync(request, obj, state == 1 ? 1d : 0d, ct);
+        if (!AcceptExecute(obj.Ioa, value))
+        {
+            await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, true), ct);
+            return;
+        }
+        await ExecuteCommandAsync(request, obj, value, ct);
     }
 
     private async Task ExecuteCommandAsync(Asdu request, InfoObject obj, double value, CancellationToken ct)
@@ -403,6 +418,32 @@ internal sealed class Iec104ServerSession : IAsyncDisposable
         var result = await _router.WriteAsync(slot.TagId, value, "外部 IEC 104 主站", _remoteIp, ct);
         await EnqueueAsync(CommandResponse(request, Iec104Types.CotActCon, !result.Success), ct);
         await EnqueueAsync(CommandResponse(request, Iec104Types.CotActTerm, !result.Success), ct);
+    }
+
+    private Iec104ServerOptions CurrentOptions() => _optionsProvider?.Invoke().Iec ?? _options;
+
+    private void RememberSelect(int ioa, double value)
+    {
+        var timeout = Math.Clamp(CurrentOptions().SelectTimeoutMs, 500, 60_000);
+        _selects[ioa] = (value, Environment.TickCount64 + timeout);
+    }
+
+    // 未开启闭锁时执行可直接下发（保持产品默认）。开启后必须先选择且 IOA/值一致、未超时。
+    private bool AcceptExecute(int ioa, double value)
+    {
+        if (!CurrentOptions().RequireSelectExecute) return true;
+        if (!_selects.TryGetValue(ioa, out var latch) || latch.ExpiresAt < Environment.TickCount64)
+        {
+            _selects.Remove(ioa);
+            return false;
+        }
+        if (latch.Value != value)
+        {
+            _selects.Remove(ioa);
+            return false;
+        }
+        _selects.Remove(ioa);
+        return true;
     }
 
     private static Asdu CommandResponse(Asdu request, byte cause, bool negative) =>

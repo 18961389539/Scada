@@ -121,6 +121,8 @@ internal sealed class DeviceWorker
     {
         try { _driver.Disconnect(); }
         catch (Exception ex) { _logger.LogDebug(ex, "设备 {Device} 的驱动在强制关闭时抛出", _device.Name); }
+        // 卡住的任务可能永远走不到 RunAsync 的取消路径，必须在此把缓存标成通讯中断。
+        PublishCommFailure("采集任务无响应，已强制关闭");
     }
 
     // 复用采集连接做一次探针读取：与采集轮询在同一循环内串行，不会二次打开串口。
@@ -160,9 +162,9 @@ internal sealed class DeviceWorker
             }
             catch (Exception ex)
             {
-                _online = false;
                 _lastError = $"采集任务异常停止，{backoffMs / 1000} 秒后自动重启：{ex.Message}";
                 _diagnostics.Stopped(ex.Message);
+                await MarkStoppedAsync(ex.Message);
                 ReportStatus();
                 _logger.LogError(ex, "设备 {Device} 的采集任务异常停止，{Delay} 秒后自动重启", _device.Name, backoffMs / 1000);
                 try { _driver.Disconnect(); }
@@ -172,6 +174,7 @@ internal sealed class DeviceWorker
                 backoffMs = Backoff.Next(backoffMs, 1000, 60_000);
             }
         }
+        await MarkStoppedAsync("采集已停止");
         _diagnostics.Stopped();
     }
 
@@ -658,31 +661,45 @@ internal sealed class DeviceWorker
     /// 只处理通信链路故障：把测点标成 CommFailure（历史里要留一条断点）并触发设备离线报警。
     /// 存储故障走 <see cref="MarkStorageFault"/>，两者不能混。
     /// </summary>
-    private async Task MarkOfflineAsync(string? error, CancellationToken cancellationToken)
+    private async Task MarkStoppedAsync(string? error)
     {
-        if (!_online && _offlineAlarmId is not null)
-        {
-            return;
-        }
+        try { await MarkOfflineAsync(error, CancellationToken.None); }
+        catch (Exception ex) { _logger.LogDebug(ex, "设备 {Device} 停采时标记通讯中断失败", _device.Name); }
+    }
 
+    // 同步写入缓存并发布，供强制放弃等无法等待异步路径的场合使用。
+    private void PublishCommFailure(string? error)
+    {
         _online = false;
         var ts = ScadaTime.NowMs();
-        var updates = _tags.Select(tag =>
+        foreach (var tag in _tags)
         {
             var previous = _cache.Get(tag.Id);
-            return new TagValue(tag.Id, previous?.Value ?? 0, TagQuality.CommFailure, ts, previous?.SourceTs, error, tag.CalculationRevision, previous?.Text);
-        }).ToArray();
-        // 存储已经故障时不再重复写日志：一次失败会被记成两次，且每轮白构造一份全量快照。
-        if (!_journalFaulted) await TryAppendJournalAsync(updates, cancellationToken);
-        foreach (var bad in updates)
-        {
-            var tag = _tagMap[bad.TagId]; _cache.Set(bad);
+            var bad = new TagValue(tag.Id, previous?.Value ?? 0, TagQuality.CommFailure, ts, previous?.SourceTs, error, tag.CalculationRevision, previous?.Text);
+            _cache.Set(bad);
             _diagnostics.Point(bad, null);
-            if (!_lastPublished.TryGetValue(tag.Id, out var previous) || previous.Quality != TagQuality.CommFailure)
+            if (!_lastPublished.TryGetValue(tag.Id, out var published) || published.Quality != TagQuality.CommFailure)
             {
                 _bus.Publish(bad);
                 _lastPublished[tag.Id] = bad;
             }
+        }
+    }
+
+    private async Task MarkOfflineAsync(string? error, CancellationToken cancellationToken)
+    {
+        if (!_online && _offlineAlarmId is not null)
+        {
+            // 缓存仍可能是最后一次合格值（例如异常停采只改了 _online），仍要发布通讯中断。
+            var alreadyOffline = _tags.All(tag => _cache.Get(tag.Id)?.Quality == TagQuality.CommFailure);
+            if (alreadyOffline) return;
+        }
+
+        PublishCommFailure(error);
+        if (!_journalFaulted)
+        {
+            var updates = _tags.Select(tag => _cache.Get(tag.Id)).OfType<TagValue>().ToArray();
+            await TryAppendJournalAsync(updates, cancellationToken);
         }
 
         if (_offlineAlarmId is null)
@@ -690,7 +707,7 @@ internal sealed class DeviceWorker
             _offlineAlarmId = await _alarmSink.RaiseDeviceOfflineAsync(
                 _device,
                 error,
-                ts,
+                ScadaTime.NowMs(),
                 cancellationToken);
         }
     }

@@ -4,6 +4,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 using Scada.Server.Auth;
 using Scada.Server.Services;
 using Scada.Engine.Alarms;
@@ -182,6 +183,8 @@ public static class AlarmRuleEndpoints
             db.AlarmRules.Remove(rule);
             // 审计由拦截器写。
             await commands.SaveAsync(db, cancellationToken);
+            var cleanup = http.RequestServices.GetService<RuntimeCleanupRunner>();
+            if (cleanup is not null) await cleanup.AfterDeletedAsync("AlarmRule", [id], cancellationToken);
             return Results.NoContent();
         }).Produces(StatusCodes.Status204NoContent).RequireAuthorization(AccessPolicies.Configure);
 

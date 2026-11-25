@@ -6,6 +6,7 @@ using Scada.Collector;
 using Scada.Core.Interfaces;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 using Scada.Engine;
 using Scada.Server.Ai;
 using Scada.Server.External;
@@ -140,6 +141,8 @@ internal static class ScadaServerServices
         // 测点/设备写入的唯一落地点：REST 与 MCP 共用同一套校验顺序与落盘顺序。
         builder.Services.AddSingleton<TagCommandService>();
         builder.Services.AddSingleton<TagUsageService>();
+        builder.Services.AddSingleton<RuntimeCleanupRunner>();
+        RuntimeCleanupExecutor.EnsureRegistered();
         builder.Services.AddSingleton<ScreenPublicationNotifier>();
         builder.Services.AddSingleton<ScreenRuntimeHealth>();
         builder.Services.AddSingleton<Scada.Engine.Health.IHealthContributor>(sp => sp.GetRequiredService<ScreenRuntimeHealth>());

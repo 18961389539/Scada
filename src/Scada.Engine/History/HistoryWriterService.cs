@@ -19,6 +19,7 @@ public sealed class HistoryWriterService : BackgroundService
     private readonly HistoryLossLog? _lossLog;
     private readonly ILogger<HistoryWriterService> _logger;
     private readonly LivenessRegistry? _liveness;
+    private readonly INodeRole _role;
     private long _reportedHistoryRejected;
     private long _reportedHistoryGapRejected;
     private long _gapMarkFrom;
@@ -42,9 +43,11 @@ public sealed class HistoryWriterService : BackgroundService
         HistorySpool spool,
         ILogger<HistoryWriterService> logger,
         LivenessRegistry? liveness = null,
-        HistoryLossLog? lossLog = null)
+        HistoryLossLog? lossLog = null,
+        INodeRole? role = null)
     {
         _liveness = liveness;
+        _role = role ?? new StandaloneNodeRole();
         _bus = bus;
         _cache = cache;
         _config = config;
@@ -73,6 +76,20 @@ public sealed class HistoryWriterService : BackgroundService
                 var dataTask = reader.WaitToReadAsync(stoppingToken).AsTask();
                 var gapTask = gapReader.WaitToReadAsync(stoppingToken).AsTask();
                 var completed = await Task.WhenAny(tickTask, dataTask, gapTask);
+
+                if (!_role.IsActive)
+                {
+                    while (reader.TryRead(out _)) { }
+                    while (gapReader.TryRead(out _)) { }
+                    _buffer.Clear();
+                    _lastBuffered.Clear();
+                    if (completed == tickTask)
+                    {
+                        ReportBusDrops();
+                        tickTask = ticker.WaitForNextTickAsync(stoppingToken).AsTask();
+                    }
+                    continue;
+                }
 
                 while (reader.TryRead(out var value))
                 {
@@ -141,11 +158,13 @@ public sealed class HistoryWriterService : BackgroundService
                 continue;
             }
 
-            var last = LastAccepted(tag.Id);
-            if (ArchivePolicy.ShouldStore(tag, current with { Ts = now }, last, now))
+            Device? device = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var found) ? found : null;
+            if (!ArchivePolicy.TryStorePeriodic(tag, current, LastAccepted(tag.Id), now, device, out var sample))
             {
-                Buffer(new HistoryValue(tag.Id, now, current.Value, current.Quality, current.Text));
+                continue;
             }
+
+            Buffer(sample);
         }
     }
 
@@ -167,6 +186,13 @@ public sealed class HistoryWriterService : BackgroundService
 
     private async Task FlushAsync(CancellationToken cancellationToken)
     {
+        if (!_role.IsActive)
+        {
+            _buffer.Clear();
+            _lastBuffered.Clear();
+            return;
+        }
+
         if (_buffer.Count == 0)
         {
             // An idle collector still needs to survive a prolonged database outage.

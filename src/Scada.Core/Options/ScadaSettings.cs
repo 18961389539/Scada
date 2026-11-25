@@ -1,4 +1,4 @@
-﻿using Scada.Core.Enums;
+using Scada.Core.Enums;
 using Scada.Core.Security;
 
 namespace Scada.Core.Options;
@@ -215,6 +215,8 @@ public sealed class ScadaSettings
     // 白名单支持精确 IP、CIDR（如 10.20.0.0/16）与 *.域 后缀；配置白名单后主机名也必须命中。
     public List<string> CollectorTargetAllowlist { get; set; } = [];
     public bool AllowPublicCollectorTargets { get; set; }
+    // 通知出站白名单：公网 IP 必须命中此名单或内置云邮件/短信网关。域名默认放行。
+    public List<string> NotificationTargetAllowlist { get; set; } = [];
     // 本机进程内采集。默认开启，保持一体化部署。
     // 设为 false 后 Server 不再连接现场设备；启用且未分配网关的设备会在保存、浏览与控制时被拒绝，
     // 采集改走已登记的 Gateway.Host（可与中心同机回环）。这不是驱动插件进程隔离。

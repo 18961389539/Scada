@@ -10,6 +10,7 @@ using Scada.Core.Protocols;
 using Scada.Core.Options;
 using Scada.Core.Simulation;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 
 namespace Scada.Server.Services;
 
@@ -27,7 +28,9 @@ public sealed class DeviceCommandService(
     ConfigReloader reloader,
     IOptions<ScadaSettings> settings,
     IProtocolDriverAvailability drivers,
-    ISimulationRuntime simulations)
+    ISimulationRuntime simulations,
+    TagUsageService? usage = null,
+    RuntimeCleanupRunner? cleanup = null)
 {
     public const string DuplicateNameMessage = "设备名称已存在";
 
@@ -128,6 +131,23 @@ public sealed class DeviceCommandService(
                 x => db.Tags.Any(t => t.Id == x.InputTagId && t.DeviceId == device.Id), cancellationToken))
             return DeviceCommandResult.Failed(DeviceCommandError.Referenced, "设备测点仍被计算定义引用，请先修改依赖定义");
 
+        var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId == device.Id).Select(x => x.Id).ToListAsync(cancellationToken);
+        if (usage is not null)
+        {
+            var scan = await usage.ScanManyAsync(db, tags, cancellationToken);
+            if (scan.Unreadable)
+                return DeviceCommandResult.Failed(DeviceCommandError.Referenced, "存在无法解析的画面或模板，无法确认测点引用，暂不能删除设备");
+            if (scan.References.Count > 0)
+            {
+                var summary = string.Join("、", scan.References
+                    .GroupBy(reference => reference.Category)
+                    .OrderBy(group => group.Key)
+                    .Select(group => $"{CategoryLabel(group.Key)} {group.Count()}"));
+                return DeviceCommandResult.Failed(DeviceCommandError.Referenced,
+                    $"设备测点仍被 {scan.References.Count} 处配置引用：{summary}。请先使用“替换测点”或修改这些配置");
+            }
+        }
+
         db.Devices.Remove(device);
         try
         {
@@ -140,11 +160,29 @@ public sealed class DeviceCommandService(
 
         // 仿真运行时按设备号记账，删除后必须同时摘掉，否则下次同号设备会继承旧仿真状态。
         simulations.Remove(device.Id);
+        if (cleanup is not null)
+        {
+            await cleanup.AfterDeletedAsync("Device", [device.Id], cancellationToken);
+            await cleanup.AfterDeletedAsync("Tag", tags, cancellationToken);
+        }
         await ReloadAsync(cancellationToken);
         return DeviceCommandResult.Succeeded(device);
     }
 
+    private static string CategoryLabel(string category) => category switch
+    {
+        "screenDraft" => "画面草稿",
+        "screenPublished" => "已发布画面",
+        "template" => "图库模板",
+        "alarmRule" => "报警规则",
+        "sequence" => "顺控流程",
+        "recipe" => "配方模板",
+        "calculatedTag" => "计算测点",
+        _ => category
+    };
+
     /// <summary>校验顺序固定，REST、MCP 与工程导入共用。</summary>
+
     public Task<IReadOnlyList<ValidationIssue>> InspectIssuesAsync(
         ConfigDbContext db, Device device, int? excludeDeviceId, CancellationToken cancellationToken)
         => InspectIssuesAsync(db, device, excludeDeviceId, settings.Value, drivers, cancellationToken);

@@ -5,6 +5,7 @@ using Opc.Ua;
 using Opc.Ua.Server;
 using Opc.Ua.Server.Fluent;
 using Opc.Ua.Server.Hosting;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -28,8 +29,10 @@ public sealed class ExternalOpcUaHost(
     IConfigSnapshot config,
     IServiceScopeFactory scopes,
     ExternalApiKeyService keys,
-    ILogger<ExternalOpcUaHost> logger) : BackgroundService
+    ILogger<ExternalOpcUaHost> logger,
+    INodeRole? role = null) : BackgroundService
 {
+    private readonly INodeRole _role = role ?? new StandaloneNodeRole();
     private IHost? _host;
     private CancellationTokenSource? _publishCts;
     // 发布循环异常以前完全静默：客户端一直收不到值，现场却没有任何线索。按累计数限流记录。
@@ -43,10 +46,10 @@ public sealed class ExternalOpcUaHost(
         while (!stoppingToken.IsCancellationRequested)
         {
             var opt = options.CurrentValue.OpcUa;
-            if (!opt.Enabled)
+            if (!opt.Enabled || !_role.IsActive)
             {
                 await StopServerAsync();
-                await Task.Delay(1500, stoppingToken);
+                await Task.Delay(_role.IsActive ? 1500 : 1000, stoppingToken);
                 continue;
             }
             try
@@ -54,7 +57,7 @@ public sealed class ExternalOpcUaHost(
                 var boundHost = ExternalOpcUaReload.HostFingerprint(opt);
                 var boundSpace = ExternalOpcUaReload.AddressSpaceFingerprint(config);
                 await StartServerAsync(opt, stoppingToken);
-                while (!stoppingToken.IsCancellationRequested && options.CurrentValue.OpcUa.Enabled)
+                while (!stoppingToken.IsCancellationRequested && options.CurrentValue.OpcUa.Enabled && _role.IsActive)
                 {
                     var current = options.CurrentValue.OpcUa;
                     var currentHost = ExternalOpcUaReload.HostFingerprint(current);
@@ -250,7 +253,7 @@ public sealed class ExternalOpcUaHost(
                 state.Description = new LocalizedText(tag.Description ?? tag.Name);
                 state.AccessLevel = tag.Writable && allowWrite ? AccessLevels.CurrentReadOrWrite : AccessLevels.CurrentRead;
                 state.UserAccessLevel = state.AccessLevel;
-                var initial = cache.Get(tag.Id);
+                var initial = Fresh(cache, config, tag.Id);
                 state.Value = isText ? new Variant(initial?.Text ?? "") : new Variant(initial?.Value ?? 0d);
                 state.StatusCode = ToStatus(initial?.Quality);
                 if (initial is not null) state.Timestamp = ToTimestamp(initial);
@@ -266,7 +269,7 @@ public sealed class ExternalOpcUaHost(
                         var error = hasRange ? UaStatus.BadIndexRangeNoData : UaStatus.BadDataEncodingUnsupported;
                         return ValueTask.FromResult(new AttributeReadResult(new ServiceResult(error), Variant.Null, error, DateTimeUtc.MinValue));
                     }
-                    var v = cache.Get(tagId);
+                    var v = Fresh(cache, config, tagId);
                     return ValueTask.FromResult(new AttributeReadResult(ServiceResult.Good,
                         v is null ? Variant.Null : isText ? new Variant(v.Text ?? "") : new Variant(v.Value), ToStatus(v?.Quality),
                         v is null ? DateTimeUtc.MinValue : ToTimestamp(v)));
@@ -343,7 +346,7 @@ public sealed class ExternalOpcUaHost(
                     await Task.Delay(publishIntervalMs, publishCt);
                     foreach (var (tagId, state) in published)
                     {
-                        var v = cache.Get(tagId);
+                        var v = Fresh(cache, config, tagId);
                         if (v is null) continue;
                         state.Value = v.Text is not null ? new Variant(v.Text) : new Variant(v.Value);
                         state.StatusCode = ToStatus(v.Quality);
@@ -396,6 +399,15 @@ public sealed class ExternalOpcUaHost(
             logger.LogWarning(ex, "OPC UA 身份 {Actor} 的权限解析失败，按拒绝处理", actorName);
             return null;
         }
+    }
+
+    private static TagValue? Fresh(IRealtimeCache cache, IConfigSnapshot snapshot, int tagId)
+    {
+        var v = cache.Get(tagId);
+        if (v is null) return null;
+        if (!snapshot.TryGetTag(tagId, out var tag)) return v;
+        Device? device = tag.DeviceId is int deviceId && snapshot.TryGetDevice(deviceId, out var found) ? found : null;
+        return TagFreshness.Apply(v, ScadaTime.NowMs(), tag, device);
     }
 
     private static StatusCode ToStatus(TagQuality? quality) => quality switch

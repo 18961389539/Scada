@@ -1,6 +1,8 @@
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Core.Options;
 
 namespace Scada.Server.External.Slave;
@@ -168,6 +170,11 @@ public sealed class ExportPointMap
         // 没有缓存值时用当前 Unix 毫秒，不能用 TickCount64：后者是开机以来的毫秒数，
         // 直接喂给 CP56Time2a 会得到 1970 年附近的时标，主站侧看起来像"时间同步坏了"。
         if (v is null) return new ExportSample(0, TagQuality.CommFailure, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        if (_config.TryGetTag(tagId, out var tag))
+        {
+            Device? device = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var found) ? found : null;
+            v = TagFreshness.Apply(v, ScadaTime.NowMs(), tag, device);
+        }
         if (v.Quality == TagQuality.Good) return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);
         if (badQualityValue is double fallback) return new ExportSample(fallback, v.Quality, v.Ts);
         return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);

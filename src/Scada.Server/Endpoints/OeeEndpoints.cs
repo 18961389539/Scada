@@ -5,6 +5,7 @@ using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.RuntimeCleanup;
 using Scada.Engine.Oee;
 using Scada.Server.Auth;
 using Scada.Server.Localization;
@@ -53,9 +54,13 @@ public static class OeeEndpoints
             if (!(await http.GetAccessAsync()).Has(Permission.Configure, row.AreaId)) return await Audit.ForbidAsync(http, $"删除产线 {row.Name}", "无该区域的配置权限", "ProductionLine", id);
             db.ProductionLines.Remove(row);
             await db.SaveChangesAsync(ct);
-            await using var operational = await runtimeFactory.CreateDbContextAsync(ct);
-            await operational.OeeLineSamples.Where(x => x.LineId == id).ExecuteDeleteAsync(ct);
-            await operational.OeeRollups.Where(x => x.LineId == id).ExecuteDeleteAsync(ct);
+            var cleanup = http.RequestServices.GetService<RuntimeCleanupRunner>();
+            if (cleanup is not null) await cleanup.AfterDeletedAsync("ProductionLine", [id], ct);
+            else
+            {
+                await using var operational = await runtimeFactory.CreateDbContextAsync(ct);
+                await RuntimeCleanupExecutor.AfterDeletedAsync(operational, "ProductionLine", [id], ct);
+            }
             return Results.NoContent();
         });
 

@@ -108,8 +108,8 @@ public sealed class ExternalIec104ServerTests
             Area = TagArea.HoldingRegister, Address = 0, Writable = false
         });
         var cache = new FakeCache();
-        cache.Set(new TagValue(1, 1, TagQuality.Good, 1_700_000_000_000));
-        cache.Set(new TagValue(2, 42.5, TagQuality.Good, 1_700_000_000_000));
+        cache.Set(new TagValue(1, 1, TagQuality.Good, ScadaTime.NowMs()));
+        cache.Set(new TagValue(2, 42.5, TagQuality.Good, ScadaTime.NowMs()));
 
         var options = new Iec104ServerOptions
         {
@@ -183,6 +183,38 @@ public sealed class ExternalIec104ServerTests
         Assert.NotSame(read, completed);
     }
 
+    [Fact]
+    public async Task RequireSelectExecute_rejects_unselected_or_mismatched_execute()
+    {
+        var (map, options) = BuildSite();
+        options.AllowControl = true;
+        options.RequireSelectExecute = true;
+        var (tcp, port) = await StartServerAsync(map, options);
+        using var listenerHandle = tcp;
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        using var client = new TcpClient();
+        await client.ConnectAsync(IPAddress.Loopback, port, cts.Token);
+        var stream = client.GetStream();
+        await stream.WriteAsync(Iec104Codec.U(Iec104Types.U_StartDtAct), cts.Token);
+        _ = await ReadApduAsync(stream, cts.Token);
+
+        await stream.WriteAsync(Iec104Codec.I(0, 0, new Asdu(Iec104Types.C_SC_NA, false, Iec104Types.CotAct,
+            false, false, 0, 1, [new InfoObject(100, [0x01])])), cts.Token);
+        var unselected = await ReadAsduUntilAsync(stream, cts.Token, a => a.TypeId == Iec104Types.C_SC_NA && a.Cause == Iec104Types.CotActCon);
+        Assert.True(unselected.Negative);
+
+        await stream.WriteAsync(Iec104Codec.I(1, 1, new Asdu(Iec104Types.C_SC_NA, false, Iec104Types.CotAct,
+            false, false, 0, 1, [new InfoObject(100, [0x81])])), cts.Token);
+        var selected = await ReadAsduUntilAsync(stream, cts.Token, a => a.TypeId == Iec104Types.C_SC_NA && a.Cause == Iec104Types.CotActCon);
+        Assert.False(selected.Negative);
+
+        await stream.WriteAsync(Iec104Codec.I(2, 2, new Asdu(Iec104Types.C_SC_NA, false, Iec104Types.CotAct,
+            false, false, 0, 1, [new InfoObject(100, [0x00])])), cts.Token);
+        var mismatch = await ReadAsduUntilAsync(stream, cts.Token, a => a.TypeId == Iec104Types.C_SC_NA && a.Cause == Iec104Types.CotActCon);
+        Assert.True(mismatch.Negative);
+    }
+
     private static (ExportPointMap Map, Iec104ServerOptions Options) BuildSite(bool badQuality = false)
     {
         var config = new FakeConfig();
@@ -198,8 +230,8 @@ public sealed class ExternalIec104ServerTests
         });
 
         var cache = new FakeCache();
-        cache.Set(new TagValue(1, 1, TagQuality.Good, 1_700_000_000_000));
-        cache.Set(new TagValue(2, 42.5, badQuality ? TagQuality.CommFailure : TagQuality.Good, 1_700_000_000_000));
+        cache.Set(new TagValue(1, 1, TagQuality.Good, ScadaTime.NowMs()));
+        cache.Set(new TagValue(2, 42.5, badQuality ? TagQuality.CommFailure : TagQuality.Good, ScadaTime.NowMs()));
 
         var options = new Iec104ServerOptions
         {

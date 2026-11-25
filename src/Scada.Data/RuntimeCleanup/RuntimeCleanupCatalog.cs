@@ -39,7 +39,7 @@ public static class RuntimeCleanupCatalog
         Retain<McpIdempotencyRecord>("MCP 幂等记录。"),
         Must<OeeLineSample>("ProductionLine", "删除产线时清掉样本。", "OeeEndpoints.DeleteLine"),
         Must<OeeRollup>("ProductionLine", "删除产线时清掉预聚合。", "OeeEndpoints.DeleteLine"),
-        Must<OeeRollupState>("ProductionLine", "删除产线时清掉预聚合游标。", "OeeEndpoints.DeleteLine"),
+        Retain<OeeRollupState>("全局滚动水位（Id = 1），不能按产线删除。"),
         Must<SpcSample>("SpcChart", "删除控制图时清掉样本。", "SpcChartDelete"),
         Must<SpcViolation>("SpcChart", "删除控制图时清掉违例。", "SpcChartDelete"),
         Retain<TraceabilityRecord>("追溯记录按任务编号保留，供事后查询。"),

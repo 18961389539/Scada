@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using Microsoft.Extensions.Options;
+using Scada.Core.Interfaces;
 using Scada.Core.Licensing;
 using Scada.Core.Net;
 using Scada.Core.Options;
@@ -17,10 +18,13 @@ public sealed class Iec104ServerHost(
     ExportPointMap map,
     ExportWriteRouter router,
     ILicenseEnforcement license,
-    ILogger<Iec104ServerHost> logger) : BackgroundService
+    ILogger<Iec104ServerHost> logger,
+    INodeRole? role = null) : BackgroundService
 {
+    private readonly INodeRole _role = role ?? new StandaloneNodeRole();
     private readonly ConcurrentDictionary<Guid, Iec104ServerSession> _sessions = new();
     private TcpListener? _listener;
+    private CancellationTokenSource? _runCts;
     // 禁用时不轮询：靠配置变更唤醒。测试宿主会创建大量站点，
     // 每个站点常驻一个 1.5s 定时器会显著抬高并行测试的线程与计时器压力。
     private readonly SemaphoreSlim _configChanged = new(0, 1);
@@ -36,10 +40,10 @@ public sealed class Iec104ServerHost(
         while (!stoppingToken.IsCancellationRequested)
         {
             var opt = options.CurrentValue.Iec104Server;
-            if (!opt.Enabled || !Allowed())
+            if (!opt.Enabled || !Allowed() || !_role.IsActive)
             {
                 await StopListenerAsync();
-                if (opt.Enabled) await Task.Delay(5000, stoppingToken);
+                if (opt.Enabled) await Task.Delay(_role.IsActive ? 5000 : 1000, stoppingToken);
                 else await WaitForConfigChangeAsync(stoppingToken);
                 continue;
             }
@@ -90,16 +94,26 @@ public sealed class Iec104ServerHost(
         logger.LogInformation("IEC 104 从站监听 {Addr}:{Port}，点表 {Count} 个 IOA，公共地址 {Ca}",
             opt.ListenAddress, opt.Port, map.Iec.Count, string.Join(',', opt.CommonAddresses));
 
-        while (!ct.IsCancellationRequested && options.CurrentValue.Iec104Server.Enabled)
+        using var run = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _runCts = run;
+        while (!run.IsCancellationRequested && options.CurrentValue.Iec104Server.Enabled && _role.IsActive)
         {
-            var client = await _listener.AcceptTcpClientAsync(ct);
-            _ = Task.Run(() => HandleClientAsync(client, ct), ct);
+            var accept = _listener.AcceptTcpClientAsync(run.Token).AsTask();
+            var done = await Task.WhenAny(accept, Task.Delay(200, run.Token));
+            if (done != accept)
+            {
+                if (!_role.IsActive || !options.CurrentValue.Iec104Server.Enabled) break;
+                continue;
+            }
+            var client = await accept;
+            _ = Task.Run(() => HandleClientAsync(client, run.Token), run.Token);
         }
     }
 
     private Task StopListenerAsync()
     {
         IsRunning = false;
+        try { _runCts?.Cancel(); } catch { }
         try { _listener?.Stop(); } catch { }
         _listener = null;
         return Task.CompletedTask;

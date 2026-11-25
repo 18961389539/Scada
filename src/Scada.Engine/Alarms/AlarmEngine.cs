@@ -415,8 +415,17 @@ public sealed class AlarmEngine : BackgroundService
                 .Where(x => x.EndTs == null && x.RuleId != null)
                 .ToListAsync(cancellationToken);
             var dirty = false;
+            var now = ScadaTime.NowMs();
             foreach (var alarm in active)
             {
+                if (alarm.RuleId is int missing && !_rules.ContainsKey(missing))
+                {
+                    alarm.EndTs = now;
+                    alarm.EndReason = "规则已删除";
+                    dirty = true;
+                    continue;
+                }
+
                 // 洪水状态不跨重启保留：恢复仍带洪水抑制的活动报警，条件抑制仍有效的继续保留。
                 if (alarm.Suppressed && alarm.SuppressReason?.StartsWith("报警洪水", StringComparison.Ordinal) == true)
                 {
@@ -440,7 +449,6 @@ public sealed class AlarmEngine : BackgroundService
                 .Where(x => x.EndTs == null && x.DeviceId != null && x.RuleId == null && x.GatewayId == null
                     && !gatewayDeviceIds.Contains(x.DeviceId.Value))
                 .ToListAsync(cancellationToken);
-            var now = ScadaTime.NowMs();
             foreach (var alarm in staleOffline)
             {
                 alarm.EndTs = now;
@@ -495,10 +503,10 @@ public sealed class AlarmEngine : BackgroundService
         _rulesByTag = byTag;
         _configVersion = _config.Version;
 
-        // 规则删除后，按 ruleId 索引的抖动历史与抑制缓存不再有意义，清掉避免随配置反复增删缓慢累积。
-        // _activeEventIds 故意不动：库里可能还留着未恢复的活动报警，重启恢复与人工处置仍要按它定位事件。
+        // 规则删除后清理按 ruleId 索引的内存状态。未结束事件由删除路径关闭，不必再按已不存在的规则登记。
         foreach (var stale in _raiseHistory.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _raiseHistory.Remove(stale);
         foreach (var stale in _suppressed.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _suppressed.Remove(stale);
+        foreach (var stale in _activeEventIds.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _activeEventIds.Remove(stale);
     }
 
     private void ApplyFlags(AlarmEvent alarm, AlarmRule rule, long now)

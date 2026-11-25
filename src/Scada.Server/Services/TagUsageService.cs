@@ -100,6 +100,92 @@ public sealed class TagUsageService
             .ToList(), unreadable);
     }
 
+    /// <summary>对一台设备下的全部测点做与单点删除相同的引用扫描，只遍历一次画面与规则。</summary>
+    public async Task<(IReadOnlyList<TagUsageRef> References, bool Unreadable)> ScanManyAsync(ConfigDbContext db, IReadOnlyCollection<int> tagIds, CancellationToken ct)
+    {
+        if (tagIds.Count == 0) return ([], false);
+        var wanted = tagIds as ISet<int> ?? tagIds.ToHashSet();
+        var references = new List<TagUsageRef>();
+        var unreadable = false;
+
+        foreach (var screen in await db.ProcessScreens.AsNoTracking().ToListAsync(ct))
+        {
+            var draft = TryParse(screen.DraftJson);
+            if (draft is null) unreadable = true;
+            else
+            {
+                foreach (var tagId in wanted)
+                    if (ScreenReferenceCount(draft, tagId) is int draftCount && draftCount > 0)
+                        references.Add(new("screenDraft", screen.Id, screen.Name, $"#{tagId} x{draftCount}", true));
+            }
+            if (screen.PublishedJson is null) continue;
+            var published = TryParse(screen.PublishedJson);
+            if (published is null) { unreadable = true; continue; }
+            foreach (var tagId in wanted)
+                if (ScreenReferenceCount(published, tagId) is int publishedCount && publishedCount > 0)
+                    references.Add(new("screenPublished", screen.Id, screen.PublishedName ?? screen.Name, $"#{tagId} x{publishedCount}", true, true));
+        }
+
+        foreach (var item in await db.HmiLibrary.AsNoTracking().Where(x => x.Kind == "template").ToListAsync(ct))
+        {
+            var document = TryParse(item.DocumentJson);
+            if (document is null) { unreadable = true; continue; }
+            foreach (var tagId in wanted)
+                if (ScreenReferenceCount(document, tagId) > 0)
+                    references.Add(new("template", item.Id, item.Name, $"#{tagId} {item.Key}", true));
+        }
+
+        foreach (var rule in await db.AlarmRules.AsNoTracking().ToListAsync(ct))
+        {
+            foreach (var tagId in wanted)
+            {
+                if (!RuleReferencesTag(rule, tagId)) continue;
+                references.Add(new("alarmRule", rule.Id, rule.Message ?? $"规则 #{rule.Id}", $"#{tagId} · {rule.Type} · {rule.Level}", true));
+            }
+        }
+
+        foreach (var sequence in await db.ControlSequences.AsNoTracking().ToListAsync(ct))
+        {
+            var steps = ParseSteps(sequence.StepsJson);
+            if (steps is null) { unreadable = true; continue; }
+            foreach (var tagId in wanted)
+            {
+                var count = steps.Count(step => step.TagId == tagId || ExpressionReferences(step.ConfirmExpression, tagId) || ExpressionReferences(step.Expression, tagId));
+                if (count > 0)
+                    references.Add(new("sequence", sequence.Id, sequence.Name, $"#{tagId} x{count}", true));
+            }
+        }
+
+        foreach (var template in await db.RecipeTemplates.AsNoTracking().ToListAsync(ct))
+        {
+            var parameters = ParseParameters(template.ParametersJson);
+            if (parameters is null) { unreadable = true; continue; }
+            foreach (var tagId in wanted)
+            {
+                var count = parameters.Count(parameter => parameter.TagId == tagId);
+                if (count > 0)
+                    references.Add(new("recipe", template.Id, template.Name, $"#{tagId} x{count}", true));
+            }
+        }
+
+        var calculated = await db.TagDependencies.AsNoTracking()
+            .Where(x => wanted.Contains(x.InputTagId))
+            .Select(x => new { x.InputTagId, x.TagId })
+            .ToListAsync(ct);
+        if (calculated.Count > 0)
+        {
+            var names = await db.Tags.AsNoTracking().Where(x => calculated.Select(c => c.TagId).Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Name, ct);
+            foreach (var item in calculated)
+                references.Add(new("calculatedTag", item.TagId, names.GetValueOrDefault(item.TagId, $"#{item.TagId}"), $"#{item.InputTagId}", true));
+        }
+
+        return (references
+            .OrderBy(reference => CategoryOrder(reference.Category))
+            .ThenBy(reference => reference.Name)
+            .ToList(), unreadable);
+    }
+
+
     public async Task<TagRebindResult> RebindAsync(ConfigDbContext db, Tag source, Tag target, AccessContext access, string user, CancellationToken ct)
     {
         if (source.Id == target.Id) throw new TagRebindException("目标测点不能与当前测点相同");
