@@ -124,6 +124,7 @@
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item v-if="auth.user" disabled>{{ auth.user.displayName ?? auth.user.userName }}</el-dropdown-item>
+                <el-dropdown-item v-if="auth.user" command="change-password" data-test="account-change-password">{{ $t('passwordChange.title') }}</el-dropdown-item>
                 <el-dropdown-item :divided="!!auth.user" command="logout">{{ $t('appLayout.k094774') }}</el-dropdown-item>
               </el-dropdown-menu>
             </template>
@@ -155,7 +156,7 @@ import PageHelpButton from '../components/PageHelpButton.vue'
 import ShortcutHelpDialog from '../components/ShortcutHelpDialog.vue'
 import { shortcutHelpOpen } from '../shortcuts/registry'
 import { modalOpen } from '../ui/overlay'
-import { findNavByPath } from '../nav/catalog'
+import { findNavByPath, navTitleForPath } from '../nav/catalog'
 import { pushRecent } from '../nav/recents'
 import { applyLocale, currentLocale, locales, type AppLocale } from '../i18n'
 import { isMobile, loadClientPolicy } from '../mobile'
@@ -214,7 +215,8 @@ watch(() => route.path, () => {
 function notifyDenied(): void {
   const denied = route.query.denied
   if (typeof denied !== 'string' || !denied) return
-  ElMessage.warning(tr('uxShell.deniedMessage', [denied]))
+  const pageName = navTitleForPath(denied, tr) ?? denied
+  ElMessage.warning(tr('uxShell.deniedMessage', [pageName]))
   const query = { ...route.query }
   delete query.denied
   void router.replace({ path: route.path, query })
@@ -328,6 +330,10 @@ function onCommand(command: string): void {
   if (command === 'display:toggle') {
     display.value = display.value === 'control-room' ? 'standard' : 'control-room'
     applyDisplay(display.value)
+    return
+  }
+  if (command === 'change-password') {
+    void router.push({ name: 'change-password', query: { redirect: route.fullPath } })
     return
   }
   if (command === 'logout') {

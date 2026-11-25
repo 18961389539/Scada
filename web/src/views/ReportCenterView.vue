@@ -8,6 +8,7 @@
       <el-button :loading="loading" @click="refresh()">{{ $t('reportCenterView.k38108e') }}</el-button>
     </div>
     <p class="tiny muted">{{ $t('ux.reports.businessHint') }}</p>
+      <ShiftTimeZoneBar readonly />
     <el-radio-group v-model="centerTab" :aria-label="$t('ux.reports.business')" data-test="report-center-tabs">
       <el-radio-button value="archives" data-test="report-center-archives">{{ $t('ux.reports.archives') }}</el-radio-button>
       <el-radio-button value="templates" data-test="report-center-templates">{{ $t('ux.reports.templates') }}</el-radio-button>
@@ -214,6 +215,7 @@ import type { Area, NotificationChannel, Tag } from '../types'
 import { readLastNumber, readLastText, rememberNumber, rememberText } from '../composables/lastChoice'
 import { useEditDialog } from '../composables/useEditDialog'
 import { tr } from '../i18n'
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 
 const auth = useAuthStore()
 const canConfigure = computed(() => can(auth.user, 'Configure'))

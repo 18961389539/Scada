@@ -5,6 +5,7 @@
     <el-alert v-if="queryError" :title="queryError" type="error" :closable="false" show-icon data-test="oee-query-error" />
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="oee-action-error" />
     <div class="panel oee-panel" v-loading="loading">
+      <ShiftTimeZoneBar readonly />
       <div class="oee-actions">
         <router-link v-if="can(auth.user, 'Control')" :to="productionEventsLocation"><el-button data-test="oee-production-events">{{ $t('ux.events.title') }}</el-button></router-link>
         <el-button size="small" :icon="Download" :disabled="!canExport" :loading="exporting" data-test="oee-export-xlsx" @click="exportAs('xlsx')">{{ $t('oee.exportExcel') }}</el-button>
@@ -137,6 +138,7 @@ import { t } from '../i18n'
 import { chartPalette, onThemeChanged } from '../theme'
 import { downloadBlob, formatTime } from '../utils'
 import { can } from '../access/policies'
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 
 const auth = useAuthStore()
 const route = useRoute(), router = useRouter()

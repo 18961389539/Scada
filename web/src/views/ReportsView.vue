@@ -6,6 +6,7 @@
         <router-link to="/report-center"><el-button data-test="reports-business-link">{{ $t('ux.reports.business') }}</el-button></router-link>
       </div>
       <p class="tiny muted">{{ $t('ux.reports.statisticsHint') }}</p>
+      <ShiftTimeZoneBar readonly />
       <div class="toolbar">
         <el-radio-group v-model="reportType" :disabled="exporting" :aria-label="$t('reportsView.reportType')" @change="onTypeChange">
           <el-radio-button value="daily">{{ $t('reportsView.k4f91c6') }}</el-radio-button>
@@ -96,6 +97,7 @@ import { errorMessage, errorText } from '../api/http'
 import type { Device, Tag } from '../types'
 import { downloadBlob, formatTime, formatValue } from '../utils'
 import { tr } from '../i18n'
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 
 interface ReportRow {
   ts: number

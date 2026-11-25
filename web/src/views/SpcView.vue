@@ -1,6 +1,7 @@
 <template>
   <div class="page spc-page">
     <div class="panel">
+      <ShiftTimeZoneBar readonly />
       <div class="toolbar filter-row">
         <span class="hint">{{ $t('spc.subtitle') }}</span>
         <span class="spacer" />
@@ -144,6 +145,7 @@ import { can } from '../access/policies'
 import { tr } from '../i18n'
 import { useAuthStore } from '../stores/auth'
 import { formatTime } from '../utils'
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 import { chartPalette, onThemeChanged } from '../theme'
 import type { Area, Device, SpcChart, SpcChartInput, SpcChartType, SpcSample, SpcViolation, SpcViolationRule, Tag } from '../types'
 

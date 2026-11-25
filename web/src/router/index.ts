@@ -158,9 +158,9 @@ router.beforeEach(async (to) => {
   if (auth.mustChangePassword && to.name !== 'change-password') {
     return { name: 'change-password', query: { redirect: to.fullPath } }
   }
-  if (!auth.mustChangePassword && to.name === 'change-password') {
+  // 已改密的账号仍可从账户菜单主动打开改密页；提交成功后由页面跳回 redirect 或首页。
+  if (to.name === 'change-password') {
     try { await auth.confirmSession() } catch { return true }
-    if (!auth.mustChangePassword) return await resolveLandingPath(auth.user)
   }
 
   if (!auth.mustChangePassword) {
@@ -174,6 +174,7 @@ router.beforeEach(async (to) => {
     const landing = await resolveLandingPath(auth.user)
     // 落地页本身被拒绝时不再重定向，否则 denied 带上自己会形成无限重定向
     if (to.path === landing) return true
+    // AppLayout 用 findNavByPath 把 denied 路径显示成页面中文名。
     return { path: landing, query: { denied: to.fullPath } }
   }
 

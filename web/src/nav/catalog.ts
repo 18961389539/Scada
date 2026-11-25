@@ -158,3 +158,9 @@ export function findNavByPath(path: string): NavItemDef | undefined {
     NAV_ITEMS.filter(item => normalized.startsWith(item.path + '/'))
       .sort((a, b) => b.path.length - a.path.length)[0]
 }
+
+/** 把路径换成导航目录中的页面标题；没有标题时返回 undefined，调用方再回退到路径。 */
+export function navTitleForPath(path: string, translate: (key: string) => string): string | undefined {
+  const item = findNavByPath(path)
+  return item ? translate(item.titleKey) : undefined
+}

@@ -35,7 +35,10 @@ const EXACT: Record<string, string> = {
   '/config/rules': 'alarmRules',
   '/config/notifications': 'notifications',
   '/config/annunciators': 'annunciators',
-  '/config/external-api': 'externalApi'
+  '/config/external-api': 'externalApi',
+  '/handover': 'handover',
+  '/workspace': 'workspace',
+  '/config/channels': 'channels'
 }
 
 const PATTERNS: [RegExp, string][] = [

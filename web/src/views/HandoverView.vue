@@ -15,16 +15,22 @@
 
       <section>
         <h2>{{ $t('dutyHandover.unacked') }}</h2>
-        <p>{{ summaryLine }}</p>
+        <p><router-link data-test="handover-unacked-link" to="/alarms?state=unack">{{ summaryLine }}</router-link></p>
         <ul class="level-list" data-test="handover-unacked">
-          <li v-for="row in unackedByLevel" :key="row.level">{{ row.label }}：{{ row.count }}</li>
+          <li v-for="row in unackedByLevel" :key="row.level">
+            <router-link :to="{ path: '/alarms', query: { state: 'unack' } }">{{ row.label }}：{{ row.count }}</router-link>
+          </li>
         </ul>
-        <p>{{ $t('dutyHandover.rtnUnack') }}：{{ rtnUnack }}</p>
+        <p><router-link data-test="handover-rtn-link" to="/alarms?state=rtnUnack">{{ $t('dutyHandover.rtnUnack') }}：{{ rtnUnack }}</router-link></p>
       </section>
 
       <section>
         <h2>{{ $t('dutyHandover.shelved') }} / {{ $t('dutyHandover.suppressed') }}</h2>
-        <p>{{ $t('dutyHandover.shelved') }}：{{ shelved }} · {{ $t('dutyHandover.suppressed') }}：{{ suppressed }}</p>
+        <p>
+          <router-link data-test="handover-shelved-link" to="/alarms?state=shelved">{{ $t('dutyHandover.shelved') }}：{{ shelved }}</router-link>
+          ·
+          <router-link data-test="handover-suppressed-link" to="/alarms?state=suppressed">{{ $t('dutyHandover.suppressed') }}：{{ suppressed }}</router-link>
+        </p>
       </section>
 
       <section>
@@ -32,7 +38,9 @@
         <p v-if="!pending.length" data-test="handover-pending-empty">{{ $t('dutyHandover.noPending') }}</p>
         <ul v-else data-test="handover-pending">
           <li v-for="row in pending" :key="row.request.id">
-            {{ row.request.kind }} · {{ row.request.requestedBy }} · {{ row.sequenceName || row.recipe?.recipeName || row.request.id }}
+            <router-link data-test="handover-pending-link" to="/control">
+              {{ kindLabel(row.request.kind) }} · {{ row.request.requestedBy }} · {{ row.sequenceName || row.recipe?.recipeName || row.request.id }}
+            </router-link>
           </li>
         </ul>
       </section>
@@ -41,7 +49,11 @@
         <h2>{{ $t('dutyHandover.runningSequences') }}</h2>
         <p v-if="!runningSequences.length">{{ $t('dutyHandover.noneRunning') }}</p>
         <ul v-else data-test="handover-sequences">
-          <li v-for="run in runningSequences" :key="run.id">{{ run.sequenceName }} · {{ run.startedBy }} · {{ run.status }}</li>
+          <li v-for="run in runningSequences" :key="run.id">
+            <router-link data-test="handover-sequence-link" :to="{ path: '/control', query: { tab: 'sequences' } }">
+              {{ run.sequenceName }} · {{ run.startedBy }} · {{ runStatusLabel(run.status) }}
+            </router-link>
+          </li>
         </ul>
       </section>
 
@@ -49,10 +61,13 @@
         <h2>{{ $t('dutyHandover.runningRecipes') }}</h2>
         <p v-if="!runningRecipes.length">{{ $t('dutyHandover.noneRunning') }}</p>
         <ul v-else data-test="handover-recipes">
-          <li v-for="download in runningRecipes" :key="download.id">{{ download.recipeName || download.id }} · {{ download.status }}</li>
+          <li v-for="download in runningRecipes" :key="download.id">
+            <router-link data-test="handover-recipe-link" to="/recipes#downloads">
+              {{ download.recipeName || download.id }} · {{ download.statusLabel || runStatusLabel(download.status) }}
+            </router-link>
+          </li>
         </ul>
       </section>
-
       <section>
         <h2>{{ $t('dutyHandover.sound') }}</h2>
         <p data-test="handover-sound">{{ soundEnabled ? $t('dutyHandover.unmuted') : $t('dutyHandover.muted') }}</p>
@@ -95,6 +110,24 @@ const suppressed = ref(0)
 const pending = ref<ControlRequestRow[]>([])
 const runningSequences = ref<ControlRun[]>([])
 const runningRecipes = ref<RecipeDownload[]>([])
+
+function kindLabel(kind: string): string {
+  if (kind === 'command') return tr('dutyHandover.kindCommand')
+  if (kind === 'recipe') return tr('dutyHandover.kindRecipe')
+  if (kind === 'sequence') return tr('dutyHandover.kindSequence')
+  return kind
+}
+
+function runStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    Running: tr('controlView.k594249'),
+    Completed: tr('controlView.k33246f'),
+    Failed: tr('controlView.k3e3c80'),
+    Aborted: tr('controlView.k5c1747'),
+    Pending: tr('controlView.k4607ba')
+  }
+  return labels[status] ?? status
+}
 
 const summaryLine = computed(() => {
   const total = unackedByLevel.value.reduce((sum, row) => sum + row.count, 0)
@@ -167,5 +200,6 @@ onMounted(() => { void load() })
   :global(.no-print), :global(.el-menu), :global(header), :global(.app-header), :global(.nav) { display: none !important; }
   .handover-page { background: white; color: black; }
   .handover-sheet { box-shadow: none; border: none; }
+  .handover-sheet a { color: inherit; text-decoration: none; }
 }
 </style>

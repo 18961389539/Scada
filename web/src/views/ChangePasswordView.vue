@@ -3,7 +3,7 @@
     <el-card class="pw-card" shadow="never">
       <header class="pw-head">
         <h1>{{ tr('passwordChange.title') }}</h1>
-        <p>{{ tr('passwordChange.hint') }}</p>
+        <p>{{ tr(forced ? 'passwordChange.hint' : 'passwordChange.voluntaryHint') }}</p>
       </header>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" @submit.prevent="submit">
@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useAuthStore } from '../stores/auth'
@@ -58,6 +58,7 @@ import { startPath } from '../router'
 import { safeRedirect } from '../nav/query'
 
 const auth = useAuthStore()
+const forced = computed(() => !!auth.mustChangePassword)
 const router = useRouter()
 const route = useRoute()
 const formRef = ref<FormInstance>()

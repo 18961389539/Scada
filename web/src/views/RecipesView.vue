@@ -44,7 +44,7 @@
             </el-dropdown>
           </div></template></el-table-column>
         </el-table>
-        <div ref="downloadSection" class="download-section">
+        <div id="downloads" ref="downloadSection" class="download-section">
         <h4>{{ $t('recipesView.kde9501') }}</h4>
         <p v-if="latestDownload?.status === 'Completed'" class="recipe-latest muted" data-test="recipe-latest-download">{{ $t('recipesView.latestDownload', [latestDownload.id, latestDownload.recipeName, latestDownload.version, latestDownload.statusLabel]) }}</p>
         <el-alert v-else-if="latestDownload" :type="['Pending', 'Running'].includes(latestDownload.status) ? 'warning' : ['Failed', 'PartiallyApplied', 'Rejected'].includes(latestDownload.status) ? 'error' : 'info'" :title="$t('recipesView.latestDownload', [latestDownload.id, latestDownload.recipeName, latestDownload.version, latestDownload.statusLabel])" :closable="false" show-icon data-test="recipe-latest-download" />
@@ -170,6 +170,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { notifySubmittedForApproval } from '../composables/pendingApprovalToast'
 import { areaApi, deviceApi, realtimeApi, tagApi } from '../api'
@@ -503,8 +504,15 @@ async function compare(r: Recipe, leftVersion: number | null, right: string, rig
 
 // Pending approvals and running downloads both need progress updates, even when filters hide them.
 usePolling(loadDownloads, 1000, { enabled: () => !loading.value && activeDownloads.value > 0 })
+const route = useRoute()
+function scrollToDownloads(): void {
+  if (route.hash !== '#downloads') return
+  void nextTick(() => downloadSection.value?.scrollIntoView({ block: 'start' }))
+}
+watch(() => route.hash, scrollToDownloads)
 onMounted(async () => {
   await refresh()
+  scrollToDownloads()
 })
 onBeforeUnmount(() => { disposed = true; refreshSeq++; downloadsSeq++; checkSeq++ })
 </script>

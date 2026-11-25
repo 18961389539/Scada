@@ -34,7 +34,7 @@ public static class NotificationOutboundPolicy
         if (IsLinkLocal(address))
             return $"通知目标 {target} 属于链路本地地址，不允许作为邮件或 Webhook/短信出站地址";
         if (OutboundTargetPolicy.IsLocal(address)) return null;
-        return $"通知目标 {target} 属于公网 IP，须在 Scada:NotificationTargetAllowlist 中放行，或改用云邮件/短信网关的域名";
+        return $"通知目标 {target} 属于公网 IP，请改用域名（云邮件或短信网关的主机名默认可用），或请运维在出站名单中放行";
     }
 
     public static string? ValidateHttpUrl(string? url, ScadaSettings? settings)

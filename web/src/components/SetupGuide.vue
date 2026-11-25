@@ -23,7 +23,7 @@
     <p class="tiny muted">{{ $t('configurationUx.manualChecks') }}</p>
     <router-link to="/config/project">{{ $t('ux.setup.import') }}</router-link>
     <span> · </span>
-    <router-link v-if="canGlobal(auth.user, 'System')" to="/system">{{ $t('ux.setup.backup') }}</router-link>
+    <router-link v-if="canGlobal(auth.user, 'System')" to="/ops#backup">{{ $t('ux.setup.backup') }}</router-link>
     <span v-else>{{ $t('ux.setup.backupNeedAdmin') }}</span>
     <CollectorDiagnosticsDialog v-if="selectedDevice" v-model="diagnosticsVisible" :device="selectedDevice" />
   </details>

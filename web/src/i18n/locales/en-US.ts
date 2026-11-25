@@ -1030,8 +1030,16 @@ export default {
     saved: 'Shift time zone updated',
     saveFailed: 'Could not save the shift time zone',
     loadFailed: 'Could not load the shift time zone',
-    notPersisted: 'The change is active in this process but was not written to the site settings file, so it may revert after a restart.',
+    plantEntryTitle: 'Plant shift time zone',
+    plantEntryHint: 'This is the plant-wide shift time zone. Reports, OEE, quality, calculation jobs, and notifications all use it to split shifts and hours. You will be asked to confirm before a change is saved.',
+    confirmTitle: 'Confirm the shift time zone change',
+    confirmBody: 'After you save, shifts will be split in the new time zone. Reports, OEE, calculation jobs, notifications, and historical hourly buckets may be recalculated. The setting is stored in the configuration database and remains after a restart.',
+    impactHint: 'Changing this can affect reports, OEE, calculation jobs, notifications, and historical hourly buckets.',
     needGlobal: 'Changing the shift time zone requires configure permission for all areas.'
+  },
+  notificationsUx: {
+    outboundHint: 'Outbound limits: link-local addresses are rejected, and a public IP needs an allowlist entry from operations. Common cloud mail or SMS gateways and ordinary hostnames are allowed by default.',
+    outboundAdvice: 'Use a hostname, or ask operations to allow this address.'
   },
   dutyHandover: {
     title: 'Shift summary',
@@ -1060,7 +1068,10 @@ export default {
     fresh: 'Health check is normal',
     unknown: 'Health status unknown',
     standby: 'This node is standby. Primary: {0}',
-    emptyLevel: 'None'
+    emptyLevel: 'None',
+    kindCommand: 'Control command',
+    kindRecipe: 'Recipe',
+    kindSequence: 'Sequence'
   },
   alarmReconnect: {
     missedTitle: 'Critical alarms during the disconnect',

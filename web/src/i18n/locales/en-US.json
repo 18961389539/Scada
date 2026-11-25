@@ -2726,6 +2726,7 @@
   "passwordChange": {
     "title": "Change password",
     "hint": "This account is using a first-time or reset password. Set your own password before continuing.",
+    "voluntaryHint": "Enter your current password and a new password. This changes the password for the signed-in account and does not replace an administrator reset for someone else.",
     "current": "Current password",
     "next": "New password",
     "confirm": "Confirm new password",

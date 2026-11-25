@@ -1030,8 +1030,16 @@ export default {
     saved: '班次时区已更新',
     saveFailed: '保存班次时区失败',
     loadFailed: '读取班次时区失败',
-    notPersisted: '已在当前进程生效，但未写入站点配置文件，重启后可能恢复原值。',
+    plantEntryTitle: '厂级班次时区',
+    plantEntryHint: '这是全厂共用的班次时区。报表、OEE、质检、计算任务和通知都按此时区划分班次与小时。修改前会要求确认。',
+    confirmTitle: '确认修改班次时区',
+    confirmBody: '保存后将按新时区划分班次。报表、OEE、计算任务、通知以及历史小时分桶可能会重算。此项已写入配置库，重启后仍然有效。',
+    impactHint: '修改会影响报表、OEE、计算任务、通知和历史小时分桶。',
     needGlobal: '修改班次时区需要全部区域的配置权限。'
+  },
+  notificationsUx: {
+    outboundHint: '出站限制：链路本地地址会被拒绝；填写公网 IP 时需要运维放行名单。常用云邮件、短信网关和普通域名默认可用。',
+    outboundAdvice: '请改用域名，或请运维放行该地址。'
   },
   dutyHandover: {
     title: '值班摘要',
@@ -1060,7 +1068,10 @@ export default {
     fresh: '健康检查正常',
     unknown: '健康状态未知',
     standby: '当前节点为备机，主机：{0}',
-    emptyLevel: '无'
+    emptyLevel: '无',
+    kindCommand: '控制命令',
+    kindRecipe: '配方',
+    kindSequence: '顺控'
   },
   alarmReconnect: {
     missedTitle: '断线期间的紧急报警',

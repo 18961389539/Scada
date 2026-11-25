@@ -88,7 +88,7 @@
       </p>
     </div>
 
-    <div class="panel" data-test="backup-panel">
+    <div id="backup" class="panel" data-test="backup-panel">
       <el-alert type="info" show-icon :closable="false" :title="$t('opsView.fullBackupHint')" data-test="backup-kind-hint" style="margin-bottom: 8px" />
       <el-alert v-if="backupSecurity?.plaintextRisk" type="warning" show-icon :closable="false" :title="$t('opsView.plaintextRisk')" data-test="backup-plaintext-risk" style="margin-bottom: 8px" />
       <div class="toolbar">
@@ -139,7 +139,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { opsApi } from '../api/ops'
 import type { BackupRun, BackupSecurity, BackupSummary, DesktopClient, DesktopClientList, HaStatus } from '../api/ops'
@@ -354,5 +355,11 @@ usePolling(async () => {
   }
 }, 5000)
 usePolling(refreshDesktop, 15000, { immediate: true })
-onMounted(() => { void refresh() })
+const route = useRoute()
+function scrollToBackup(): void {
+  if (route.hash !== '#backup') return
+  void nextTick(() => document.getElementById('backup')?.scrollIntoView({ block: 'start' }))
+}
+watch(() => route.hash, scrollToBackup)
+onMounted(() => { void refresh(); scrollToBackup() })
 </script>

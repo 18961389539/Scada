@@ -4,42 +4,45 @@
     <span v-if="loading" class="muted">{{ $t('pageState.loading') }}</span>
     <template v-else>
       <span class="shift-zone-current" data-test="shift-timezone-current">{{ currentText }}</span>
-      <el-select
-        v-if="canEdit"
-        v-model="selected"
-        filterable
-        clearable
-        :placeholder="$t('shiftZone.placeholder')"
-        style="width: 280px"
-        :disabled="saving"
-        data-test="shift-timezone-select"
-        @change="save"
-      >
-        <el-option :label="$t('shiftZone.serverLocalOption')" value="" />
-        <el-option v-for="option in options" :key="option.id" :label="`${option.id} — ${option.display}`" :value="option.id" />
-      </el-select>
-      <span v-else class="muted">{{ $t('shiftZone.needGlobal') }}</span>
+      <template v-if="!readonly">
+        <el-select
+          v-if="canEdit"
+          v-model="selected"
+          filterable
+          clearable
+          :placeholder="$t('shiftZone.placeholder')"
+          style="width: 280px"
+          :disabled="saving"
+          data-test="shift-timezone-select"
+          @change="onSelect"
+        >
+          <el-option :label="$t('shiftZone.serverLocalOption')" value="" />
+          <el-option v-for="option in options" :key="option.id" :label="`${option.id} — ${option.display}`" :value="option.id" />
+        </el-select>
+        <span v-else class="muted">{{ $t('shiftZone.needGlobal') }}</span>
+      </template>
     </template>
+    <p v-if="!readonly && canEdit" class="muted shift-zone-hint">{{ $t('shiftZone.impactHint') }}</p>
     <el-alert v-if="error" :title="error" type="error" :closable="false" show-icon data-test="shift-timezone-error" />
-    <el-alert v-if="notPersisted" :title="$t('shiftZone.notPersisted')" type="warning" :closable="false" show-icon data-test="shift-timezone-unpersisted" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { oeeApi, type ShiftTimeZoneOption, type ShiftTimeZoneView } from '../api/oee'
 import { errorMessage } from '../api/http'
 import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
 
+withDefaults(defineProps<{ readonly?: boolean }>(), { readonly: false })
+
 const auth = useAuthStore()
 const canEdit = computed(() => canGlobal(auth.user, 'Configure'))
 const loading = ref(false)
 const saving = ref(false)
 const error = ref('')
-const notPersisted = ref(false)
 const view = ref<ShiftTimeZoneView | null>(null)
 const selected = ref('')
 const options = computed(() => view.value?.options ?? [] as ShiftTimeZoneOption[])
@@ -51,13 +54,16 @@ const currentText = computed(() => {
     : tr('shiftZone.configured', [current.configured ?? current.effectiveId])
 })
 
+function revertSelection(): void {
+  selected.value = view.value?.configured ?? ''
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
     view.value = await oeeApi.shiftTimezone()
-    selected.value = view.value.configured ?? ''
-    notPersisted.value = false
+    revertSelection()
   } catch (err) {
     error.value = errorMessage(err, tr('shiftZone.loadFailed'))
   } finally {
@@ -65,18 +71,29 @@ async function load(): Promise<void> {
   }
 }
 
-async function save(value: string | null): Promise<void> {
-  if (!canEdit.value || saving.value) return
+async function onSelect(value: string | null): Promise<void> {
+  if (!canEdit.value || saving.value) {
+    revertSelection()
+    return
+  }
+  const next = value ? value : null
+  const current = view.value?.configured ?? null
+  if ((next ?? '') === (current ?? '')) return
+  try {
+    await ElMessageBox.confirm(tr('shiftZone.confirmBody'), tr('shiftZone.confirmTitle'), { type: 'warning' })
+  } catch {
+    revertSelection()
+    return
+  }
   saving.value = true
   error.value = ''
   try {
-    view.value = await oeeApi.saveShiftTimezone(value ? value : null)
-    selected.value = view.value.configured ?? ''
-    notPersisted.value = !view.value.persisted
+    view.value = await oeeApi.saveShiftTimezone(next)
+    revertSelection()
     ElMessage.success(tr('shiftZone.saved'))
   } catch (err) {
     error.value = errorMessage(err, tr('shiftZone.saveFailed'))
-    selected.value = view.value?.configured ?? ''
+    revertSelection()
   } finally {
     saving.value = false
   }
@@ -90,5 +107,6 @@ onMounted(() => { void load() })
 .shift-zone-label { font-weight: 600; }
 .shift-zone-current { color: var(--el-text-color-regular); }
 .muted { color: var(--el-text-color-secondary); }
+.shift-zone-hint { width: 100%; margin: 0; font-size: 12px; line-height: 1.5; }
 .shift-zone :deep(.el-alert) { width: 100%; }
 </style>

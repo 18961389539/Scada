@@ -161,6 +161,7 @@
             <el-option v-for="(label, value) in channelTypeLabels" :key="value" :label="label" :value="value" />
           </el-select>
         </el-form-item>
+        <el-alert type="info" :closable="false" show-icon data-test="channel-outbound-hint" :title="$t('notificationsUx.outboundHint')" />
         <template v-if="channelForm.type === 'Email'">
           <el-form-item :label="$t('notificationsView.k941346')" required><el-input v-model="channelForm.settings.host" /></el-form-item>
           <el-form-item :label="$t('notificationsView.k6cbb73')"><el-input-number v-model="channelForm.settings.port" :min="1" :max="65535" /> <el-checkbox v-model="channelForm.settings.useSsl" style="margin-left: 12px">SSL/STARTTLS</el-checkbox></el-form-item>
@@ -259,6 +260,16 @@ const routeEscalateMinutes = ref(15)
 const routeChannelType = computed(() => channels.value.find(c => c.id === routeForm.channelId)?.type ?? '')
 
 const channelDialog = reactive({ visible: false, id: 0, hasSecret: false, clearSecret: false })
+function outboundMessage(message: string): string {
+  const advice = tr('notificationsUx.outboundAdvice')
+  if (message.includes(advice) || !message.includes('NotificationTargetAllowlist')) return message
+  return `${message} ${advice}`
+}
+
+function outboundError(error: unknown, fallback: string): string {
+  return outboundMessage(errorMessage(error, fallback))
+}
+
 const emptyChannel = (): NotificationChannelInput => ({ name: '', type: 'Webhook', enabled: true, settings: { port: 25, useSsl: false, timeoutMs: 5000, url: '', host: '', from: '', userName: '', headerName: '' }, secret: '', revision: undefined })
 const channelForm = reactive<NotificationChannelInput>(emptyChannel())
 
@@ -378,7 +389,7 @@ async function saveChannel(): Promise<void> {
     channelDialog.visible = false
     await load()
   } catch (error) {
-    channelError.value = errorMessage(error, tr('notificationsView.k40525a'))
+    channelError.value = outboundError(error, tr('notificationsView.k40525a'))
   } finally { saving.value = false }
 }
 
@@ -397,9 +408,9 @@ async function testChannel(channel: NotificationChannel): Promise<void> {
       actionError.value = ''
       const result = await notificationApi.testChannel(channel.id, recipients)
       if (result.success) { actionError.value = ''; ElMessage.success(tr('notificationsView.k09b30e')) }
-      else actionError.value = result.message || tr('notificationsView.k4184cd')
+      else actionError.value = outboundMessage(result.message || tr('notificationsView.k4184cd'))
     } catch (error) {
-      actionError.value = errorMessage(error, tr('notificationsView.k4184cd'))
+      actionError.value = outboundError(error, tr('notificationsView.k4184cd'))
     }
   } finally { testingId.value = null }
 }

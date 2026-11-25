@@ -4,6 +4,11 @@
       <el-button data-test="project-export" @click="exportProject()">{{ $t('projectView.kd5d9e8') }}</el-button>
     </div>
     <p class="page-desc">{{ $t('projectView.kfbbdd8') }}</p>
+    <section class="plant-shift-zone" data-test="project-shift-timezone">
+      <h3>{{ $t('shiftZone.plantEntryTitle') }}</h3>
+      <p class="tiny muted">{{ $t('shiftZone.plantEntryHint') }}</p>
+      <ShiftTimeZoneBar />
+    </section>
     <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="project-action-error" />
     <el-tabs v-model="tab">
       <el-tab-pane :label="$t('projectView.kc9dcd9')" name="versions">
@@ -69,6 +74,7 @@ import { formatTime } from '../utils'
 import { canGlobal } from '../access/policies'
 import { useAuthStore } from '../stores/auth'
 import { tr } from '../i18n'
+import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 
 const actionLabels: Record<string, string> = { add: tr('projectView.k2cd9e6'), update: tr('projectView.ka26056'), rename: tr('projectView.kda615e'), skip: tr('projectView.k31a985'), delete: tr('projectView.k3755f5') }
 const actionTypes: Record<string, string> = { add: 'success', update: 'warning', rename: 'primary', skip: 'info', delete: 'danger' }

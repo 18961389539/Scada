@@ -3,7 +3,7 @@ import zhJson from '../i18n/locales/zh-CN.json'
 import enJson from '../i18n/locales/en-US.json'
 import zhFlow from '../i18n/locales/zh-CN'
 import enFlow from '../i18n/locales/en-US'
-import { NAV_ITEMS } from './catalog'
+import { NAV_ITEMS, navTitleForPath } from './catalog'
 
 describe('navigation labels', () => {
   it('names the three screen paths distinctly, and uses permit wording for lockouts', () => {
@@ -23,5 +23,22 @@ describe('navigation labels', () => {
     expect(zhJson.navMenu.k4eb87f).not.toBe(zhJson.index.k8a1840)
     expect(zhJson.navMenu.k4eb87f).toBeTruthy()
     expect(zhFlow.workbench.navTitle).toBeTruthy()
+  })
+
+})
+
+describe('navTitleForPath', () => {
+  const translate = (key: string) => ({
+    'navMenu.externalApi': '对外接口',
+    'navMenu.k9f45b3': '报警',
+    'dutyHandover.title': '值班摘要'
+  }[key] ?? key)
+
+  it('uses the navigation title and falls back when the path is unknown', () => {
+    expect(navTitleForPath('/config/external-api', translate)).toBe('对外接口')
+    expect(navTitleForPath('/config/external-api?x=1', translate)).toBe('对外接口')
+    expect(navTitleForPath('/alarms?state=unack', translate)).toBe('报警')
+    expect(navTitleForPath('/handover', translate)).toBe('值班摘要')
+    expect(navTitleForPath('/not-a-page', translate)).toBeUndefined()
   })
 })
