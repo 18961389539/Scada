@@ -153,6 +153,41 @@ public sealed class ExternalOpcUaTests : IClassFixture<ExternalOpcUaTests.OpcSit
         await admin.PostAsJsonAsync($"/api/external/keys/{keyId}/revoke", new { });
     }
 
+
+    [Fact]
+    public async Task SimulatedGood_IsNotPublishedAsGood()
+    {
+        var cache = _site.Services.GetRequiredService<IRealtimeCache>();
+        using var root = new TempDir("scada-ext-opc-sim-");
+        var services = new ServiceCollection().AddLogging(b => b.SetMinimumLevel(LogLevel.Warning));
+        services.AddOpcUa().AddClient(options =>
+        {
+            options.ApplicationName = "ScadaExternalOpcSimClient";
+            options.ApplicationUri = "urn:localhost:scada:external-opc-sim";
+            options.ProductUri = "urn:scada:external-opc-sim";
+            options.PkiRoot = root.Path;
+            options.AutoAcceptUntrustedCertificates = true;
+        });
+        services.AddSingleton<IDeviceCredentials, PlainCredentials>();
+        services.AddSingleton<OpcUaRuntime>();
+        await using var provider = services.BuildServiceProvider();
+        var runtime = provider.GetRequiredService<OpcUaRuntime>();
+        await using var session = await ConnectAsync(runtime, Device(_site.Endpoint, null, null));
+        var nodeId = await FindTagNodeAsync(session, _site.TagA);
+
+        cache.Set(new TagValue(_site.TagA, 15.5, TagQuality.Good, ScadaTime.NowMs(), Simulated: true));
+        var simulated = await session.ReadAsync(null, 0, TimestampsToReturn.Both,
+            [new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value }], default);
+        Assert.Equal(StatusCodes.Uncertain, simulated.Results[0].StatusCode);
+        Assert.Equal(15.5, Convert.ToDouble(simulated.Results[0].WrappedValue.AsBoxedObject()));
+
+        cache.Set(new TagValue(_site.TagA, 16.25, TagQuality.Good, ScadaTime.NowMs()));
+        var official = await session.ReadAsync(null, 0, TimestampsToReturn.Both,
+            [new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value }], default);
+        Assert.Equal(StatusCodes.Good, official.Results[0].StatusCode);
+        Assert.Equal(16.25, Convert.ToDouble(official.Results[0].WrappedValue.AsBoxedObject()));
+    }
+
     private static Device Device(string endpoint, string? user, string? password) => new()
     {
         Id = 1, Name = "ext-opc", Protocol = ProtocolType.OpcUa, OpcEndpointUrl = endpoint,

@@ -369,6 +369,7 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
 
     private async Task<(bool Ok, string Message, string? Next)> ExecuteCoreAsync(RunContext ctx, int i, ControlSequenceStep step, CancellationToken branch, TimeSpan timeout, CancellationToken wait)
     {
+        var allowSimulated = commands.AllowsSimulatedConditions(ctx.Steps.Where(x => x.Type == "write" && x.TagId is int).Select(x => x.TagId!.Value));
         switch (step.Type)
         {
             case "write":
@@ -379,20 +380,20 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
                 if (step.DelayMs > 0) await Task.Delay(Math.Min(step.DelayMs, 600_000), wait);
                 if (!string.IsNullOrWhiteSpace(step.ConfirmExpression))
                 {
-                    var (ok, why) = await commands.WaitAsync(step.ConfirmExpression, timeout, wait);
+                    var (ok, why) = await commands.WaitAsync(step.ConfirmExpression, timeout, wait, allowSimulated);
                     if (!ok) return (false, why.Contains("无法判定", StringComparison.Ordinal) ? $"完成条件无法判定：{why}" : $"完成条件未满足：{why}", null);
                 }
                 return (true, result.Message, Fallthrough(ctx, i));
             }
             case "wait":
             {
-                var (ok, why) = await commands.WaitAsync(step.Expression!, timeout, wait);
+                var (ok, why) = await commands.WaitAsync(step.Expression!, timeout, wait, allowSimulated);
                 if (ok) return (true, "条件成立", Fallthrough(ctx, i));
                 return (false, why.Contains("无法判定", StringComparison.Ordinal) ? $"等待条件无法判定：{why}" : $"等待条件超时：{why}", null);
             }
             case "condition":
             {
-                var (value, why) = commands.TryEvaluate(step.Expression!);
+                var (value, why) = commands.TryEvaluate(step.Expression!, allowSimulated);
                 if (value is null) return (false, $"条件无法判定：{why}", null);
                 return value.Value ? (true, $"条件成立 → {step.Then}", step.Then) : (true, $"条件不成立 → {step.Else ?? Fallthrough(ctx, i) ?? "结束"}", step.Else ?? Fallthrough(ctx, i));
             }

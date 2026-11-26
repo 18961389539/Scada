@@ -23,7 +23,7 @@ public static class AlarmEndpoints
     {
         x.Id, x.TagId, x.DeviceId, x.GatewayId, x.RuleId, x.Level, x.Category, x.Consequence, x.ResponseTimeSec,
         x.Value, x.StartTs, x.EndTs, x.EndReason, x.AckUser, x.AckTs, x.Message, x.MessageEn,
-        x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering, x.FirstOut, x.FirstUp,
+        x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering, x.FirstOut, x.FirstUp, x.Simulated,
         state = AlarmStates.Of(x),
         areas = Areas(access, x)
     };

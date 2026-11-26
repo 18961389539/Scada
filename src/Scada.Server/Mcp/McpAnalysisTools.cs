@@ -27,7 +27,7 @@ public sealed class McpAnalysisTools(
     McpQueryBudget queryBudget)
 {
     [McpServerTool(Name = "analyze_alarms", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Read alarm counts, priority distribution, frequent sources and hourly/daily trend for [from,to), at most 31 days. Optional area/device filters. Truncated and rollup flags must be reported with conclusions; no thresholds or alarms are modified.")]
+    [Description("Read official alarm counts, priority distribution, frequent sources and hourly/daily trend for [from,to), at most 31 days. Simulated or drill alarms are excluded from these official KPI. Optional area/device filters. Truncated and rollup flags must be reported with conclusions; no thresholds or alarms are modified. Use query_alarms to view simulated alarms, which are flagged.")]
     public async Task<McpAlarmAnalysis> AnalyzeAlarms(long from, long to, CancellationToken cancellationToken,
         int? areaId = null, int? deviceId = null, int top = 10)
     {

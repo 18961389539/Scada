@@ -232,7 +232,7 @@ public sealed class ExternalTcpHost(
                     EnsureAuth(session);
                     EnsureScope(session, ExternalApiScope.ReadTags);
                     var ids = msg.TagIds is { Length: > 0 } ? FilterTags(session, msg.TagIds) : session.Subscriptions.ToArray();
-                    var values = ids.Select(Fresh).OfType<TagValue>().Select(v => new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts });
+                    var values = ids.Select(Fresh).OfType<TagValue>().Select(v => new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts, simulated = v.Simulated });
                     await SendAsync(session, new TcpMessage { Type = "snapshot", Id = msg.Id, Data = values }, ct);
                     break;
                 case "write":
@@ -360,7 +360,7 @@ public sealed class ExternalTcpHost(
                         var key = (session.Id, tagId);
                         if (last.TryGetValue(key, out var prev) && prev.Value == v.Value && prev.Ts == v.Ts && prev.Text == v.Text) continue;
                         last[key] = (v.Value, v.Ts, v.Text);
-                        updates.Add(new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts });
+                        updates.Add(new { v.TagId, v.Value, text = v.Text, quality = v.Quality.ToString(), v.Ts, simulated = v.Simulated });
                     }
                     if (updates.Count == 0) continue;
                     try { await SendAsync(session, new TcpMessage { Type = "update", Data = updates }, ct); }

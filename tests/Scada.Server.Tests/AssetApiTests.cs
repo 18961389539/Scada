@@ -233,4 +233,37 @@ public sealed class AssetApiTests : IClassFixture<AuthorizationTests.Site>
         // already retired: further edits do not require a reason
         Assert.True((await Put("Retired", null)).IsSuccessStatusCode);
     }
+
+    [Fact]
+    public async Task CreatingRetiredAssetRequiresReasonAndWritesAudit()
+    {
+        var cfgA = await _site.ClientAsync("cfgA");
+        object Body(string code, string? reason) => new
+        {
+            code,
+            name = "测试资产-" + code,
+            category = "泵",
+            model = "M-100",
+            manufacturer = "测试厂商",
+            serialNumber = "SN-" + code,
+            location = "A区",
+            areaId = _site.AreaA,
+            deviceId = (int?)null,
+            status = "Retired",
+            commissionedTs = (long?)null,
+            warrantyUntilTs = (long?)null,
+            description = "",
+            enabled = true,
+            statusReason = reason
+        };
+        Assert.Equal(HttpStatusCode.BadRequest, (await cfgA.PostAsJsonAsync("/api/assets", Body(Unique("AST-CR-"), null))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await cfgA.PostAsJsonAsync("/api/assets", Body(Unique("AST-CR-"), "  "))).StatusCode);
+        var code = Unique("AST-CR-");
+        var created = await Json(await cfgA.PostAsJsonAsync("/api/assets", Body(code, "新建即报废，归档处理")));
+        Assert.Equal("Retired", created.GetProperty("status").GetString());
+        var id = created.GetProperty("id").GetInt32();
+        await using var runtime = await _site.Services.GetRequiredService<IDbContextFactory<RuntimeDbContext>>().CreateDbContextAsync();
+        var logs = await runtime.OperationLogs.AsNoTracking().Where(x => x.TargetType == "Asset" && x.TargetId == id.ToString()).ToListAsync();
+        Assert.Contains(logs, x => x.Action.Contains("资产报废") && x.Action.Contains("新建即报废，归档处理"));
+    }
 }

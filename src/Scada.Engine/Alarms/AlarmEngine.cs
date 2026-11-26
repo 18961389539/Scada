@@ -278,7 +278,8 @@ public sealed class AlarmEngine : BackgroundService
             StartTs = transition.Value.Ts,
             EndTs = end ? transition.Value.Ts : null,
             Message = AlarmMessageBuilder.Build(tag, device, rule, transition.Value.Value, transition.PreviousValue, transition.Value.Quality),
-            MessageEn = AlarmMessageBuilder.BuildEn(tag, device, rule, transition.Value.Value, transition.PreviousValue, transition.Value.Quality)
+            MessageEn = AlarmMessageBuilder.BuildEn(tag, device, rule, transition.Value.Value, transition.PreviousValue, transition.Value.Quality),
+            Simulated = transition.Value.Simulated || device is { SimulationEnabled: true }
         };
     }
 

@@ -255,7 +255,7 @@ public sealed class ExternalOpcUaHost(
                 state.UserAccessLevel = state.AccessLevel;
                 var initial = Fresh(cache, config, tag.Id);
                 state.Value = isText ? new Variant(initial?.Text ?? "") : new Variant(initial?.Value ?? 0d);
-                state.StatusCode = ToStatus(initial?.Quality);
+                state.StatusCode = ToStatus(initial?.Quality, initial?.Simulated == true);
                 if (initial is not null) state.Timestamp = ToTimestamp(initial);
 
                 var tagId = tag.Id;
@@ -271,7 +271,7 @@ public sealed class ExternalOpcUaHost(
                     }
                     var v = Fresh(cache, config, tagId);
                     return ValueTask.FromResult(new AttributeReadResult(ServiceResult.Good,
-                        v is null ? Variant.Null : isText ? new Variant(v.Text ?? "") : new Variant(v.Value), ToStatus(v?.Quality),
+                        v is null ? Variant.Null : isText ? new Variant(v.Text ?? "") : new Variant(v.Value), ToStatus(v?.Quality, v?.Simulated == true),
                         v is null ? DateTimeUtc.MinValue : ToTimestamp(v)));
                 });
 
@@ -349,7 +349,7 @@ public sealed class ExternalOpcUaHost(
                         var v = Fresh(cache, config, tagId);
                         if (v is null) continue;
                         state.Value = v.Text is not null ? new Variant(v.Text) : new Variant(v.Value);
-                        state.StatusCode = ToStatus(v.Quality);
+                        state.StatusCode = ToStatus(v.Quality, v.Simulated);
                         state.Timestamp = ToTimestamp(v);
                         try { state.ClearChangeMasks(ctx, false); } catch { }
                     }
@@ -410,13 +410,18 @@ public sealed class ExternalOpcUaHost(
         return TagFreshness.Apply(v, ScadaTime.NowMs(), tag, device);
     }
 
-    private static StatusCode ToStatus(TagQuality? quality) => quality switch
+    // 仿真点不映射为 Good，与从站默认按非 Good（Uncertain）上送仿真值的口径对齐。REST 质量仍保持原值并另附 Simulated。
+    private static StatusCode ToStatus(TagQuality? quality, bool simulated = false)
     {
-        TagQuality.Good => UaStatus.Good,
-        TagQuality.Uncertain => UaStatus.Uncertain,
-        null => UaStatus.BadNoData,
-        _ => UaStatus.Bad
-    };
+        if (simulated && quality is TagQuality.Good or null) return UaStatus.Uncertain;
+        return quality switch
+        {
+            TagQuality.Good => UaStatus.Good,
+            TagQuality.Uncertain => UaStatus.Uncertain,
+            null => UaStatus.BadNoData,
+            _ => UaStatus.Bad
+        };
+    }
 
     private static DateTimeUtc ToTimestamp(TagValue value) =>
         DateTimeUtc.From(DateTimeOffset.FromUnixTimeMilliseconds(value.SourceTs ?? value.Ts));

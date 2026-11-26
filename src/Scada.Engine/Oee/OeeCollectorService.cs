@@ -273,7 +273,7 @@ public sealed class OeeCollectorService(
         var existing = (await runtime.DowntimeEvents.AsNoTracking().Where(x => x.Source == "alarm" && x.AlarmEventId != null && x.StartTs >= from && x.StartTs < to)
             .Select(x => x.AlarmEventId!.Value).ToListAsync(ct)).ToHashSet();
         var alarms = await runtime.AlarmEvents.AsNoTracking()
-            .Where(x => x.TagId != null && tagIds.Contains(x.TagId.Value) && x.StartTs >= from && x.StartTs < to && x.Level >= minLevel)
+            .Where(x => x.TagId != null && tagIds.Contains(x.TagId.Value) && x.StartTs >= from && x.StartTs < to && x.Level >= minLevel && !x.Simulated)
             .OrderBy(x => x.StartTs).Take(5000).ToListAsync(ct);
         var n = 0;
         foreach (var a in alarms)

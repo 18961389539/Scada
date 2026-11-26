@@ -57,7 +57,15 @@ public sealed class ExternalTcpTests : IClassFixture<ExternalTcpTests.TcpSite>, 
         await WriteMessageAsync(stream, new { type = "poll", id = "3" });
         var snap = await ReadMessageAsync(stream);
         Assert.Equal("snapshot", snap.GetProperty("type").GetString());
-        Assert.Contains(snap.GetProperty("data").EnumerateArray(), x => x.GetProperty("tagId").GetInt32() == _site.TagA);
+        var official = Assert.Single(snap.GetProperty("data").EnumerateArray(), x => x.GetProperty("tagId").GetInt32() == _site.TagA);
+        Assert.False(official.GetProperty("simulated").GetBoolean());
+        cache.Set(new TagValue(_site.TagA, 3.14, Scada.Core.Enums.TagQuality.Good, ScadaTime.NowMs(), Simulated: true));
+        await WriteMessageAsync(stream, new { type = "poll", id = "3b" });
+        var simSnap = await ReadMessageAsync(stream);
+        var simulated = Assert.Single(simSnap.GetProperty("data").EnumerateArray(), x => x.GetProperty("tagId").GetInt32() == _site.TagA);
+        Assert.True(simulated.GetProperty("simulated").GetBoolean());
+        Assert.Equal("Good", simulated.GetProperty("quality").GetString());
+        cache.Set(new TagValue(_site.TagA, 3.14, Scada.Core.Enums.TagQuality.Good, ScadaTime.NowMs()));
 
         await WriteMessageAsync(stream, new { type = "write", tagId = _site.TagA, value = 1, confirmed = true, requestId = Guid.NewGuid(), id = "4" });
         var write = await ReadUntilTypeAsync(stream, "writeResult");

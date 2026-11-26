@@ -10,7 +10,7 @@ public sealed record AlarmSample(
     int Id, int? RuleId, int? TagId, int? DeviceId, int? GatewayId, AlarmLevel Level,
     long StartTs, long? EndTs, long? AckTs, string? AckUser,
     bool Shelved, bool Suppressed, bool Chattering, string Message,
-    AlarmCategory Category = AlarmCategory.Process)
+    AlarmCategory Category = AlarmCategory.Process, bool Simulated = false)
 {
     // 报警源键：同一规则（或无规则时同一测点/设备/网关/消息）视为同一条报警，用于坏分子统计与预聚合。
     public string Source => SourceOf(RuleId, TagId, DeviceId, GatewayId, Message);
@@ -20,7 +20,7 @@ public sealed record AlarmSample(
         ruleId is int r ? $"r{r}" : tagId is int t ? $"t{t}" : deviceId is int d ? $"d{d}" : gatewayId is int g ? $"g{g}"
         : "m:" + (message.Length > 100 ? message[..100] : message);
 
-    public static AlarmSample From(AlarmEvent e) => new(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category);
+    public static AlarmSample From(AlarmEvent e) => new(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category, e.Simulated);
 }
 
 public sealed record ShelveInterval(int RuleId, long StartTs, long EndTs);

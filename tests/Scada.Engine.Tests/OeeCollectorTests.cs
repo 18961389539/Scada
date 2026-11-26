@@ -113,6 +113,28 @@ public class OeeCollectorTests
         Assert.Equal(15, runtime.OeeRollups.Sum(x => x.GoodCount));
     }
 
+    [Fact]
+    public async Task ImportAlarmCandidatesSkipsSimulatedAlarms()
+    {
+        await using var fx = await Fixture.CreateAsync();
+        const long from = 3_000_000_000L;
+        const long to = from + 60_000;
+        await using (var runtime = fx.Runtime.CreateDbContext())
+        {
+            runtime.AlarmEvents.Add(new AlarmEvent { TagId = fx.StateTag, Level = AlarmLevel.Critical, Message = "现场故障", StartTs = from + 1, EndTs = from + 2 });
+            runtime.AlarmEvents.Add(new AlarmEvent { TagId = fx.StateTag, Level = AlarmLevel.Critical, Message = "演练故障", StartTs = from + 3, EndTs = from + 4, Simulated = true });
+            await runtime.SaveChangesAsync();
+        }
+        var imported = await fx.Collector.ImportAlarmCandidatesAsync(from, to, default);
+        Assert.Equal(1, imported);
+        await using (var runtime = fx.Runtime.CreateDbContext())
+        {
+            var ev = Assert.Single(runtime.DowntimeEvents);
+            Assert.Equal("现场故障", ev.Note);
+            Assert.Equal("alarm", ev.Source);
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _configConnection;

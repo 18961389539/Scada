@@ -73,6 +73,9 @@ public static class AssetEndpoints
                 if (request.AreaId is null) areaId = device.AreaId;
             }
             if (await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Configure, $"创建设备资产：{request.Name}") is { } denied) return denied;
+            var retiring = request.Status == AssetStatus.Retired;
+            var retireReason = request.StatusReason?.Trim();
+            if (retiring && string.IsNullOrEmpty(retireReason)) return EndpointHelpers.BadRequest("资产报废必须填写原因");
             var asset = new Asset
             {
                 Code = request.Code?.Trim() ?? "", Name = request.Name?.Trim() ?? "", Category = request.Category?.Trim() ?? "",
@@ -88,6 +91,11 @@ public static class AssetEndpoints
             db.Assets.Add(asset);
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("资产编号已存在"); }
+            if (retiring)
+            {
+                runtime.OperationLogs.Add(Audit.Change(http, $"资产报废：{asset.Code}（{retireReason}）", "Asset", asset.Id, null, asset));
+                await runtime.SaveChangesAsync(ct);
+            }
             return Results.Created($"/api/assets/{asset.Id}", asset);
         }).RequireAuthorization(AccessPolicies.Configure);
 

@@ -32,6 +32,8 @@ public class AlarmEvent
     public bool FirstOut { get; set; }
     // 设备级首出：同一设备本次报警片段中最早触发的一条，不受洪水窗口限制，用于定位根因。
     public bool FirstUp { get; set; }
+    // 演练/仿真触发的报警：界面和 MCP 可见，官方 KPI 与 OEE 报警导入默认排除。
+    public bool Simulated { get; set; }
 }
 
 // ISA-18.2 报警状态：活动未确认/活动已确认/恢复未确认/正常（恢复且已确认）。

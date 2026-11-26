@@ -111,6 +111,9 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<bool>("Shelved")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("Simulated")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("StartTs")
                         .HasColumnType("INTEGER");
 

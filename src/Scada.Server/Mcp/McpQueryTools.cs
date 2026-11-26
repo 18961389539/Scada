@@ -144,7 +144,7 @@ public sealed class McpQueryTools(
     }
 
     [McpServerTool(Name = "query_alarms", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Query alarms across all areas with paging, at most 100 per page. activeOnly=true includes all currently active alarms regardless of age. For history set activeOnly=false and supply a time range of at most 31 days. No acknowledgement or shelving is performed.")]
+    [Description("Query alarms across all areas with paging, at most 100 per page. Each item includes a simulated flag: true means the alarm was raised from a drill or simulated value and remains viewable, but official analyze_alarms KPI exclude it. activeOnly=true includes all currently active alarms regardless of age. For history set activeOnly=false and supply a time range of at most 31 days. No acknowledgement or shelving is performed.")]
     public async Task<McpAlarmPage> QueryAlarms(
         CancellationToken cancellationToken,
         [Description("True for currently active alarms; false for alarm history.")] bool activeOnly = true,

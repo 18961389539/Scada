@@ -166,6 +166,9 @@
               <el-tooltip v-if="row.firstOut" :content="$t('alarmsView.firstOutHint')" placement="top">
                 <el-tag size="small" effect="dark" type="danger" data-test="first-out">{{ $t('alarmsView.firstOut') }}</el-tag>
               </el-tooltip>
+              <el-tooltip v-if="row.simulated" :content="$t('alarmsView.simulatedHint')" placement="top">
+                <el-tag size="small" effect="plain" type="warning" data-test="alarm-simulated">{{ $t('alarmsView.simulated') }}</el-tag>
+              </el-tooltip>
               <!-- 暂挂/抑制/抖动合并为一枚标志：三种状态同时出现时不再把行高撑成三行 -->
               <el-tooltip
                 v-if="row.shelved || row.suppressed || row.chattering"
@@ -238,6 +241,7 @@
             <el-tag :class="{ 'tag-quiet': !alarmStateType(row.state) }" :type="alarmStateType(row.state)" size="small" effect="plain">{{ alarmStateLabels[row.state ?? 'Normal'] }}</el-tag>
             <el-tag v-if="row.shelved" size="small" effect="plain" type="info">{{ $t('alarmsView.k06d561') }}</el-tag>
             <el-tag v-if="row.suppressed" size="small" effect="plain" type="info">{{ $t('alarmsView.kaa2e2b') }}</el-tag>
+            <el-tag v-if="row.simulated" size="small" effect="plain" type="warning">{{ $t('alarmsView.simulated') }}</el-tag>
             <span class="alarm-card-duration tiny muted">{{ duration(row) }}</span>
           </div>
           <p class="alarm-card-message">{{ alarmMessage(row) }}</p>

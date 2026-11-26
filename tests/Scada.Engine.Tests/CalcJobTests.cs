@@ -297,6 +297,67 @@ public class CalcJobTests
     private static CalcJobEngine Engine(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtime, IRealtimeCache cache, IRealtimeBus bus, ICalcTagWriter writer) =>
         new(factory, new Snapshot(), cache, bus, writer, Options.Create(new ScadaSettings { ShiftTimeZone = "UTC", CalcStatePersistSec = 3600 }), NullLogger<CalcJobEngine>.Instance, runtime);
 
+    [Fact]
+    public void SimulationIncrementsStayInPeriodAndDoNotBridgeIntoOfficialTotals()
+    {
+        var pulse = new CalcJob { Kind = CalcJobKind.Accumulator, Mode = AccumulatorMode.Pulse, Factor = 1 };
+        var pulseState = new JobRuntimeState();
+        CalcJobMath.Accumulate(pulse, pulseState, new JobSample(10, true, T0, Simulated: false), T0);
+        CalcJobMath.Accumulate(pulse, pulseState, new JobSample(20, true, T0, Simulated: false), T0);
+        Assert.Equal(10, pulseState.Get("total"));
+        Assert.Equal(10, pulseState.Get("period"));
+        CalcJobMath.Accumulate(pulse, pulseState, new JobSample(50, true, T0, Simulated: true), T0); // 仿真过渡不按上一正式值差分
+        Assert.Equal(10, pulseState.Get("total"));
+        Assert.Equal(10, pulseState.Get("period"));
+        CalcJobMath.Accumulate(pulse, pulseState, new JobSample(80, true, T0, Simulated: true), T0);
+        Assert.Equal(10, pulseState.Get("total"));
+        Assert.Equal(40, pulseState.Get("period"));
+        CalcJobMath.Accumulate(pulse, pulseState, new JobSample(100, true, T0, Simulated: false), T0); // 回到正式只建基准
+        Assert.Equal(10, pulseState.Get("total"));
+        Assert.Equal(40, pulseState.Get("period"));
+        CalcJobMath.Accumulate(pulse, pulseState, new JobSample(115, true, T0, Simulated: false), T0);
+        Assert.Equal(25, pulseState.Get("total"));
+        Assert.Equal(55, pulseState.Get("period"));
+
+        var flow = new CalcJob { Kind = CalcJobKind.Accumulator, Mode = AccumulatorMode.Flow, Factor = 1, BadQuality = BadQualityPolicy.Hold, MaxGapSec = 10 };
+        var flowState = new JobRuntimeState();
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(100, true, T0), T0);
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(100, true, T0 + 1000), T0 + 1000);
+        Assert.Equal(100, flowState.Get("total"), 6);
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(100, true, T0 + 2000, Simulated: true), T0 + 2000);
+        Assert.Equal(100, flowState.Get("total"), 6); // 不用上一笔正式值与仿真值做梯形积分
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(100, true, T0 + 3000, Simulated: true), T0 + 3000);
+        Assert.Equal(100, flowState.Get("total"), 6);
+        Assert.Equal(200, flowState.Get("period"), 6);
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(0, false, T0 + 4000), T0 + 4000); // 正式坏质量不得 Hold 仿真好值
+        Assert.Equal(100, flowState.Get("total"), 6);
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(100, true, T0 + 5000), T0 + 5000);
+        Assert.Equal(100, flowState.Get("total"), 6);
+        CalcJobMath.Accumulate(flow, flowState, new JobSample(100, true, T0 + 6000), T0 + 6000);
+        Assert.Equal(200, flowState.Get("total"), 6);
+        Assert.Equal(300, flowState.Get("period"), 6);
+
+        var hours = new CalcJob { Kind = CalcJobKind.RunHours, RunThreshold = 0.5, MaxGapSec = 3600, MaintenanceHours = 2 };
+        var hourState = new JobRuntimeState();
+        void At(JobRuntimeState state, double hour, double value, bool simulated = false) =>
+            CalcJobMath.RunHours(hours, state, new JobSample(value, true, T0 + (long)(hour * 3_600_000), simulated), T0 + (long)(hour * 3_600_000));
+        At(hourState, 0, 1);
+        At(hourState, 1, 1);
+        Assert.Equal(1, hourState.Get("hours"), 6);
+        At(hourState, 2, 1, simulated: true); // 仿真过渡不把上一正式运行区间计入官方小时
+        Assert.Equal(1, hourState.Get("hours"), 6);
+        At(hourState, 3, 1, simulated: true);
+        Assert.Equal(1, hourState.Get("hours"), 6);
+        Assert.Equal(2, hourState.Get("periodHours"), 6);
+        Assert.Equal(0, hourState.Get("maintenanceDue")); // 仿真小时不计入维护到期
+        At(hourState, 4, 1); // 回到正式再建立运行基准
+        Assert.Equal(1, hourState.Get("hours"), 6);
+        At(hourState, 5, 1);
+        Assert.Equal(2, hourState.Get("hours"), 6);
+        Assert.Equal(0, hourState.Get("starts"));
+        Assert.Equal(1, hourState.Get("maintenanceDue"));
+    }
+
     private sealed class FakeWriter : ICalcTagWriter
     {
         public string? Deny { get; set; }

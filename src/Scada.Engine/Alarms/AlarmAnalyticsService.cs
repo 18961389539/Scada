@@ -58,17 +58,18 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
     public long FloorHour(long ts) => ZoneTime.FloorHour(ts, Zone);
 
     private static IQueryable<AlarmSample> Project(IQueryable<AlarmEvent> q) =>
-        q.Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category));
+        q.Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category, e.Simulated));
 
     // 开始于 [from,to) 的报警 + 开始更早、在 from 时仍活动的报警（驻留/抑制时长需要）。
-    public async Task<(List<AlarmSample> Samples, bool Truncated)> LoadSamplesAsync(long from, long to, Func<AlarmSample, bool> include, CancellationToken ct)
+    public async Task<(List<AlarmSample> Samples, bool Truncated)> LoadSamplesAsync(long from, long to, Func<AlarmSample, bool> include, CancellationToken ct, bool includeSimulated = false)
     {
         var max = Math.Max(1000, _settings.AlarmAnalyticsMaxRows);
         await using var db = await runtime.CreateDbContextAsync(ct);
-        var inWindow = await Project(db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).OrderByDescending(x => x.StartTs)).Take(max + 1).ToListAsync(ct);
+        IQueryable<AlarmEvent> Official(IQueryable<AlarmEvent> q) => includeSimulated ? q : q.Where(x => !x.Simulated);
+        var inWindow = await Project(Official(db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to)).OrderByDescending(x => x.StartTs)).Take(max + 1).ToListAsync(ct);
         var truncated = inWindow.Count > max;
         if (truncated) inWindow.RemoveAt(inWindow.Count - 1);
-        var carried = await Project(db.AlarmEvents.AsNoTracking().Where(x => x.StartTs < from && (x.EndTs == null || x.EndTs > from))).Take(50_000).ToListAsync(ct);
+        var carried = await Project(Official(db.AlarmEvents.AsNoTracking().Where(x => x.StartTs < from && (x.EndTs == null || x.EndTs > from)))).Take(50_000).ToListAsync(ct);
         var all = inWindow.Concat(carried).Where(include).OrderBy(x => x.StartTs).ThenBy(x => x.Id).ToList();
         return (all, truncated);
     }
@@ -312,8 +313,8 @@ public sealed class AlarmRollupService(IServiceProvider services, IDbContextFact
             ct.ThrowIfCancellationRequested();
             var dayEnd = Math.Min(analytics.NextDay(day), closed);
             var hourFrom = Math.Max(day, analytics.FloorHour(start));
-            var samples = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= day && x.StartTs < dayEnd)
-                .Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category))
+            var samples = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= day && x.StartTs < dayEnd && !x.Simulated)
+                .Select(e => new AlarmSample(e.Id, e.RuleId, e.TagId, e.DeviceId, e.GatewayId, e.Level, e.StartTs, e.EndTs, e.AckTs, e.AckUser, e.Shelved, e.Suppressed, e.Chattering, e.Message, e.Category, e.Simulated))
                 .ToListAsync(ct);
             // 超出小时保留期的日子只生成日行（回补很久以前的数据时避免写入随即被清理的小时行）。
             var hourly = dayEnd <= hourCut ? [] : AlarmAnalytics.Rollup(samples, hourFrom, dayEnd, AlarmRollup.Hour, analytics.FloorHour, th);

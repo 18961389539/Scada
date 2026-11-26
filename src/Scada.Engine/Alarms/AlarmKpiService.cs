@@ -48,7 +48,7 @@ public sealed class AlarmKpiService(IDbContextFactory<RuntimeDbContext> factory,
     {
         if (to <= from) to = from + 1;
         await using var db = await factory.CreateDbContextAsync(ct);
-        var events = (await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to)
+        var events = (await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to && !x.Simulated)
             .OrderBy(x => x.StartTs).Take(MaxRows).ToListAsync(ct)).Where(visible).ToList();
         var hours = (to - from) / 3_600_000d;
         var annunciated = events.Where(AlarmStates.Annunciated).ToList();
@@ -69,7 +69,7 @@ public sealed class AlarmKpiService(IDbContextFactory<RuntimeDbContext> factory,
         // 长期驻留：当前仍活动且持续超过阈值的报警，不受统计时间窗限制。
         var now = ScadaTime.NowMs();
         var standingMs = (long)(Math.Max(standingHours ?? _settings.AlarmStandingHours, 0.01) * 3_600_000);
-        var standing = (await db.AlarmEvents.AsNoTracking().Where(x => x.EndTs == null && x.StartTs <= now - standingMs)
+        var standing = (await db.AlarmEvents.AsNoTracking().Where(x => x.EndTs == null && !x.Simulated && x.StartTs <= now - standingMs)
                 .OrderBy(x => x.StartTs).Take(5000).ToListAsync(ct))
             .Where(visible)
             .Select(x => new AlarmStandingItem(x.Id, x.RuleId, x.TagId, x.Message, x.Level.ToString(), x.StartTs, Math.Round((now - x.StartTs) / 3_600_000d, 2), x.AckTs is not null))

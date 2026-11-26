@@ -198,7 +198,7 @@ public sealed class ControlCommandService
                 if (current is not double now) refusals.Add("当前值无效，无法校验变化率");
                 else if (Math.Abs(value - now) > step + 1e-9) refusals.Add($"单次变化 {Fmt(Math.Abs(value - now))} 超过限制 {Fmt(step)}（当前 {Fmt(now)}）");
             }
-            if (!string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression) is var (ok, why) && !ok)
+            if (!string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression, AllowsSimulatedConditions(tag.DeviceId)) is var (ok, why) && !ok)
                 refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
         }
         return new ControlCheck(tag.Id, tag.Name, current, refusals, point?.RequireConfirm ?? _confirmByDefault, point?.DualApproval ?? false,
@@ -249,7 +249,7 @@ public sealed class ControlCommandService
             var bytes = System.Text.Encoding.UTF8.GetByteCount(text);
             if (bytes > tag.TextLength) refusals.Add($"文本为 {bytes} 字节，超过测点长度 {tag.TextLength} 字节");
         }
-        if (point is not null && !string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression) is var (ok, why) && !ok)
+        if (point is not null && !string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression, AllowsSimulatedConditions(tag.DeviceId)) is var (ok, why) && !ok)
             refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
         return new ControlCheck(tag.Id, tag.Name, null, refusals, point?.RequireConfirm ?? _confirmByDefault, point?.DualApproval ?? false,
             null, null, null, point?.FeedbackExpression, mode, lockoutTexts, currentQuality, qualityReason);
@@ -352,7 +352,7 @@ public sealed class ControlCommandService
             try
             {
                 var timeoutMs = await FeedbackTimeoutAsync(tag.Id, ct);
-                var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(timeoutMs), ct);
+                var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(timeoutMs), ct, device.SimulationEnabled);
                 if (!ok) result = result with { Success = false, Outcome = GatewayCommandOutcome.Unknown, Message = $"写入及回读成功，但独立反馈超时未到位：{why}" };
                 else result = result with { Message = result.Message + "，反馈到位" };
             }
@@ -425,7 +425,7 @@ public sealed class ControlCommandService
             try
             {
                 var timeoutMs = await FeedbackTimeoutAsync(tag.Id, ct);
-                var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(timeoutMs), ct);
+                var (ok, why) = await WaitAsync(check.Feedback!, TimeSpan.FromMilliseconds(timeoutMs), ct, device.SimulationEnabled);
                 if (!ok) result = result with { Success = false, Outcome = GatewayCommandOutcome.Unknown, Message = $"写入及回读成功，但独立反馈超时未到位：{why}" };
                 else result = result with { Message = result.Message + "，反馈到位" };
             }
@@ -455,12 +455,12 @@ public sealed class ControlCommandService
     }
 
     // 等待条件为真。表达式为假时继续等；引用测点质量无效或结果非有限值时立即按无法判定失败，不再空等到超时。
-    public async Task<(bool Ok, string Why)> WaitAsync(string expression, TimeSpan timeout, CancellationToken ct)
+    public async Task<(bool Ok, string Why)> WaitAsync(string expression, TimeSpan timeout, CancellationToken ct, bool allowSimulated = false)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (true)
         {
-            var (value, why) = TryEvaluate(expression);
+            var (value, why) = TryEvaluate(expression, allowSimulated);
             if (value is null) return (false, $"无法判定：{why}");
             if (value.Value) return (true, "");
             if (DateTime.UtcNow >= deadline) return (false, $"{why}，等待 {timeout.TotalMilliseconds:0} 毫秒超时");
@@ -469,38 +469,67 @@ public sealed class ControlCommandService
     }
 
     // 用实时值计算条件表达式；引用测点无有效值视为不满足（许可条件等同步判定仍用此口径）。
-    public (bool Ok, string Why) Evaluate(string expression)
+    public (bool Ok, string Why) Evaluate(string expression, bool allowSimulated = false)
     {
         string? missing = null;
         try
         {
             var compiled = TagExpression.Compile(expression);
-            var value = compiled.Evaluate(id =>
-            {
-                if (_cache.Get(id) is { Quality: TagQuality.Good } v) return v.Value;
-                missing ??= $"条件引用的测点 #{id} 无有效值"; return double.NaN;
-            });
-            return value != 0 ? (true, "") : (false, $"{expression} 不成立");
+            var value = compiled.Evaluate(id => ReadConditionInput(id, allowSimulated, ref missing));
+            return value != 0 && missing is null ? (true, "") : (false, missing ?? $"{expression} 不成立");
         }
         catch (TagExpressionException ex) { return (false, missing ?? ex.Message); }
     }
 
-    // 条件分支用：区分“不成立”与“无法判定”（引用测点无有效值或表达式错误时返回 null）。
-    public (bool? Value, string Why) TryEvaluate(string expression)
+    // 条件分支用：区分“不成立”与“无法判定”（引用测点无有效值、为仿真值或表达式错误时返回 null）。
+    public (bool? Value, string Why) TryEvaluate(string expression, bool allowSimulated = false)
     {
         string? missing = null;
         try
         {
             var compiled = TagExpression.Compile(expression);
-            var value = compiled.Evaluate(id =>
-            {
-                if (_cache.Get(id) is { Quality: TagQuality.Good } v) return v.Value;
-                missing ??= $"条件引用的测点 #{id} 无有效值"; return double.NaN;
-            });
+            var value = compiled.Evaluate(id => ReadConditionInput(id, allowSimulated, ref missing));
             if (missing is not null || double.IsNaN(value)) return (null, missing ?? $"{expression} 结果无效");
             return (value != 0, value != 0 ? "" : $"{expression} 不成立");
         }
         catch (TagExpressionException ex) { return (null, missing ?? ex.Message); }
+    }
+
+    // 仿真输入视为无法判定；仅当相关目标设备本身也在仿真时才允许用仿真条件继续演练。
+    public static string? SimulatedConditionReason(int tagId, bool simulated, bool allowSimulated) =>
+        simulated && !allowSimulated ? $"条件引用的测点 #{tagId} 为仿真值，无法判定" : null;
+
+    public bool AllowsSimulatedConditions(int? deviceId) =>
+        deviceId is int id && _config.TryGetDevice(id, out var device) && device.SimulationEnabled;
+
+    public bool AllowsSimulatedConditions(IEnumerable<int> writeTagIds)
+    {
+        var any = false;
+        foreach (var tagId in writeTagIds)
+        {
+            any = true;
+            if (!_config.TryGetTag(tagId, out var tag) || !AllowsSimulatedConditions(tag.DeviceId)) return false;
+        }
+        return any;
+    }
+
+    public static bool IsSimulatedInput(TagValue? cached, Device? device) =>
+        cached is { Simulated: true } || device is { SimulationEnabled: true };
+
+    private double ReadConditionInput(int id, bool allowSimulated, ref string? missing)
+    {
+        var cached = _cache.Get(id);
+        Device? device = null;
+        if (_config.TryGetTag(id, out var tag) && tag.DeviceId is int deviceId)
+            _config.TryGetDevice(deviceId, out device);
+        if (cached is { Quality: TagQuality.Good } v)
+        {
+            if (SimulatedConditionReason(id, IsSimulatedInput(v, device), allowSimulated) is string reason)
+            { missing ??= reason; return double.NaN; }
+            return v.Value;
+        }
+        missing ??= $"条件引用的测点 #{id} 无有效值";
+        return double.NaN;
     }
 
     public static string? ValidateExpression(string? expression, Func<int, bool> tagExists)

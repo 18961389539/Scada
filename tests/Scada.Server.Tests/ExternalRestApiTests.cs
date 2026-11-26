@@ -58,6 +58,12 @@ public sealed class ExternalRestApiTests : IClassFixture<AuthorizationTests.Site
         var values = await Json(await client.PostAsJsonAsync("/api/v1/realtime/batch", new { tagIds = new[] { _site.TagA, _site.TagB } }));
         Assert.Single(values.EnumerateArray());
         Assert.Equal(_site.TagA, values[0].GetProperty("tagId").GetInt32());
+        Assert.False(values[0].GetProperty("simulated").GetBoolean());
+        cache.Set(new TagValue(_site.TagA, 12.5, Scada.Core.Enums.TagQuality.Good, ScadaTime.NowMs(), Simulated: true));
+        var simulated = await Json(await client.PostAsJsonAsync("/api/v1/realtime/batch", new { tagIds = new[] { _site.TagA } }));
+        Assert.True(simulated[0].GetProperty("simulated").GetBoolean());
+        Assert.Equal("Good", simulated[0].GetProperty("quality").GetString());
+        cache.Set(new TagValue(_site.TagA, 12.5, Scada.Core.Enums.TagQuality.Good, ScadaTime.NowMs()));
 
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync($"/api/v1/history?tagIds={_site.TagA}")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync($"/api/v1/history?tagIds={_site.TagB}")).StatusCode);

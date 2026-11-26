@@ -381,6 +381,8 @@
     "firstOutHint": "该洪水片段中最早的一条报警，通常是根因",
     "firstUp": "设备首出",
     "firstUpHint": "同一设备本次报警片段中最早触发的一条，用于定位根因",
+    "simulated": "仿真",
+    "simulatedHint": "由演练或仿真值触发，仍可查看；官方报警统计与 OEE 报警导入默认排除",
     "floodAreaExit": "{0}回落到 {1} 条以下自动解除",
     "floodAreaUnnamed": "未分区",
     "floodAreaWindow": "{0} {1} {2} 条（进入阈值 {3}）",

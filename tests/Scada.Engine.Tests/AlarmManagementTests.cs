@@ -431,6 +431,27 @@ public class AlarmManagementTests
     }
 
     [Fact]
+    public async Task OfficialKpiExcludesSimulatedAlarmsButTheyRemainStored()
+    {
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        const long from = 2_000_000_000L; var to = from + 3_600_000L;
+        await using (var db = runtime.CreateDbContext())
+        {
+            db.AlarmEvents.Add(new AlarmEvent { RuleId = 1, TagId = 1, Message = "现场", StartTs = from + 1, EndTs = from + 2 });
+            db.AlarmEvents.Add(new AlarmEvent { RuleId = 2, TagId = 1, Message = "演练", StartTs = from + 3, EndTs = from + 4, Simulated = true });
+            db.AlarmEvents.Add(new AlarmEvent { RuleId = 3, TagId = 1, Message = "演练驻留", StartTs = ScadaTime.NowMs() - 30 * 3_600_000L, Simulated = true });
+            await db.SaveChangesAsync();
+        }
+        var kpi = new AlarmKpiService(runtime, Options.Create(new ScadaSettings { AlarmFloodThreshold = 10, AlarmStandingHours = 24 }));
+        var all = await kpi.ComputeAsync(from, to, 10, null, _ => true);
+        Assert.Equal(1, all.Total);
+        Assert.Equal("现场", Assert.Single(all.Top).Message);
+        Assert.Empty(all.Standing);
+        await using (var db = runtime.CreateDbContext())
+            Assert.Equal(3, await db.AlarmEvents.CountAsync());
+    }
+
+    [Fact]
     public async Task ReportEmailGoesThroughOutboxWithVerifiedAttachmentsOnce()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);

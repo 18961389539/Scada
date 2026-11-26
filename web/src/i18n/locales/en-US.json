@@ -381,6 +381,8 @@
     "firstOutHint": "Earliest alarm of this flood episode — usually the root cause",
     "firstUp": "Device first up",
     "firstUpHint": "Earliest alarm raised in this device alarm episode — use it to locate the root cause",
+    "simulated": "Simulated",
+    "simulatedHint": "Raised from a drill or simulated value; still viewable. Official alarm KPI and OEE alarm import exclude it by default",
     "floodAreaExit": "{0} releases below {1}",
     "floodAreaUnnamed": "Unassigned area",
     "floodAreaWindow": "{0}: {2} in the {1} (entry threshold {3})",

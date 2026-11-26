@@ -29,6 +29,11 @@ public sealed class JobRuntimeState
     public long LastFireTs { get; set; }
     public long AlarmCursor { get; set; }
     public bool PeriodIncludesSimulation { get; set; }
+    // 上一笔用于积分/保持/启停的样本是否来自仿真，避免仿真增量在复位后洗入终身官方累计。
+    public bool LastRawSimulated { get; set; }
+    public bool LastValueSimulated { get; set; }
+    public bool LastGoodSimulated { get; set; }
+    public bool LastRunningSimulated { get; set; }
 
     public double Get(string key) => Values.GetValueOrDefault(key);
     public void Add(string key, double delta) => Values[key] = Values.GetValueOrDefault(key) + delta;
@@ -57,15 +62,35 @@ public static class CalcJobMath
         var maxGap = Math.Max(1, job.MaxGapSec) * 1000L;
         if (sample is { Good: true } s && double.IsFinite(s.Value) && now - s.Ts <= maxGap)
         {
-            state.LastGood = s.Value; state.LastGoodTs = now;
+            state.LastGood = s.Value; state.LastGoodTs = now; state.LastGoodSimulated = s.Simulated;
             return s.Value;
         }
         return job.BadQuality switch
         {
-            BadQualityPolicy.Hold => state.LastGoodTs is long t && now - t <= maxGap ? state.LastGood : null,
+            BadQualityPolicy.Hold => CanHold(state, sample, now, maxGap) ? state.LastGood : null,
             BadQualityPolicy.Zero => 0,
             _ => null
         };
+    }
+
+    // 仿真到正式的过渡不用上一笔仿真样本做 Hold；正式到仿真同样不桥接。样本缺失时也不保持仿真值。
+    private static bool CanHold(JobRuntimeState state, JobSample? sample, long now, long maxGap) =>
+        state.LastGoodTs is long t && now - t <= maxGap && state.LastGood is not null
+        && state.LastGoodSimulated == (sample?.Simulated ?? false);
+
+    private static bool CurrentSimulated(CalcJob job, JobRuntimeState state, JobSample? sample)
+    {
+        if (sample is { Good: true } s && double.IsFinite(s.Value)) return s.Simulated;
+        if (job.BadQuality == BadQualityPolicy.Hold) return state.LastGoodSimulated;
+        return sample is { Simulated: true };
+    }
+
+    // 仿真增量只计入周期量，不写入终身官方累计。
+    private static void Credit(JobRuntimeState state, string official, string period, double increment, bool simulated)
+    {
+        if (increment == 0) return;
+        if (!simulated) state.Add(official, increment);
+        state.Add(period, increment);
     }
 
     // 累计器：脉冲计数（处理满量程回绕与复位）或瞬时流量梯形积分。返回本次增量。
@@ -77,7 +102,7 @@ public static class CalcJobMath
             // 计数器在设备里持续累加，坏质量期间不更新基准，恢复后的差值自然补上这段时间。
             if (sample is not { Good: true } s || !double.IsFinite(s.Value)) return 0;
             var raw = s.Value;
-            if (state.LastRaw is double last)
+            if (state.LastRaw is double last && state.LastRawSimulated == s.Simulated)
             {
                 var delta = raw - last;
                 if (delta < 0)
@@ -90,10 +115,12 @@ public static class CalcJobMath
                 if (job.MaxDelta is double limit && delta > limit) { state.LastEvent = $"增量 {delta} 超过上限 {limit}，已丢弃"; delta = 0; }
                 increment = delta * job.Factor;
             }
-            state.LastRaw = raw;
+            state.LastRaw = raw; state.LastRawSimulated = s.Simulated;
+            Credit(state, "total", "period", increment, s.Simulated);
+            return increment;
         }
-        else increment = Integrate(job, state, sample, now, out _);
-        state.Add("total", increment); state.Add("period", increment);
+        increment = Integrate(job, state, sample, now, out _);
+        Credit(state, "total", "period", increment, CurrentSimulated(job, state, sample));
         return increment;
     }
 
@@ -102,8 +129,9 @@ public static class CalcJobMath
     {
         midpoint = now;
         var value = Effective(job, state, sample, now);
+        var simulated = CurrentSimulated(job, state, sample);
         double increment = 0;
-        if (value is double v && state.LastValue is double previous && state.LastTs is long lastTs)
+        if (value is double v && state.LastValue is double previous && state.LastTs is long lastTs && state.LastValueSimulated == simulated)
         {
             var dt = (now - lastTs) / 1000.0;
             if (dt > 0 && dt <= Math.Max(1, job.MaxGapSec))
@@ -113,6 +141,7 @@ public static class CalcJobMath
             }
         }
         state.LastValue = value; state.LastTs = now;
+        if (value is not null) state.LastValueSimulated = simulated;
         return increment;
     }
 
@@ -120,7 +149,8 @@ public static class CalcJobMath
     {
         var increment = Integrate(job, state, sample, now, out var midpoint);
         if (increment <= 0) return 0;
-        state.Add("total", increment); state.Add("period", increment);
+        var simulated = state.LastValueSimulated;
+        Credit(state, "total", "period", increment, simulated);
         state.Add("period_" + Band(tou, TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(midpoint), zone).TimeOfDay), increment);
         return increment;
     }
@@ -129,14 +159,23 @@ public static class CalcJobMath
     public static void RunHours(CalcJob job, JobRuntimeState state, JobSample? sample, long now)
     {
         var value = Effective(job, state, sample, now);
+        var simulated = CurrentSimulated(job, state, sample);
         bool? running = value is double v ? v > job.RunThreshold : null;
-        if (state.LastRunning == true && state.LastTs is long lastTs)
+        if (state.LastRunning == true && state.LastTs is long lastTs && state.LastRunningSimulated == simulated)
         {
             var dt = (now - lastTs) / 1000.0;
-            if (dt > 0 && dt <= Math.Max(1, job.MaxGapSec)) { state.Add("hours", dt / 3600); state.Add("periodHours", dt / 3600); }
+            if (dt > 0 && dt <= Math.Max(1, job.MaxGapSec))
+            {
+                if (!simulated) state.Add("hours", dt / 3600);
+                state.Add("periodHours", dt / 3600);
+            }
         }
-        if (running == true && state.LastRunning == false) { state.Add("starts", 1); state.Add("periodStarts", 1); }
-        if (running is not null) state.LastRunning = running;
+        if (running == true && state.LastRunning == false && state.LastRunningSimulated == simulated)
+        {
+            if (!simulated) state.Add("starts", 1);
+            state.Add("periodStarts", 1);
+        }
+        if (running is not null) { state.LastRunning = running; state.LastRunningSimulated = simulated; }
         else if (job.BadQuality == BadQualityPolicy.Skip) state.LastRunning = null;
         state.LastTs = now;
         var since = state.Get("hours") - state.MaintenanceBase;

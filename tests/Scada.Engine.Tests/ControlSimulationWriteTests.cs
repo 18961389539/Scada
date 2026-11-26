@@ -1,5 +1,6 @@
 using Scada.Core.Entities;
 using Scada.Core.Enums;
+using Scada.Core.Models;
 using Scada.Engine.Control;
 
 namespace Scada.Engine.Tests;
@@ -46,5 +47,17 @@ public class ControlSimulationWriteTests
         Assert.NotNull(ControlCommandService.SimulationWriteRefusal(null, ControlOrigin.Script, sourceSimulated: true));
         var simulated = new Device { Name = "PLC-1", SimulationEnabled = true };
         Assert.Null(ControlCommandService.SimulationWriteRefusal(simulated, ControlOrigin.Script, sourceSimulated: true));
+    }
+
+    [Fact]
+    public void SimulatedConditionIsUndeterminedUnlessTargetDeviceIsAlsoSimulated()
+    {
+        var live = new TagValue(1, 1, TagQuality.Good, 1, Simulated: true);
+        Assert.True(ControlCommandService.IsSimulatedInput(live, new Device { SimulationEnabled = false }));
+        Assert.True(ControlCommandService.IsSimulatedInput(new TagValue(1, 1, TagQuality.Good, 1), new Device { SimulationEnabled = true }));
+        Assert.False(ControlCommandService.IsSimulatedInput(new TagValue(1, 1, TagQuality.Good, 1), new Device { SimulationEnabled = false }));
+        Assert.Equal("条件引用的测点 #7 为仿真值，无法判定", ControlCommandService.SimulatedConditionReason(7, true, allowSimulated: false));
+        Assert.Null(ControlCommandService.SimulatedConditionReason(7, true, allowSimulated: true));
+        Assert.Null(ControlCommandService.SimulatedConditionReason(7, false, allowSimulated: false));
     }
 }

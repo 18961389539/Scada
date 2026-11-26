@@ -23,6 +23,11 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/annunciators/2/clear-silence")]
     [InlineData("/api/annunciators/2/test")]
     [InlineData("/api/annunciators/silence-visible")]
+    [InlineData("/api/annunciators/ack-visible")]
+    [InlineData("/api/alarm-rules/3/shelve")]
+    [InlineData("/api/alarm-rules/3/unshelve")]
+    [InlineData("/api/alarm-rules/3/out-of-service")]
+    [InlineData("/api/calc-jobs/8/acknowledge-writes")]
     [InlineData("/api/traceability/jobs/7/scan")]
     [InlineData("/api/simulation/4/force")]
     [InlineData("/api/simulation/4/release")]
@@ -50,7 +55,6 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/control/sequences")]
     [InlineData("/api/simulation/4")]
     [InlineData("/api/calc-jobs/8/publish")]
-    [InlineData("/api/calc-jobs/8/acknowledge-writes")]
     [InlineData("/api/control/requests/11111111-1111-1111-1111-111111111111")]
     public void ControlPath_Ignores_Configuration_Or_Read_Routes(string path)
     {
@@ -76,6 +80,10 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/RecipeEndpoints.cs", "/api/recipes/downloads/1/abort"),
             ("Endpoints/AnnunciatorEndpoints.cs", "/api/annunciators/1/silence"),
             ("Endpoints/AnnunciatorEndpoints.cs", "/api/annunciators/silence-visible"),
+            ("Endpoints/AnnunciatorEndpoints.cs", "/api/annunciators/ack-visible"),
+            ("Endpoints/AlarmRuleEndpoints.cs", "/api/alarm-rules/1/shelve"),
+            ("Endpoints/AlarmRuleEndpoints.cs", "/api/alarm-rules/1/unshelve"),
+            ("Endpoints/AlarmRuleEndpoints.cs", "/api/alarm-rules/1/out-of-service"),
             ("Endpoints/TraceabilityEndpoints.cs", "/api/traceability/jobs/1/scan"),
             ("Endpoints/SimulationEndpoints.cs", "/api/simulation/1/force"),
             ("Endpoints/SimulationEndpoints.cs", "/api/simulation/1/release"),
@@ -84,6 +92,7 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/invoke"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/reset"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/maintenance-done"),
+            ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/acknowledge-writes"),
             ("Endpoints/CollectorDiagnosticEndpoints.cs", "/api/devices/1/diagnostics/reconnect"),
         };
         var missing = new List<string>();
@@ -104,6 +113,12 @@ public sealed class ClientControlPolicyTests
     [InlineData("GET", "/api/simulation/4/fault", false)]
     [InlineData("POST", "/api/calc-jobs/8/reset", true)]
     [InlineData("POST", "/api/calc-jobs/8/maintenance-done", true)]
+    [InlineData("POST", "/api/calc-jobs/8/acknowledge-writes", true)]
+    [InlineData("GET", "/api/calc-jobs/8/acknowledge-writes", false)]
+    [InlineData("POST", "/api/annunciators/ack-visible", true)]
+    [InlineData("POST", "/api/alarm-rules/3/shelve", true)]
+    [InlineData("POST", "/api/alarm-rules/3/unshelve", true)]
+    [InlineData("POST", "/api/alarm-rules/3/out-of-service", true)]
     [InlineData("GET", "/api/calc-jobs/8/reset", false)]
     [InlineData("POST", "/api/devices/12/diagnostics/reconnect", true)]
     [InlineData("GET", "/api/devices/12/diagnostics/reconnect", false)]

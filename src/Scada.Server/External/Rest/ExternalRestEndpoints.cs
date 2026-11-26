@@ -238,12 +238,12 @@ public static class ExternalRestEndpoints
         t.Id, t.Name, t.DeviceId, t.Kind, t.DataType, t.Writable, t.Unit, t.Description, t.Area.ToString(), t.Address);
 
     private static ExternalValueView ValueDto(TagValue v) => new(
-        v.TagId, v.Value, v.Quality.ToString(), v.Ts, v.SourceTs, v.Error, v.Text);
+        v.TagId, v.Value, v.Quality.ToString(), v.Ts, v.SourceTs, v.Error, v.Text, v.Simulated);
 
     public sealed record ExternalHealthView(string Status, bool Active, DateTimeOffset Utc);
     public sealed record ExternalTagView(int Id, string Name, int? DeviceId, TagKind Kind, TagDataType DataType, bool Writable,
         string? Unit, string? Description, string Area, int Address);
-    public sealed record ExternalValueView(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error, string? Text = null);
+    public sealed record ExternalValueView(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error, string? Text = null, bool Simulated = false);
     public sealed record ExternalHistoryView(string Resolution, bool Downsampled, int PointLimit, IReadOnlyList<HistorySeries> Series);
     public sealed record ExternalCommandView(bool Success, string Message, double? ReadBack, Guid? CommandId,
         GatewayCommandOutcome? Outcome, bool Pending, Guid? ApprovalId, IReadOnlyList<string>? Refusals);

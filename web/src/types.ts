@@ -422,6 +422,8 @@ export interface AlarmEvent {
   firstOut?: boolean
   /** 设备级首出：同设备本次报警片段中最早触发的一条。 */
   firstUp?: boolean
+  /** 演练或仿真触发的报警，官方 KPI 默认排除，仍可查看。 */
+  simulated?: boolean
   state?: AlarmState
 }
 
