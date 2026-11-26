@@ -14,14 +14,14 @@ namespace Scada.Server.Endpoints;
 
 public sealed record TraceabilityJobRequest(string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, List<int>? SnTagIds, List<TraceabilityField>? Fields, int ScanExpirySeconds = 300, long Revision = 0,
-    TraceabilityScannerOptions? Scanner = null, bool DuplicateCheckEnabled = false, int DuplicateCheckWindowDays = 10);
+    TraceabilityScannerOptions? Scanner = null, bool DuplicateCheckEnabled = false, int DuplicateCheckWindowDays = 10, bool AllowSimulated = false);
 public sealed record TraceabilityScanRequest(string Sn);
 public sealed record TraceabilityJobResponse(int Id, string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, IReadOnlyList<int> SnTagIds, IReadOnlyList<TraceabilityField> Fields, int ScanExpirySeconds,
-    bool DuplicateCheckEnabled, long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus, int DuplicateCheckWindowDays, string? Warning);
+    bool DuplicateCheckEnabled, long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus, int DuplicateCheckWindowDays, string? Warning, bool AllowSimulated = false);
 /// <summary>A persisted capture with its original inspection outcome and independent PLC acknowledgement.</summary>
 public sealed record TraceabilityRecordResponse(long Id, int JobId, string JobName, string Sn, DateTimeOffset CapturedAt,
-    bool Acknowledged, TraceabilityOutcome Outcome, IReadOnlyList<TraceabilityValue> Values);
+    bool Acknowledged, TraceabilityOutcome Outcome, IReadOnlyList<TraceabilityValue> Values, bool Simulated = false);
 
 public static class TraceabilityEndpoints
 {
@@ -69,7 +69,7 @@ public static class TraceabilityEndpoints
             await runtime.SaveChangesAsync(ct);
             return TypedResults.NoContent();
         }).RequireAuthorization(AccessPolicies.Control);
-        group.MapGet("/records", async Task<IResult> (string? sn, int? jobId, long? from, long? to, int? page, int? pageSize, TraceabilityOutcome? outcome,
+        group.MapGet("/records", async Task<IResult> (string? sn, int? jobId, long? from, long? to, int? page, int? pageSize, TraceabilityOutcome? outcome, bool? includeSimulated,
             HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             if (sn?.Length > 200 || from > to) return TypedResults.BadRequest(new { message = "Invalid SN or time range." });
@@ -84,6 +84,7 @@ public static class TraceabilityEndpoints
             if (from is long start) query = query.Where(record => record.Ts >= start);
             if (to is long end) query = query.Where(record => record.Ts <= end);
             if (outcome is { } inspectionOutcome) query = query.Where(record => record.Outcome == inspectionOutcome);
+            if (includeSimulated != true) query = query.Where(record => !record.Simulated);
             var currentPage = Math.Clamp(page ?? 1, 1, 100000);
             var size = Math.Clamp(pageSize ?? 50, 1, 200);
             var total = await query.CountAsync(ct);
@@ -114,6 +115,7 @@ public static class TraceabilityEndpoints
             job.Name = request.Name?.Trim() ?? ""; job.Enabled = request.Enabled; job.TriggerTagId = request.TriggerTagId;
             job.SnSource = request.SnSource; job.SnFormat = request.SnFormat; job.ScanExpirySeconds = request.ScanExpirySeconds;
             job.DuplicateCheckEnabled = request.DuplicateCheckEnabled;
+            job.AllowSimulated = request.AllowSimulated;
             job.DuplicateCheckWindowDays = request.DuplicateCheckWindowDays > 0 ? request.DuplicateCheckWindowDays : 10;
             job.SnTagIdsJson = JsonSerializer.Serialize(request.SnTagIds, TraceabilityService.Json);
             job.FieldsJson = JsonSerializer.Serialize(request.Fields, TraceabilityService.Json);
@@ -158,8 +160,8 @@ public static class TraceabilityEndpoints
         job.Id, job.Name, job.Enabled, job.TriggerTagId, job.SnSource, job.SnFormat, TraceabilityService.SnTags(job), TraceabilityService.Fields(job),
         job.ScanExpirySeconds, job.DuplicateCheckEnabled, job.Revision,
         access.CanTag(Permission.Configure, job.TriggerTagId) && access.CanTag(Permission.Control, job.TriggerTagId),
-        access.CanTag(Permission.Control, job.TriggerTagId), service.Status(job.Id), TraceabilityService.ScannerOptions(job), scanners.Status(job.Id), TraceabilityService.WindowDays(job), TraceabilityService.ListenWarning(job));
+        access.CanTag(Permission.Control, job.TriggerTagId), service.Status(job.Id), TraceabilityService.ScannerOptions(job), scanners.Status(job.Id), TraceabilityService.WindowDays(job), TraceabilityService.ListenWarning(job), job.AllowSimulated);
 
     private static TraceabilityRecordResponse RecordView(TraceabilityRecord record) => new(record.Id, record.JobId, record.JobName, record.Sn,
-        DateTimeOffset.FromUnixTimeMilliseconds(record.Ts), record.Acknowledged, record.Outcome, TraceabilityService.Values(record));
+        DateTimeOffset.FromUnixTimeMilliseconds(record.Ts), record.Acknowledged, record.Outcome, TraceabilityService.Values(record), record.Simulated);
 }

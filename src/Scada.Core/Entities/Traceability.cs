@@ -41,6 +41,8 @@ public sealed class TraceabilityJob : IAuditedEntity
     // 启用后，同一任务在 DuplicateCheckWindowDays 内已采集过的 SN 视为重码：拒绝采集并应答 PLC 3。
     public bool DuplicateCheckEnabled { get; set; }
     public int DuplicateCheckWindowDays { get; set; } = 10;
+    // 默认拒绝仿真值入库；开启后演练采集须打上 Simulated，且不得进入正式检索默认视图。
+    public bool AllowSimulated { get; set; }
     public long Revision { get; set; } = 1;
 
     [JsonIgnore] public string AuditTargetType => "TraceabilityJob";
@@ -72,6 +74,7 @@ public sealed class TraceabilityRecord
     public string ValuesJson { get; set; } = "[]";
     public TraceabilityOutcome Outcome { get; set; }
     public bool Acknowledged { get; set; }
+    public bool Simulated { get; set; }
 }
 
 public sealed class TraceabilityAttempt

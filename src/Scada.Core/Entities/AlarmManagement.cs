@@ -70,6 +70,8 @@ public class NotificationRoute
     public bool OnRecover { get; set; }
     // 有值时为升级路由：报警持续未确认达到该分钟数才发送一次，不参与触发/恢复通知。
     public int? EscalateAfterMinutes { get; set; }
+    // 默认不外发演练报警；开启后主题、正文和载荷必须标明演练。
+    public bool IncludeSimulated { get; set; }
     public long Revision { get; set; } = 1;
 }
 

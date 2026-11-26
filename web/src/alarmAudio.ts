@@ -68,8 +68,8 @@ export function primeAlarmAudio(): void {
 export function handleAlarmPush(payload: { action: string; alarm: AlarmEvent }): void {
   if (muted) return
   const alarm = payload.alarm
-  // 已暂挂/抑制/抖动的报警只入库不出声
-  if (alarm.shelved || alarm.suppressed || alarm.chattering) return
+  // 演练报警不驱动正式声光；已暂挂/抑制/抖动的报警只入库不出声
+  if (alarm.simulated || alarm.shelved || alarm.suppressed || alarm.chattering) return
   const raised = payload.action === 'raise'
   const restored =
     (payload.action === 'unshelve' || payload.action === 'unsuppress') && !alarm.ackTs && !alarm.endTs

@@ -143,6 +143,7 @@
         <el-form-item v-if="!routeEscalate" :label="$t('notificationsView.k043f90')">
           <el-checkbox v-model="routeForm.onRaise">{{ $t('notificationsView.k9f45b3') }}</el-checkbox>
           <el-checkbox v-model="routeForm.onRecover">{{ $t('notificationsView.k79748c') }}</el-checkbox>
+          <el-checkbox v-model="routeForm.includeSimulated">{{ $t('notificationsView.includeSimulated') }}</el-checkbox>
         </el-form-item>
         <el-form-item :label="$t('notificationsView.kd4e9ca')"><el-switch v-model="routeForm.enabled" /></el-form-item>
       </el-form>
@@ -252,7 +253,7 @@ const areasError = ref('')
 const configurableAreas = computed(() => areas.value.filter(a => can(auth.user, 'Configure', a.id)))
 
 const routeDialog = reactive({ visible: false, id: 0 })
-const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: true, channelId: 0, areaId: null, minLevel: 'Warning', shiftId: null, recipients: '', onRaise: true, onRecover: false, escalateAfterMinutes: null, revision: undefined })
+const emptyRoute = (): Omit<NotificationRoute, 'id'> => ({ name: '', enabled: true, channelId: 0, areaId: null, minLevel: 'Warning', shiftId: null, recipients: '', onRaise: true, onRecover: false, escalateAfterMinutes: null, includeSimulated: false, revision: undefined })
 const routeForm = reactive(emptyRoute())
 const routeEscalate = ref(false)
 const routeEscalateMinutes = ref(15)

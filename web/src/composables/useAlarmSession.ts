@@ -16,6 +16,7 @@ export type MissedCriticalNotice = { count: number }
 
 export function missedCriticalAlarms(events: AlarmEvent[], fromMs: number, toMs: number): AlarmEvent[] {
   return events.filter(alarm => {
+    if (alarm.simulated) return false
     if (alarm.level !== 'Critical') return false
     if (alarm.ackTs && alarm.endTs) return false
     if (alarm.ackTs && !alarm.endTs) return false
@@ -78,6 +79,19 @@ function openAlarmsFromToast(alarm: AlarmEvent, navigate?: (path: string, query:
 }
 
 function notifyRaise(alarm: AlarmEvent): void {
+  if (alarm.simulated) {
+    if (alarmToastSurface(window.location.pathname) === 'none') return
+    ElNotification({
+      title: tr('alarmToast.simulatedTitle', [levelLabel(alarm.level)]),
+      message: h('div', [
+        h('div', alarmMessage(alarm)),
+        h('div', { style: 'margin-top: 4px; font-size: 12px; opacity: 0.72' }, tr('alarmToast.simulatedHint'))
+      ]),
+      type: 'info',
+      duration: 6000
+    })
+    return
+  }
   const critical = alarm.level === 'Critical'
   const surface = alarmToastSurface(window.location.pathname)
   if (critical && surface !== 'none') emitCriticalAlarm(alarm)

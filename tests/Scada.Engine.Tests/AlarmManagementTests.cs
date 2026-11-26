@@ -449,6 +449,46 @@ public class AlarmManagementTests
         Assert.Empty(all.Standing);
         await using (var db = runtime.CreateDbContext())
             Assert.Equal(3, await db.AlarmEvents.CountAsync());
+        var flood = await kpi.FloodAsync(_ => true, from + 10);
+        Assert.Equal(1, flood.Count);
+
+        var counts = await new AlarmService(runtime, new Recorder()).CountStatesAsync(new AlarmQueryFilter());
+        Assert.Equal(0, counts.Unack);
+        Assert.Equal(1, counts.SimulatedUnack);
+    }
+
+    [Fact]
+    public void SimulatedNotificationIsMarkedWhenRouteAllowsDrill()
+    {
+        var alarm = new AlarmEvent { Id = 9, Level = AlarmLevel.Critical, Message = "超限", StartTs = 1_700_000_000_000, Simulated = true, TagId = 1, Value = 12 };
+        var message = AlarmNotificationComposer.Compose(alarm, "raise", "演练路由", ["A车间"], AlarmNotificationComposer.AlarmContext.Empty, "UTC");
+        Assert.StartsWith("[SCADA][演练][严重][报警]", message.Subject);
+        Assert.Contains("性质：演练/仿真", message.Body);
+        var json = System.Text.Json.JsonSerializer.Serialize(message.Payload);
+        Assert.Contains("\"simulated\":true", json);
+    }
+
+    [Fact]
+    public async Task OfficialNotificationRoutesExcludeSimulatedAlarmsUnlessRouteAllowsThem()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await SeedHookAsync(factory,
+            new NotificationRoute { Id = 1, Name = "正式", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true, OnRecover = true },
+            new NotificationRoute { Id = 2, Name = "演练触发", ChannelId = 1, MinLevel = AlarmLevel.Info, OnRaise = true, IncludeSimulated = true },
+            new NotificationRoute { Id = 3, Name = "演练升级", ChannelId = 1, MinLevel = AlarmLevel.Info, EscalateAfterMinutes = 5, IncludeSimulated = true });
+        var sender = new CapturingSender();
+        var clock = new DateTimeOffset(2026, 10, 19, 10, 10, 0, TimeSpan.Zero);
+        var dispatcher = Dispatcher(factory, runtime, sender, () => clock);
+        var alarm = await AddAlarmAsync(runtime, 1, AlarmLevel.Warning, clock.ToUnixTimeMilliseconds() - 6 * 60_000, simulated: true);
+
+        var sent = await dispatcher.ProcessAsync(alarm, "raise");
+        Assert.Equal([2], sent.Select(x => x.RouteId).ToList());
+        Assert.Contains("演练", sender.Calls.Single().Message.Subject);
+        Assert.Contains("性质：演练/仿真", sender.Calls.Single().Message.Body);
+
+        var escalated = await dispatcher.ScanEscalationsAsync();
+        Assert.Equal([3], escalated.Select(x => x.RouteId).ToList());
     }
 
     [Fact]
@@ -596,10 +636,10 @@ public class AlarmManagementTests
         new AccessModelProvider(_ => Task.FromResult(AccessModel.Build([(1, 2), (2, 3)], [(1, TagKind.Physical, 1, null), (2, TagKind.Physical, 2, null)], [], [], [], 0))),
         new FakeProtector(), [sender], Options.Create(settings ?? new ScadaSettings { ShiftTimeZone = "UTC" }), NullLogger<AlarmNotificationDispatcher>.Instance, clock);
 
-    private static async Task<AlarmEvent> AddAlarmAsync(IDbContextFactory<RuntimeDbContext> runtime, int tagId, AlarmLevel level, long start, bool shelved = false)
+    private static async Task<AlarmEvent> AddAlarmAsync(IDbContextFactory<RuntimeDbContext> runtime, int tagId, AlarmLevel level, long start, bool shelved = false, bool simulated = false)
     {
         await using var db = runtime.CreateDbContext();
-        var alarm = new AlarmEvent { TagId = tagId, Level = level, StartTs = start, Message = $"测点{tagId}报警", Shelved = shelved };
+        var alarm = new AlarmEvent { TagId = tagId, Level = level, StartTs = start, Message = $"测点{tagId}报警", Shelved = shelved, Simulated = simulated };
         db.AlarmEvents.Add(alarm); await db.SaveChangesAsync(); return alarm;
     }
 

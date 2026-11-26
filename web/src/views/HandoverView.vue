@@ -21,6 +21,7 @@
             <router-link :to="{ path: '/alarms', query: { state: 'unack' } }">{{ row.label }}：{{ row.count }}</router-link>
           </li>
         </ul>
+        <p v-if="simulatedUnacked > 0" data-test="handover-simulated-unacked">{{ $t('dutyHandover.simulatedUnacked') }}：{{ simulatedUnacked }}</p>
         <p><router-link data-test="handover-rtn-link" to="/alarms?state=rtnUnack">{{ $t('dutyHandover.rtnUnack') }}：{{ rtnUnack }}</router-link></p>
       </section>
 
@@ -147,6 +148,7 @@ const error = ref('')
 const generatedAt = ref('--')
 const operator = computed(() => auth.user?.displayName || auth.user?.userName || '--')
 const unackedByLevel = ref<{ level: string; label: string; count: number }[]>([])
+const simulatedUnacked = ref(0)
 const rtnUnack = ref(0)
 const shelved = ref(0)
 const suppressed = ref(0)
@@ -253,17 +255,23 @@ async function load(): Promise<void> {
       controlApi.externalWrites(20).catch(() => [] as ExternalWrite[])
     ])
     const counts: Record<string, number> = { Critical: 0, Warning: 0, Info: 0 }
+    let simulated = 0
     for (const alarm of events as AlarmEvent[]) {
       if (alarm.endTs) continue
+      if (alarm.simulated) {
+        simulated += 1
+        continue
+      }
       const level = (alarm.level || 'Info') as AlarmLevel
       counts[level] = (counts[level] ?? 0) + 1
     }
+    simulatedUnacked.value = summary?.simulatedUnack ?? simulated
     unackedByLevel.value = (['Critical', 'Warning', 'Info'] as AlarmLevel[]).map(level => ({
       level,
       label: levelLabel(level),
       count: counts[level] ?? 0
     }))
-    rtnUnack.value = summary?.rtnUnack ?? (events as AlarmEvent[]).filter(alarm => alarm.endTs && !alarm.ackTs).length
+    rtnUnack.value = summary?.rtnUnack ?? (events as AlarmEvent[]).filter(alarm => alarm.endTs && !alarm.ackTs && !alarm.simulated).length
     shelved.value = summary?.shelved ?? shelves.length
     suppressed.value = summary?.suppressed ?? 0
     outOfService.value = summary?.outOfServiceRules ?? oosPage.total

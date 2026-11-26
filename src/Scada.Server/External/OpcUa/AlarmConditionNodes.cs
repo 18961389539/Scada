@@ -32,11 +32,13 @@ internal sealed class ScadaAlarmConditionState : AlarmConditionState
     /// <summary>把站内报警状态投影到 Condition。返回 true 表示状态有变化，调用方应上报事件。</summary>
     public bool Apply(ISystemContext context, AlarmEvent? alarm)
     {
-        var active = alarm is { EndTs: null };
-        var acknowledged = alarm?.AckTs is not null;
-        var suppressed = alarm?.Suppressed ?? false;
-        var shelved = alarm?.Shelved ?? false;
-        var snapshot = new ConditionSnapshot(Rule.Enabled, active, acknowledged, suppressed, shelved, Rule.Level);
+        // 演练报警不上报为正式 Active：上级系统看到的 InAlarm 为 false。
+        var official = alarm is { Simulated: false };
+        var active = official && alarm is { EndTs: null };
+        var acknowledged = official && alarm?.AckTs is not null;
+        var suppressed = official && (alarm?.Suppressed ?? false);
+        var shelved = official && (alarm?.Shelved ?? false);
+        var snapshot = new ConditionSnapshot(Rule.Enabled, active, acknowledged, suppressed, shelved, Rule.Level, official && alarm is not null);
         if (snapshot == _last) return false;
         // 启用状态只在真正变化时设置：SetEnableState 会重置部分内部状态，
         // 每次报警状态变化都调用它会让客户端的 Enabled 时间戳频繁抖动。
@@ -80,7 +82,7 @@ internal sealed class ScadaAlarmConditionState : AlarmConditionState
         _ => EventSeverity.Low
     };
 
-    private readonly record struct ConditionSnapshot(bool Enabled, bool Active, bool Acked, bool Suppressed, bool Shelved, AlarmLevel Level)
+    private readonly record struct ConditionSnapshot(bool Enabled, bool Active, bool Acked, bool Suppressed, bool Shelved, AlarmLevel Level, bool Official = false)
     {
         public static ConditionSnapshot Unknown { get; } = new(false, false, false, false, false, AlarmLevel.Info);
     }
@@ -150,10 +152,10 @@ internal static class AlarmConditionBinder
                 var unacked = await alarms.QueryAsync(null, null, activeOnly: false, limit: 5000, ct, unackedOnly: true);
 
                 var byRule = new Dictionary<int, AlarmEvent>();
-                foreach (var a in unacked.Where(a => a.RuleId is not null).OrderByDescending(a => a.Id))
+                foreach (var a in unacked.Where(a => a.RuleId is not null && !a.Simulated).OrderByDescending(a => a.Id))
                     byRule[a.RuleId!.Value] = a;
-                // 活动报警后写，优先级高于同规则的已恢复报警。
-                foreach (var a in live.Where(a => a.RuleId is not null).OrderByDescending(a => a.Id))
+                // 活动报警后写，优先级高于同规则的已恢复报警。演练报警不映射为正式 Active。
+                foreach (var a in live.Where(a => a.RuleId is not null && !a.Simulated).OrderByDescending(a => a.Id))
                     byRule[a.RuleId!.Value] = a;
 
                 foreach (var condition in conditions)
@@ -179,7 +181,7 @@ internal static class AlarmConditionBinder
         var alarms = scope.ServiceProvider.GetRequiredService<AlarmService>();
         var candidates = await alarms.QueryAsync(null, null, activeOnly: true, limit: 50,
             filter: new AlarmQueryFilter(TagId: rule.TagId));
-        var target = candidates.FirstOrDefault(a => a.RuleId == rule.Id && a.AckTs is null);
+        var target = candidates.FirstOrDefault(a => a.RuleId == rule.Id && a.AckTs is null && !a.Simulated);
         if (target is null) return false;
         return await alarms.AckAsync(target.Id, user, note) is not null;
     }

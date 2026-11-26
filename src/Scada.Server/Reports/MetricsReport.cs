@@ -71,10 +71,14 @@ public sealed class MetricsReport(
 
         await using (var db = await runtime.CreateDbContextAsync(ct))
         {
-            var active = await db.AlarmEvents.AsNoTracking().Where(x => x.EndTs == null).GroupBy(x => x.Level).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
-            w.Help("scada_alarms_active", "活动报警数（按等级）", "gauge");
+            var active = await db.AlarmEvents.AsNoTracking().Where(x => x.EndTs == null && !x.Simulated).GroupBy(x => x.Level).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+            var simulatedActive = await db.AlarmEvents.AsNoTracking().Where(x => x.EndTs == null && x.Simulated).GroupBy(x => x.Level).Select(g => new { g.Key, Count = g.Count() }).ToListAsync(ct);
+            w.Help("scada_alarms_active", "官方活动报警数（按等级，不含演练）", "gauge");
             foreach (var level in Enum.GetValues<AlarmLevel>()) w.Sample("scada_alarms_active", active.FirstOrDefault(x => x.Key == level)?.Count ?? 0, ("level", level.ToString()));
-            w.Gauge("scada_alarms_unacknowledged", "未确认报警数", await db.AlarmEvents.AsNoTracking().CountAsync(x => x.AckTs == null && !x.Shelved, ct));
+            w.Help("scada_alarms_active_simulated", "演练活动报警数（按等级）", "gauge");
+            foreach (var level in Enum.GetValues<AlarmLevel>()) w.Sample("scada_alarms_active_simulated", simulatedActive.FirstOrDefault(x => x.Key == level)?.Count ?? 0, ("level", level.ToString()));
+            w.Gauge("scada_alarms_unacknowledged", "官方未确认报警数（不含演练）", await db.AlarmEvents.AsNoTracking().CountAsync(x => x.AckTs == null && !x.Shelved && !x.Simulated, ct));
+            w.Gauge("scada_alarms_unacknowledged_simulated", "演练未确认报警数", await db.AlarmEvents.AsNoTracking().CountAsync(x => x.AckTs == null && !x.Shelved && x.Simulated, ct));
             w.Gauge("scada_notification_outbox_pending", "发件箱积压（待发/发送中）", await db.NotificationOutbox.AsNoTracking()
                 .CountAsync(x => x.Status == NotificationOutboxStatus.Pending || x.Status == NotificationOutboxStatus.Sending, ct));
             w.Gauge("scada_notification_outbox_failed", "发件箱最终失败条数", await db.NotificationOutbox.AsNoTracking().CountAsync(x => x.Status == NotificationOutboxStatus.Failed, ct));

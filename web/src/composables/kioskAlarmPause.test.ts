@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AlarmEvent } from '../types'
-import { applyKioskAlarmEvent, emptyKioskAlarmPause, isBlockingKioskAlarm } from './kioskAlarmPause'
+import { applyKioskAlarmEvent, emptyKioskAlarmPause, isBlockingKioskAlarm, isDrillKioskAlarm } from './kioskAlarmPause'
 
 function alarm(partial: Partial<AlarmEvent> = {}): AlarmEvent {
   return {
@@ -43,6 +43,15 @@ describe('kioskAlarmPause', () => {
 
     applied = applyKioskAlarmEvent(applied.open, 'recover', alarm({ id: 2, level: 'Warning', endTs: 4000 }), item => item.message)
     expect(applied.state).toEqual(emptyKioskAlarmPause())
+  })
+
+  it('does not treat simulated alarms as official blocking, but can count them as a drill hint', () => {
+    expect(isBlockingKioskAlarm(alarm({ level: 'Critical', simulated: true }))).toBe(false)
+    expect(isDrillKioskAlarm(alarm({ level: 'Critical', simulated: true }))).toBe(true)
+    const applied = applyKioskAlarmEvent(new Map(), 'raise', alarm({ level: 'Critical', simulated: true, message: 'drill' }), item => item.message)
+    expect(applied.state.paused).toBe(false)
+    expect(applied.state.count).toBe(0)
+    expect(applied.state.drillCount).toBe(1)
   })
 
   it('does not clear a remaining critical alarm on a timed release', () => {

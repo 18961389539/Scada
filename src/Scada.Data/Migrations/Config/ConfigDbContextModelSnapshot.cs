@@ -1902,6 +1902,9 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int?>("EscalateAfterMinutes")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IncludeSimulated")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("MinLevel")
                         .HasColumnType("INTEGER");
 
@@ -3003,6 +3006,9 @@ namespace Scada.Data.Migrations.Config
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("AllowSimulated")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("DuplicateCheckEnabled")

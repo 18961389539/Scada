@@ -5,7 +5,7 @@ namespace Scada.Core.Scripting;
 
 public sealed record ScriptInput(double Value, bool Good, long Timestamp, string Quality = "Good", string? Text = null, bool Simulated = false);
 public sealed record ScriptSample(double Value, string Quality, long Timestamp, bool Good, bool Simulated = false);
-public sealed record ScriptAlarm(long Id, string Level, string Message, bool Acknowledged, long StartedAt);
+public sealed record ScriptAlarm(long Id, string Level, string Message, bool Acknowledged, long StartedAt, bool Simulated = false);
 public sealed record ScriptSerialUse(string Profile, bool Ok, double ElapsedMs, string? Error = null);
 
 // 行协议版本。请求、握手帧都带版本号：升级时若只替换了 Server 或 ScriptWorker 其中一侧，

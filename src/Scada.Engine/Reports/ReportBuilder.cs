@@ -244,12 +244,12 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
         var jobIds = columns.Where(c => c.Kind == ReportColumnKind.CalcSnapshot).Select(c => c.JobId!.Value).Distinct().ToArray();
         var snapshots = jobIds.Length == 0 ? [] : (await runtime.CalcJobSnapshots.AsNoTracking().Where(x => jobIds.Contains(x.JobId) && x.PeriodStartTs >= from && x.PeriodStartTs < to).ToListAsync(ct))
-            .Select(x => (x.JobId, x.PeriodStartTs, Values: JsonSerializer.Deserialize<Dictionary<string, double>>(x.ValuesJson) ?? new())).ToList();
-        List<(long StartTs, AlarmLevel Level, int? TagId, int? DeviceId)> alarms = [];
+            .Select(x => (x.JobId, x.PeriodStartTs, x.IncludesSimulation, Values: JsonSerializer.Deserialize<Dictionary<string, double>>(x.ValuesJson) ?? new())).ToList();
+        List<(long StartTs, AlarmLevel Level, int? TagId, int? DeviceId, bool Simulated)> alarms = [];
         if (columns.Any(c => c.Kind == ReportColumnKind.AlarmCount))
         {
-            alarms = (await runtime.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).Select(x => new { x.StartTs, x.Level, x.TagId, x.DeviceId }).ToListAsync(ct))
-                .Select(x => (x.StartTs, x.Level, x.TagId, x.DeviceId)).ToList();
+            alarms = (await runtime.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to).Select(x => new { x.StartTs, x.Level, x.TagId, x.DeviceId, x.Simulated }).ToListAsync(ct))
+                .Select(x => (x.StartTs, x.Level, x.TagId, x.DeviceId, x.Simulated)).ToList();
         }
         var model = await access.GetAsync(ct);
         bool InArea(int? tagId, int? deviceId) =>
@@ -301,10 +301,12 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
                 case ReportColumnKind.TagSum:
                     return ReportMath.Integrate(raw.GetValueOrDefault(c.TagId!.Value) ?? [], rf, rt) * c.Factor;
                 case ReportColumnKind.CalcSnapshot:
-                    var matched = snapshots.Where(s => s.JobId == c.JobId && s.PeriodStartTs >= rf && s.PeriodStartTs < rt && s.Values.ContainsKey(c.Output!)).ToList();
+                    var matched = snapshots.Where(s => s.JobId == c.JobId && s.PeriodStartTs >= rf && s.PeriodStartTs < rt && s.Values.ContainsKey(c.Output!)
+                        && (c.IncludeSimulated || !s.IncludesSimulation)).ToList();
                     return matched.Count == 0 ? null : matched.Sum(s => s.Values[c.Output!]) * c.Factor;
                 case ReportColumnKind.AlarmCount:
-                    return alarms.Count(a => a.StartTs >= rf && a.StartTs < rt && (int)a.Level >= (c.MinLevel ?? 0) && InArea(a.TagId, a.DeviceId));
+                    return alarms.Count(a => a.StartTs >= rf && a.StartTs < rt && (int)a.Level >= (c.MinLevel ?? 0) && InArea(a.TagId, a.DeviceId)
+                        && (c.IncludeSimulated || !a.Simulated));
                 case ReportColumnKind.AlarmKpi:
                     return Kpi(c.Output!, rf, rt) * c.Factor;
                 case ReportColumnKind.OeeKpi:

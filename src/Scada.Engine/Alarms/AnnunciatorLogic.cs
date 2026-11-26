@@ -11,7 +11,8 @@ public sealed record AnnunciatorAlarmSample(
     bool Unacked,
     bool Shelved,
     bool Suppressed,
-    bool Chattering);
+    bool Chattering,
+    bool Simulated = false);
 
 public sealed record AnnunciatorDesired(
     AlarmLevel? DrivingLevel,
@@ -33,7 +34,7 @@ public static class AnnunciatorLogic
 {
     // 可发声光的报警：活动、未确认、未暂挂/抑制/抖动。
     public static bool IsAnnunciable(AnnunciatorAlarmSample a) =>
-        a.Active && a.Unacked && !a.Shelved && !a.Suppressed && !a.Chattering;
+        a.Active && a.Unacked && !a.Shelved && !a.Suppressed && !a.Chattering && !a.Simulated;
 
     public static bool MatchesPanel(AnnunciatorAlarmSample a, int? panelAreaId) =>
         panelAreaId is null || (a.AreaId is int area && area == panelAreaId);

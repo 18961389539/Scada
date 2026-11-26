@@ -147,7 +147,9 @@ export default {
     jogReleaseUnknown: 'The jog release was not confirmed: the device may still be moving. The server releases it automatically once the button\'s maximum hold time is reached; check the field now and stop locally if needed.'
   },
   alarmToast: {
-    openHint: 'Click to open the alarm'
+    openHint: 'Click to open the alarm',
+    simulatedTitle: 'Drill alarm',
+    simulatedHint: 'Simulation drill, not a live field alarm'
   },
   pendingApprovals: {
     openList: 'Open pending approvals',
@@ -1081,6 +1083,7 @@ export default {
     operator: 'Current user: {0}',
     unacked: 'Unacknowledged alarms',
     unackedByLevel: 'By level',
+    simulatedUnacked: 'Unacknowledged drill alarms',
     rtnUnack: 'Returned unacknowledged',
     shelved: 'Shelved',
     suppressed: 'Suppressed',

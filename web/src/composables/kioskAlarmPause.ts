@@ -4,7 +4,8 @@ const BLOCKING_LEVELS = new Set(['Critical', 'Warning'])
 const RELEASE_ACTIONS = new Set(['recover', 'ack', 'shelve', 'suppress'])
 
 /** 活动且未确认、未暂挂/抑制的紧急或警告，会让 Kiosk 保持横幅并暂停轮播。 */
-export function isBlockingKioskAlarm(alarm: Pick<AlarmEvent, 'level' | 'endTs' | 'ackTs' | 'shelved' | 'suppressed'>): boolean {
+export function isBlockingKioskAlarm(alarm: Pick<AlarmEvent, 'level' | 'endTs' | 'ackTs' | 'shelved' | 'suppressed' | 'simulated'>): boolean {
+  if (alarm.simulated) return false
   if (!BLOCKING_LEVELS.has(alarm.level)) return false
   if (alarm.endTs != null || alarm.ackTs != null) return false
   if (alarm.shelved || alarm.suppressed) return false
@@ -16,10 +17,20 @@ export type KioskAlarmPauseState = {
   banner: string
   alarm: AlarmEvent | null
   count: number
+  drillCount: number
 }
 
 export function emptyKioskAlarmPause(): KioskAlarmPauseState {
-  return { paused: false, banner: '', alarm: null, count: 0 }
+  return { paused: false, banner: '', alarm: null, count: 0, drillCount: 0 }
+}
+
+/** 演练报警不阻断轮播，但可单独提示。 */
+export function isDrillKioskAlarm(alarm: Pick<AlarmEvent, 'level' | 'endTs' | 'ackTs' | 'shelved' | 'suppressed' | 'simulated'>): boolean {
+  if (!alarm.simulated) return false
+  if (!BLOCKING_LEVELS.has(alarm.level)) return false
+  if (alarm.endTs != null || alarm.ackTs != null) return false
+  if (alarm.shelved || alarm.suppressed) return false
+  return true
 }
 
 function preferred(current: AlarmEvent | null, next: AlarmEvent): AlarmEvent {
@@ -41,18 +52,26 @@ export function applyKioskAlarmEvent(
 ): { open: Map<number, AlarmEvent>; state: KioskAlarmPauseState } {
   const next = new Map(open)
   if (action === 'raise' || action === 'change' || action === 'unshelve' || action === 'unsuppress') {
-    if (isBlockingKioskAlarm(alarm)) next.set(alarm.id, alarm)
+    if (isBlockingKioskAlarm(alarm) || isDrillKioskAlarm(alarm)) next.set(alarm.id, alarm)
     else next.delete(alarm.id)
-  } else if (RELEASE_ACTIONS.has(action) || !isBlockingKioskAlarm(alarm)) {
+  } else if (RELEASE_ACTIONS.has(action) || (!isBlockingKioskAlarm(alarm) && !isDrillKioskAlarm(alarm))) {
     next.delete(alarm.id)
   }
 
   let selected: AlarmEvent | null = null
-  for (const item of next.values()) selected = preferred(selected, item)
+  let drillCount = 0
+  for (const item of next.values()) {
+    if (isDrillKioskAlarm(item)) {
+      drillCount += 1
+      continue
+    }
+    selected = preferred(selected, item)
+  }
+  const blockingCount = next.size - drillCount
   return {
     open: next,
     state: selected
-      ? { paused: true, banner: messageOf(selected), alarm: selected, count: next.size }
-      : emptyKioskAlarmPause()
+      ? { paused: true, banner: messageOf(selected), alarm: selected, count: blockingCount, drillCount }
+      : { ...emptyKioskAlarmPause(), drillCount }
   }
 }

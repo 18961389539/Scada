@@ -71,7 +71,9 @@ public static class AlarmNotificationComposer
         };
         var time = ToShiftTime(DateTimeOffset.FromUnixTimeMilliseconds(alarm.StartTs), shiftTimeZone).ToString("yyyy-MM-dd HH:mm:ss");
         var area = areaNames.Count == 0 ? "-" : string.Join("、", areaNames);
+        var drill = alarm.Simulated ? "演练" : null;
         var lines = new List<string> { $"{verb}：{alarm.Message}", $"等级：{level}" };
+        if (alarm.Simulated) lines.Add("性质：演练/仿真");
         if (!string.IsNullOrWhiteSpace(context.Device)) lines.Add($"设备：{context.Device}");
         if (!string.IsNullOrWhiteSpace(context.Tag)) lines.Add($"测点：{context.Tag}");
         // 设备离线/网关类报警没有测点，Value 恒为 0，输出“数值：0”是伪信息。
@@ -81,9 +83,11 @@ public static class AlarmNotificationComposer
         lines.Add($"开始：{time}");
         lines.Add($"区域：{area}");
         lines.Add($"报警号：#{alarm.Id}");
-        var subject = $"[SCADA][{level}][{verb}] {alarm.Message}";
+        var subject = drill is null
+            ? $"[SCADA][{level}][{verb}] {alarm.Message}"
+            : $"[SCADA][{drill}][{level}][{verb}] {alarm.Message}";
         var body = string.Join("\n", lines);
-        var payload = new { type = "alarm", action, route = routeName, areas = areaNames, sentAt = now ?? DateTimeOffset.UtcNow, device = context.Device, tag = context.Tag, cause = context.Cause, advice = context.Action, alarm };
+        var payload = new { type = "alarm", action, route = routeName, areas = areaNames, sentAt = now ?? DateTimeOffset.UtcNow, device = context.Device, tag = context.Tag, cause = context.Cause, advice = context.Action, simulated = alarm.Simulated, alarm };
         return new(subject, body, payload);
     }
 

@@ -100,7 +100,7 @@ public sealed class McpProductionQueryTools(
     [Description("Read persisted product captures over an inclusive time range of at most 31 days. Optional exact SN, job ID and inspection outcome; outcome is independent of PLC acknowledgement. Descending ID cursor, 1-50 records. No scan binding or PLC acknowledgement.")]
     public async Task<McpRecordPage<TraceabilityRecordResponse>> QueryTraceability(long from, long to,
         CancellationToken cancellationToken, string? sn = null, int? jobId = null,
-        TraceabilityOutcome? outcome = null, long? beforeId = null, int limit = 20)
+        TraceabilityOutcome? outcome = null, long? beforeId = null, int limit = 20, bool includeSimulated = false)
     {
         ValidateWindow(from, to);
         ValidateCursor(beforeId, limit);
@@ -112,9 +112,10 @@ public sealed class McpProductionQueryTools(
         if (!string.IsNullOrWhiteSpace(sn)) query = query.Where(x => x.Sn == sn.Trim());
         if (jobId is not null) query = query.Where(x => x.JobId == jobId);
         if (outcome is not null) query = query.Where(x => x.Outcome == outcome);
+        if (!includeSimulated) query = query.Where(x => !x.Simulated);
         if (beforeId is not null) query = query.Where(x => x.Id < beforeId);
         var rows = await query.OrderByDescending(x => x.Id).Take(limit + 1)
-            .Select(x => new { x.Id, x.JobId, x.JobName, x.Sn, x.Ts, x.Acknowledged, x.Outcome,
+            .Select(x => new { x.Id, x.JobId, x.JobName, x.Sn, x.Ts, x.Acknowledged, x.Outcome, x.Simulated,
                 Values = x.ValuesJson.Length <= 65536 ? x.ValuesJson : null }).ToListAsync(cancellationToken);
         var items = rows.Take(limit).Select(x =>
         {
@@ -122,7 +123,7 @@ public sealed class McpProductionQueryTools(
             if (values.Count > 100 || values.Any(value => value is null || !double.IsFinite(value.Value)))
                 throw new McpException("Traceability values exceed 100 fields or contain invalid data.");
             return new TraceabilityRecordResponse(x.Id, x.JobId, x.JobName, x.Sn,
-                DateTimeOffset.FromUnixTimeMilliseconds(x.Ts), x.Acknowledged, x.Outcome, values);
+                DateTimeOffset.FromUnixTimeMilliseconds(x.Ts), x.Acknowledged, x.Outcome, values, x.Simulated);
         }).ToArray();
         return new(items, rows.Count > limit ? rows[limit - 1].Id : null);
     }

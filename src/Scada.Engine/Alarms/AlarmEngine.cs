@@ -144,8 +144,54 @@ public sealed class AlarmEngine : BackgroundService
             return now - other.Ts > otherStale ? other with { Quality = Core.Enums.TagQuality.Bad } : other;
         }
 
+        // 设备退出仿真或主测点收到正式样本时，先结束仍活动的演练报警，再按现条件决定是否升正式报警。
+        await CloseSimulatedOnOfficialAsync(tag, value, now, cancellationToken);
+
         foreach (var transition in _evaluator.Evaluate(tag, value, rules, now, Lookup))
             await ApplyTransitionAsync(tag, transition with { Value = transition.Value with { Ts = now } }, cancellationToken);
+    }
+
+    private const string SimulationEndedReason = "仿真结束";
+
+    private bool IsOfficialSample(Tag tag, TagValue value) =>
+        !value.Simulated && DeviceOf(tag) is not { SimulationEnabled: true };
+
+    private async Task CloseSimulatedOnOfficialAsync(Tag tag, TagValue value, long now, CancellationToken cancellationToken)
+    {
+        if (!IsOfficialSample(tag, value) || !_rulesByTag.TryGetValue(tag.Id, out var rules)) return;
+        foreach (var rule in rules)
+        {
+            if (rule.TagId != tag.Id || !_activeEventIds.TryGetValue(rule.Id, out var eventId)) continue;
+            try
+            {
+                await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
+                var alarm = await db.AlarmEvents.FirstOrDefaultAsync(x => x.Id == eventId, cancellationToken);
+                if (alarm is null || alarm.EndTs is not null || !alarm.Simulated) continue;
+
+                var areaId = AreaOf(tag);
+                var wasFlood = _floodSuppressed.Remove(eventId);
+                if (wasFlood) _flood.RemoveSuppressed(areaId, eventId);
+                alarm.EndTs = now;
+                alarm.EndReason = SimulationEndedReason;
+                if (wasFlood)
+                {
+                    var keep = rule.SuppressMode == AlarmSuppressMode.None ? null : SuppressionReason(rule);
+                    alarm.Suppressed = keep is not null;
+                    alarm.SuppressReason = keep;
+                }
+
+                _suppressed.Remove(rule.Id);
+                db.AlarmActivities.Add(Activity(alarm, "recover", SimulationEndedReason));
+                await db.SaveChangesAsync(cancellationToken);
+                _activeEventIds.Remove(rule.Id);
+                _evaluator.ClearActive(rule.Id);
+                await NotifyAsync(alarm, "recover", cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "结束演练报警规则 {RuleId} 失败", rule.Id);
+            }
+        }
     }
 
     private async Task ApplyTransitionAsync(Tag triggerTag, AlarmTransition transition, CancellationToken cancellationToken)
@@ -176,7 +222,7 @@ public sealed class AlarmEngine : BackgroundService
                     return;
                 }
 
-                var decision = _flood.OnRaise(areaId, transition.Value.Ts);
+                var decision = _flood.OnRaise(areaId, transition.Value.Ts, transition.Value.Simulated || DeviceOf(tag) is { SimulationEnabled: true });
                 var alarm = NewAlarm(tag, rule, transition, end: false);
                 ApplyFlags(alarm, rule, transition.Value.Ts);
                 var floodSuppressed = ShouldSuppressByFlood(alarm, rule, decision) && !decision.Entered;
@@ -284,7 +330,7 @@ public sealed class AlarmEngine : BackgroundService
     }
 
     private bool ShouldSuppressByFlood(AlarmEvent alarm, AlarmRule rule, AlarmFloodDecision decision) =>
-        decision.Suppress && rule.Level <= _flood.SuppressMaxLevel && !alarm.Shelved && !alarm.Suppressed && !alarm.Chattering;
+        !alarm.Simulated && decision.Suppress && rule.Level <= _flood.SuppressMaxLevel && !alarm.Shelved && !alarm.Suppressed && !alarm.Chattering;
 
     private void TrackFloodSuppressed(int? areaId, int eventId)
     {
@@ -301,7 +347,7 @@ public sealed class AlarmEngine : BackgroundService
             await using var db = await _runtimeFactory.CreateDbContextAsync(cancellationToken);
             var since = ScadaTime.NowMs() - AlarmFloodGuard.WindowMs;
             var candidates = (await db.AlarmEvents
-                    .Where(x => x.EndTs == null && x.RuleId != null && x.StartTs >= since && !x.Shelved && !x.Suppressed && !x.Chattering)
+                    .Where(x => x.EndTs == null && x.RuleId != null && x.StartTs >= since && !x.Shelved && !x.Suppressed && !x.Chattering && !x.Simulated)
                     .OrderBy(x => x.StartTs).ThenBy(x => x.Id).Take(2000).ToListAsync(cancellationToken))
                 .Where(x => AreaOfTagId(x.TagId) == areaId).ToList();
 

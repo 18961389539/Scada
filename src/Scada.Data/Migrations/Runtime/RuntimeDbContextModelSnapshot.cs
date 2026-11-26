@@ -325,6 +325,9 @@ namespace Scada.Data.Migrations.Runtime
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IncludesSimulation")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int>("JobId")
                         .HasColumnType("INTEGER");
 
@@ -1907,6 +1910,9 @@ namespace Scada.Data.Migrations.Runtime
                         .HasColumnType("TEXT");
 
                     b.Property<int>("Outcome")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Simulated")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Sn")

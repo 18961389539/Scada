@@ -201,6 +201,15 @@ public sealed class AlarmEvaluator
 
     public void RestoreActive(int ruleId) => GetState(ruleId).Active = true;
 
+    // 演练报警因仿真结束关闭后，允许同一条件再升一条正式报警。
+    public void ClearActive(int ruleId)
+    {
+        var state = GetState(ruleId);
+        state.Active = false;
+        state.PendingSince = null;
+        state.RecoverPendingSince = null;
+    }
+
     public bool IsActive(int ruleId) => GetState(ruleId).Active;
 
     private RuleState GetState(int ruleId)

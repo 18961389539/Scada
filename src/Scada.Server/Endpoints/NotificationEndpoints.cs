@@ -13,7 +13,7 @@ namespace Scada.Server.Endpoints;
 
 public sealed record NotificationChannelRequest(string Name, NotificationChannelType Type, bool Enabled, NotificationChannelSettings? Settings, string? Secret, long? Revision = null);
 public sealed record DutyShiftRequest(string Name, int StartMinute, int EndMinute, int Days, bool Enabled);
-public sealed record NotificationRouteRequest(string Name, bool Enabled, int ChannelId, int? AreaId, AlarmLevel MinLevel, int? ShiftId, string? Recipients, bool OnRaise, bool OnRecover, int? EscalateAfterMinutes, long? Revision = null);
+public sealed record NotificationRouteRequest(string Name, bool Enabled, int ChannelId, int? AreaId, AlarmLevel MinLevel, int? ShiftId, string? Recipients, bool OnRaise, bool OnRecover, int? EscalateAfterMinutes, long? Revision = null, bool IncludeSimulated = false);
 public sealed record ChannelTestRequest(string? Recipients);
 public sealed record OutboxAcknowledgeRequest(long[]? Ids);
 public sealed record OutboxRetryRequest(long[]? Ids);
@@ -344,13 +344,14 @@ public static class NotificationEndpoints
         route.OnRaise = request.EscalateAfterMinutes is null && request.OnRaise;
         route.OnRecover = request.EscalateAfterMinutes is null && request.OnRecover;
         route.EscalateAfterMinutes = request.EscalateAfterMinutes;
+        route.IncludeSimulated = request.IncludeSimulated;
         return null;
     }
 
     private static NotificationRoute CopyRoute(NotificationRoute r) => new()
     {
         Id = r.Id, Name = r.Name, Enabled = r.Enabled, ChannelId = r.ChannelId, AreaId = r.AreaId, MinLevel = r.MinLevel, ShiftId = r.ShiftId,
-        Recipients = r.Recipients, OnRaise = r.OnRaise, OnRecover = r.OnRecover, EscalateAfterMinutes = r.EscalateAfterMinutes, Revision = r.Revision
+        Recipients = r.Recipients, OnRaise = r.OnRaise, OnRecover = r.OnRecover, EscalateAfterMinutes = r.EscalateAfterMinutes, IncludeSimulated = r.IncludeSimulated, Revision = r.Revision
     };
 
     // 报警通知按报警所在区域、报表投递按报表区域判定权限。

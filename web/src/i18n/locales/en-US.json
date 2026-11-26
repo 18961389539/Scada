@@ -2171,7 +2171,9 @@
     "kf6f2dc": "Edit notification route",
     "kfa4d47": "Acknowledged",
     "kfadf24": "Save",
-    "routeNeedsChannel": "Create a channel under Notification channels before adding a route"
+    "routeNeedsChannel": "Create a channel under Notification channels before adding a route",
+    "includeSimulated": "Include drill alarms",
+    "includeSimulatedHint": "Drill alarms are not sent by default. When enabled, the subject and body are marked as a drill/simulation."
   },
   "objectTemplateEditorView": {
     "actionFailed": "Template action failed",

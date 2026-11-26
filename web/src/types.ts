@@ -309,6 +309,9 @@ export interface AlarmSummary {
   shelved: number
   suppressed: number
   chattering: number
+  simulatedUnack?: number
+  simulatedAcked?: number
+  simulatedRtnUnack?: number
   shelvedRules: number
   outOfServiceRules: number
   flood: AlarmFloodStatus
@@ -394,6 +397,7 @@ export interface NotificationRoute {
   onRaise: boolean
   onRecover: boolean
   escalateAfterMinutes: number | null
+  includeSimulated?: boolean
 }
 
 export interface AlarmEvent {

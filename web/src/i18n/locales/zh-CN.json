@@ -2171,7 +2171,9 @@
     "kf6f2dc": "编辑通知路由",
     "kfa4d47": "已知悉",
     "kfadf24": "保存",
-    "routeNeedsChannel": "请先在「通知通道」创建通道，再新增路由"
+    "routeNeedsChannel": "请先在「通知通道」创建通道，再新增路由",
+    "includeSimulated": "允许演练报警",
+    "includeSimulatedHint": "默认不向外发送演练报警。开启后主题和正文会标明演练/仿真。"
   },
   "objectTemplateEditorView": {
     "actionFailed": "模板操作失败",

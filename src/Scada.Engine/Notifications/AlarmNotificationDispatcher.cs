@@ -537,6 +537,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
             .Where(r => alarm.Level >= r.MinLevel)
             .Where(r => r.AreaId is not int area || areas.Contains(area))
             .Where(r => r.ShiftId is not int s || (shifts.TryGetValue(s, out var shift) && ShiftActive(shift, local)))
+            .Where(r => !alarm.Simulated || r.IncludeSimulated)
             .Where(r => channels.ContainsKey(r.ChannelId))
             .Select(r => (r, channels[r.ChannelId]))
             .ToList();
@@ -605,6 +606,7 @@ public sealed class AlarmNotificationDispatcher : BackgroundService, IAlarmNotif
     {
         Id = a.Id, TagId = a.TagId, DeviceId = a.DeviceId, GatewayId = a.GatewayId, EndReason = a.EndReason, RuleId = a.RuleId, Level = a.Level,
         Value = a.Value, StartTs = a.StartTs, EndTs = a.EndTs, AckUser = a.AckUser, AckTs = a.AckTs, Message = a.Message,
-        Shelved = a.Shelved, Suppressed = a.Suppressed, SuppressReason = a.SuppressReason, Chattering = a.Chattering
+        Shelved = a.Shelved, Suppressed = a.Suppressed, SuppressReason = a.SuppressReason, Chattering = a.Chattering,
+        Simulated = a.Simulated
     };
 }

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Engine.Reports;
 
 namespace Scada.Engine.Tests;
@@ -196,6 +197,43 @@ public class ReportBuilderHistoryTests
         Assert.Equal(10, monthPoint.Min, 6);
         Assert.Equal(10, monthPoint.Max, 6);
         Assert.True(monthPoint.Count > 0);
+    }
+
+    [Fact]
+    public async Task OfficialReportOmitsSimulatedAlarmCountsAndSimulatedSnapshots()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        await using (var db = runtime.CreateDbContext())
+        {
+            db.AlarmEvents.Add(new AlarmEvent { Message = "现场", StartTs = Day + 10, Level = AlarmLevel.Warning });
+            db.AlarmEvents.Add(new AlarmEvent { Message = "演练", StartTs = Day + 20, Level = AlarmLevel.Warning, Simulated = true });
+            db.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = 1, Reason = "周期复位", PeriodKey = "2026-10-01", PeriodStartTs = Day, Ts = Day + H, ValuesJson = "{\"period\":10}" });
+            db.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = 1, Reason = "周期复位", PeriodKey = "sim", PeriodStartTs = Day + H, Ts = Day + 2 * H, ValuesJson = "{\"period\":99}", IncludesSimulation = true });
+            await db.SaveChangesAsync();
+        }
+        var builder = new ReportBuilder(new ReportService(new FakeHistory()), factory,
+            new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [], [], 0))), runtime);
+        var official = new ReportColumn[]
+        {
+            new() { Key = "alarms", Title = "报警", Kind = ReportColumnKind.AlarmCount },
+            new() { Key = "period", Title = "周期量", Kind = ReportColumnKind.CalcSnapshot, JobId = 1, Output = "period" }
+        };
+        var template = new ReportTemplate { Name = "日报", Period = ReportPeriod.Day, ColumnsJson = System.Text.Json.JsonSerializer.Serialize(official, ReportTemplates.Json) };
+        var table = await builder.BuildAsync(template, "2026-10-01", Day, Day + 24 * H, Utc, default);
+        Assert.Equal(1, table.Rows.Sum(r => r.Values[0] ?? 0));
+        Assert.Equal(1, table.Summary.Values[0]);
+        Assert.Equal(10, table.Rows.Sum(r => r.Values[1] ?? 0));
+        Assert.Equal(10, table.Summary.Values[1]);
+
+        official[0].IncludeSimulated = true;
+        official[1].IncludeSimulated = true;
+        var withDrill = new ReportTemplate { Name = "日报", Period = ReportPeriod.Day, ColumnsJson = System.Text.Json.JsonSerializer.Serialize(official, ReportTemplates.Json) };
+        var included = await builder.BuildAsync(withDrill, "2026-10-01", Day, Day + 24 * H, Utc, default);
+        Assert.Equal(2, included.Summary.Values[0]);
+        Assert.Equal(109, included.Summary.Values[1]);
     }
 
     private sealed class Factory(Microsoft.Data.Sqlite.SqliteConnection connection) : Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>

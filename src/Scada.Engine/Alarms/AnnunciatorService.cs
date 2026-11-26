@@ -184,7 +184,7 @@ public sealed class AnnunciatorService : BackgroundService, IAlarmNotifier
         int? area = a.TagId is int tagId ? model.AreasOfTag(tagId).FirstOrDefault()
             : a.DeviceId is int deviceId && model.DeviceAreas.TryGetValue(deviceId, out var da) ? da
             : null;
-        return new(a.Level, area, a.EndTs is null, a.AckTs is null, a.Shelved, a.Suppressed, a.Chattering);
+        return new(a.Level, area, a.EndTs is null, a.AckTs is null, a.Shelved, a.Suppressed, a.Chattering, a.Simulated);
     }
 
     public async Task<IReadOnlyList<AnnunciatorPanelDto>> ListAsync(Func<int?, bool> areaVisible, CancellationToken ct)

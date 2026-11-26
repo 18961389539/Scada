@@ -36,6 +36,8 @@ public sealed class ReportColumn
     public string? Formula { get; set; }
     public int Decimals { get; set; } = 2;
     public string? Unit { get; set; }
+    // 官方报表默认排除演练数据；开启后该列把演练报警或含仿真的周期快照一并计入。
+    public bool IncludeSimulated { get; set; }
 }
 
 // 报表模板：周期、列定义、定时生成与邮件投递设置。

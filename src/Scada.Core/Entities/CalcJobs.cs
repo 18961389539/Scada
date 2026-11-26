@@ -102,6 +102,8 @@ public class CalcJobSnapshot
     public long PeriodStartTs { get; set; }
     public long Ts { get; set; }
     public string ValuesJson { get; set; } = "{}";
+    // 本周期输入含仿真：官方报表默认不把该快照的周期量加进正式合计。
+    public bool IncludesSimulation { get; set; }
 }
 
 // 已发布脚本的历史。回退把其中一份同时写回草稿和已发布副本。

@@ -38,7 +38,7 @@ public sealed class AlarmKpiService(IDbContextFactory<RuntimeDbContext> factory,
         var now = nowMs ?? ScadaTime.NowMs();
         var from = now - Bucket;
         await using var db = await factory.CreateDbContextAsync(ct);
-        var rows = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs <= now && !x.Shelved && !x.Suppressed).ToListAsync(ct);
+        var rows = await db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs <= now && !x.Shelved && !x.Suppressed && !x.Simulated).ToListAsync(ct);
         var count = rows.Count(visible);
         var threshold = Math.Max(_settings.AlarmFloodThreshold, 1);
         return new(count, threshold, count > threshold, from, now);

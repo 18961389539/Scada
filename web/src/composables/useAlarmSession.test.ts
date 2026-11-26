@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ElNotification } from 'element-plus'
-import { alarmSessionActive, alarmToastSurface, onCriticalAlarmRaise, resetAlarmSessionForTests, shouldRunAlarmSession, useAlarmSession } from './useAlarmSession'
+import { alarmSessionActive, alarmToastSurface, missedCriticalAlarms, onCriticalAlarmRaise, resetAlarmSessionForTests, shouldRunAlarmSession, useAlarmSession } from './useAlarmSession'
 import { resetAlarmSoundForTests } from './useAlarmSound'
 
 const { onHubEvent, onHubClosed, onHubReconnected, resetHubMock } = vi.hoisted(() => ({
@@ -173,6 +173,30 @@ describe('critical raise presentation', () => {
     raiseCritical()
     expect(seen).toEqual(['Critical'])
     stop()
+  })
+
+  it('does not treat a simulated raise as an official critical toast or banner', () => {
+    const seen: string[] = []
+    const stop = onCriticalAlarmRaise(alarm => { seen.push(alarm.level) })
+    const session = useAlarmSession()
+    session.start()
+    const handler = onHubEvent.mock.calls[0]?.[1] as ((payload: { action: string; alarm: ReturnType<typeof criticalAlarm> & { simulated?: boolean } }) => void) | undefined
+    handler?.({ action: 'raise', alarm: { ...criticalAlarm(), simulated: true } })
+    expect(seen).toEqual([])
+    expect(ElNotification).toHaveBeenCalledTimes(1)
+    const options = vi.mocked(ElNotification).mock.calls[0]?.[0] as { type?: string; duration?: number; onClick?: () => void }
+    expect(options.type).toBe('info')
+    expect(options.duration).toBe(6000)
+    expect(options.onClick).toBeUndefined()
+    stop()
+  })
+})
+
+describe('missedCriticalAlarms', () => {
+  it('excludes simulated alarms from official missed-critical review', () => {
+    const official = { ...criticalAlarm(), startTs: 50, ackTs: null, endTs: null }
+    const drill = { ...criticalAlarm(), id: 2, startTs: 60, simulated: true, ackTs: null, endTs: null }
+    expect(missedCriticalAlarms([official, drill] as never, 0, 100).map(item => item.id)).toEqual([1])
   })
 })
 

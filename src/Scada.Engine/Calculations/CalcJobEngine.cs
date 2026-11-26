@@ -333,9 +333,9 @@ public sealed class CalcJobEngine(
         var tagIds = await AreaTagIdsCachedAsync(db, job, ct);
         if (tagIds.Count == 0) return (points, []);
         var alarms = await runtime.AlarmEvents.AsNoTracking()
-            .Where(alarm => alarm.EndTs == null && alarm.Level >= job.AlarmMinLevel && alarm.TagId != null && tagIds.Contains(alarm.TagId.Value))
+            .Where(alarm => alarm.EndTs == null && !alarm.Simulated && alarm.Level >= job.AlarmMinLevel && alarm.TagId != null && tagIds.Contains(alarm.TagId.Value))
             .OrderByDescending(alarm => alarm.StartTs)
-            .Select(alarm => new ScriptAlarm(alarm.Id, alarm.Level.ToString(), alarm.Message, alarm.AckTs != null, alarm.StartTs))
+            .Select(alarm => new ScriptAlarm(alarm.Id, alarm.Level.ToString(), alarm.Message, alarm.AckTs != null, alarm.StartTs, alarm.Simulated))
             .Take(32).ToArrayAsync(ct);
         return (points, alarms);
     }
@@ -606,7 +606,7 @@ public sealed class CalcJobEngine(
     {
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-        runtime.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = jobId, Reason = reason, PeriodKey = snapshot.PeriodKey, PeriodStartTs = snapshot.PeriodStartTs, Ts = now, ValuesJson = JsonSerializer.Serialize(snapshot.Values) });
+        runtime.CalcJobSnapshots.Add(new CalcJobSnapshot { JobId = jobId, Reason = reason, PeriodKey = snapshot.PeriodKey, PeriodStartTs = snapshot.PeriodStartTs, Ts = now, ValuesJson = JsonSerializer.Serialize(snapshot.Values), IncludesSimulation = snapshot.IncludesSimulation });
         await runtime.SaveChangesAsync(ct);
         // 复位前状态立即落盘，避免快照已写但周期量未清零时掉电导致重复计入。
         await PersistOneAsync(db, runtime, _jobs[jobId], now, ct);
@@ -663,7 +663,7 @@ public sealed class CalcJobEngine(
         if (_reload) await LoadAsync(ct);
         if (!_jobs.TryGetValue(jobId, out var running) || running.Job.Kind != CalcJobKind.RunHours || running.Execution is not null) return false;
         var now = ScadaTime.NowMs();
-        var before = new PeriodSnapshot(running.State.PeriodKey, running.State.PeriodStartTs, new Dictionary<string, double>(running.State.Values));
+        var before = new PeriodSnapshot(running.State.PeriodKey, running.State.PeriodStartTs, new Dictionary<string, double>(running.State.Values), running.State.PeriodIncludesSimulation);
         running.State.MaintenanceBase = running.State.Get("hours");
         running.State.Values["sinceMaintenance"] = 0; running.State.Values["maintenanceDue"] = 0;
         await SaveSnapshotAsync(jobId, "维护确认", before, now, ct);
@@ -729,7 +729,7 @@ public sealed class CalcJobEngine(
         // 三类触发合并成一次往返：原来最多三次 AnyAsync，而这条路径整个跑在全局 gate 内。
         // AckTs/EndTs 为 NULL 时与 cursor 比较结果为 UNKNOWN，等价于原来的 "!= null && > cursor"。
         var hit = await runtime.AlarmEvents.AsNoTracking()
-            .Where(x => x.Level >= job.AlarmMinLevel && x.TagId != null && tagIds.Contains(x.TagId.Value))
+            .Where(x => !x.Simulated && x.Level >= job.AlarmMinLevel && x.TagId != null && tagIds.Contains(x.TagId.Value))
             .AnyAsync(x => (job.AlarmOnRaise && x.StartTs > cursor)
                         || (job.AlarmOnAck && x.AckTs > cursor)
                         || (job.AlarmOnRecover && x.EndTs > cursor), ct);

@@ -320,17 +320,20 @@ public sealed class TraceabilityService(
                     throw new IOException($"采集点 #{id} 缺失、质量为非 Good 或数值无效。");
             if (values[trigger.Id].Value != 1)
                 throw new IOException($"PLC 已撤回采集请求：触发点 #{trigger.Id} 当前值为 {values[trigger.Id].Value}，不再是 1。");
+            TraceabilityCapture.EnsureOfficial(values.Values, job.AllowSimulated);
             var sn = job.SnSource == TraceabilitySnSource.Plc
                 ? TraceabilityCapture.ReadSn(snIds.Select(id => values[id]).ToArray(), job.SnFormat)
                 : TraceabilityCapture.ValidateSn(scan);
+            var simulated = values.Values.Any(value => value.Simulated);
             if (job.DuplicateCheckEnabled && await runtime.TraceabilityRecords.AnyAsync(record =>
-                record.JobId == job.Id && record.Sn == sn && record.Ts >= now - WindowMs(job), token))
+                record.JobId == job.Id && record.Sn == sn && record.Simulated == simulated && record.Ts >= now - WindowMs(job), token))
                 throw new IOException($"SN {sn} 在本任务近 {WindowDays(job)} 天内已采集过（重码），本次采集被拒绝并应答 3。");
             var payload = fields.Select(field => new TraceabilityValue(field.Name, field.TagId, values[field.TagId].Value,
                 config.TryGetTag(field.TagId, out var tag) ? tag.Unit : null, field.OutcomeMapping?.Evaluate(values[field.TagId].Value))).ToArray();
             return new TraceabilityRecord { CycleId = attempt.Id, JobId = job.Id, JobName = job.Name, AreaId = device.AreaId,
                 Sn = sn, Ts = ScadaTime.NowMs(), ValuesJson = JsonSerializer.Serialize(payload, Json),
-                Outcome = payload.SingleOrDefault(value => value.Outcome.HasValue)?.Outcome ?? TraceabilityOutcome.NotEvaluated };
+                Outcome = payload.SingleOrDefault(value => value.Outcome.HasValue)?.Outcome ?? TraceabilityOutcome.NotEvaluated,
+                Simulated = simulated };
         }, async (record, token) =>
         {
             runtime.TraceabilityRecords.Add(record);

@@ -22,6 +22,18 @@ namespace Scada.Engine.Tests;
 public sealed class TraceabilityTests
 {
     [Fact]
+    public void SimulatedGoodValuesAreRejectedUnlessExplicitlyAllowed()
+    {
+        var official = new TagValue(1, 1, TagQuality.Good, 1);
+        var simulated = new TagValue(2, 1, TagQuality.Good, 1, Simulated: true);
+        TraceabilityCapture.EnsureOfficial([official], allowSimulated: false);
+        var ex = Assert.Throws<InvalidOperationException>(() => TraceabilityCapture.EnsureOfficial([official, simulated], allowSimulated: false));
+        Assert.Contains("仿真", ex.Message);
+        TraceabilityCapture.EnsureOfficial([official, simulated], allowSimulated: true);
+        Assert.Equal(2, TraceabilityCapture.FirstSimulated([official, simulated])!.TagId);
+    }
+
+    [Fact]
     public async Task UpgradePreservesLegacyValuesWithoutReclassifyingThem()
     {
         await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
@@ -325,6 +337,35 @@ public sealed class TraceabilityTests
         }
     }
 
+    [Fact]
+    public async Task SimulatedValuesAreRejectedByDefaultAndDoNotReplySuccess()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        fixture.Collector.Simulated = true;
+        await fixture.Service.ProcessOnceAsync(default);
+        await using var runtime = fixture.Runtime.CreateDbContext();
+        Assert.Empty(await runtime.TraceabilityRecords.ToListAsync());
+        Assert.Equal([3], fixture.Collector.Replies);
+    }
+
+    [Fact]
+    public async Task AllowedSimulatedCaptureIsMarked()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await using (var db = fixture.Factory.CreateDbContext())
+        {
+            var job = await db.TraceabilityJobs.SingleAsync();
+            job.AllowSimulated = true;
+            await db.SaveChangesAsync();
+        }
+        fixture.Collector.Simulated = true;
+        await fixture.Service.ProcessOnceAsync(default);
+        await using var runtime = fixture.Runtime.CreateDbContext();
+        var record = await runtime.TraceabilityRecords.SingleAsync();
+        Assert.True(record.Simulated);
+        Assert.Equal([2], fixture.Collector.Replies);
+    }
+
     [Theory]
     [InlineData(TraceabilitySnSource.Tcp)]
     [InlineData(TraceabilitySnSource.Serial)]
@@ -484,6 +525,7 @@ public sealed class TraceabilityTests
     {
         public bool FailReply { get; set; }
         public bool BadData { get; set; }
+        public bool Simulated { get; set; }
         public int Captures { get; private set; }
         public List<int> Replies { get; } = [];
         private double _trigger = 1;
@@ -494,7 +536,7 @@ public sealed class TraceabilityTests
         {
             if (tagIds.Count > 1) Captures++;
             return Task.FromResult<IReadOnlyList<TagValue>>(tagIds.Select(id => new TagValue(id, id == 1 ? _trigger : id == 2 ? 12345 : id == 3 ? 12.3 : 220,
-                BadData && id == 3 ? TagQuality.Bad : TagQuality.Good, ScadaTime.NowMs())).ToArray());
+                BadData && id == 3 ? TagQuality.Bad : TagQuality.Good, ScadaTime.NowMs(), Simulated: Simulated)).ToArray());
         }
         public Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default)
         {

@@ -134,6 +134,26 @@ public class AlarmFloodGuardTests
     }
 
     [Fact]
+    public void SimulatedRaises_DoNotEnterOfficialFloodOrTriggerSuppress()
+    {
+        var guard = new AlarmFloodGuard(Settings(threshold: 1));
+        var first = guard.OnRaise(1, T0, simulated: true);
+        Assert.Equal(0, first.Count);
+        Assert.False(first.InFlood);
+        Assert.False(first.Entered);
+        Assert.False(first.Suppress);
+
+        var second = guard.OnRaise(1, T0 + 1, simulated: true);
+        Assert.Equal(0, second.Count);
+        Assert.False(second.InFlood);
+
+        var official = guard.OnRaise(1, T0 + 2);
+        Assert.Equal(1, official.Count);
+        Assert.False(official.InFlood);
+        Assert.False(official.Suppress);
+    }
+
+    [Fact]
     public void FirstOut_IsResetWhenFloodEnds()
     {
         var guard = new AlarmFloodGuard(Settings(threshold: 1));
@@ -203,6 +223,80 @@ public class AlarmEngineFloodTests
     }
 
     [Fact]
+    public async Task SimulatedRaises_DoNotPutOfficialAlarmsIntoFloodSuppression()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+
+        using var bus = new RealtimeBus();
+        var cache = new RealtimeCache();
+        var notifier = new Recorder();
+        var settings = new ScadaSettings { AlarmFloodThreshold = 1, AlarmFloodAutoSuppress = true, AlarmFloodFirstOut = true, AlarmFloodSuppressMaxLevel = AlarmLevel.Warning };
+        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance,
+            options: Options.Create(settings), floodGuard: new AlarmFloodGuard(settings));
+        await engine.StartAsync(CancellationToken.None);
+
+        var ts = ScadaTime.NowMs();
+        Publish(bus, cache, 1, 15, ts, simulated: true);
+        Publish(bus, cache, 2, 15, ts + 1, simulated: true);
+        Publish(bus, cache, 3, 15, ts + 2);
+
+        await notifier.WaitForAsync(x => x.Count(y => y.Action == "raise") == 3);
+        await engine.StopAsync(CancellationToken.None);
+
+        await using var check = runtime.CreateDbContext();
+        var alarms = await check.AlarmEvents.OrderBy(x => x.Id).ToListAsync();
+        Assert.Equal(2, alarms.Count(x => x.Simulated));
+        var official = Assert.Single(alarms, x => !x.Simulated);
+        Assert.Equal(3, official.TagId);
+        Assert.False(official.Suppressed);
+        Assert.DoesNotContain(alarms, x => x.Suppressed);
+        Assert.DoesNotContain(await check.AlarmActivities.ToListAsync(), x => x.Action == "firstout");
+    }
+
+    [Fact]
+    public async Task OfficialSample_ClosesActiveSimulatedAlarmAndRaisesOfficialWhenConditionHolds()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+
+        using var bus = new RealtimeBus();
+        var cache = new RealtimeCache();
+        var notifier = new Recorder();
+        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance);
+        await engine.StartAsync(CancellationToken.None);
+
+        var ts = ScadaTime.NowMs();
+        Publish(bus, cache, 3, 15, ts, simulated: true);
+        await notifier.WaitForAsync(x => x.Any(y => y.Action == "raise"));
+        var raised = notifier.Snapshot().Single(y => y.Action == "raise").Alarm;
+        Assert.True(raised.Simulated);
+
+        Publish(bus, cache, 3, 16, ts + 1000);
+        await notifier.WaitForAsync(x => x.Count(y => y.Action == "recover") == 1 && x.Count(y => y.Action == "raise") == 2);
+        await engine.StopAsync(CancellationToken.None);
+
+        await using var check = runtime.CreateDbContext();
+        var alarms = await check.AlarmEvents.OrderBy(x => x.Id).ToListAsync();
+        Assert.Equal(2, alarms.Count);
+        var ended = alarms.Single(x => x.Simulated);
+        Assert.Equal(raised.Id, ended.Id);
+        Assert.NotNull(ended.EndTs);
+        Assert.Equal("仿真结束", ended.EndReason);
+        Assert.Null(ended.AckTs);
+        var official = alarms.Single(x => !x.Simulated);
+        Assert.Null(official.EndTs);
+        Assert.True(official.StartTs >= ended.EndTs);
+        Assert.Contains(await check.AlarmActivities.ToListAsync(), x => x.Action == "recover" && x.Note == "仿真结束");
+    }
+
+    [Fact]
     public async Task FloodInOneArea_DoesNotSuppressAlarmsOfAnotherArea()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -236,9 +330,9 @@ public class AlarmEngineFloodTests
         Assert.False(other.FirstOut);
     }
 
-    private static void Publish(RealtimeBus bus, RealtimeCache cache, int tagId, double value, long ts)
+    private static void Publish(RealtimeBus bus, RealtimeCache cache, int tagId, double value, long ts, bool simulated = false)
     {
-        var tagValue = new TagValue(tagId, value, TagQuality.Good, ts);
+        var tagValue = new TagValue(tagId, value, TagQuality.Good, ts, Simulated: simulated);
         cache.Set(tagValue);
         bus.Publish(tagValue);
     }

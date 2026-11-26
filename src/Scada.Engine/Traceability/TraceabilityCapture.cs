@@ -43,6 +43,17 @@ public static class TraceabilityCapture
         return ValidateSn(Encoding.ASCII.GetString(payload));
     }
 
+    public static TagValue? FirstSimulated(IEnumerable<TagValue> values) =>
+        values.FirstOrDefault(value => value.Simulated);
+
+    public static void EnsureOfficial(IEnumerable<TagValue> values, bool allowSimulated)
+    {
+        if (allowSimulated) return;
+        var simulated = FirstSimulated(values);
+        if (simulated is not null)
+            throw new InvalidOperationException($"采集点 #{simulated.TagId} 为仿真值，默认拒绝作为正式追溯入库，也不应答成功。");
+    }
+
     public static string ValidateSn(string? sn)
     {
         var value = sn?.Trim() ?? "";

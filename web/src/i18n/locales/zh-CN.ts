@@ -147,7 +147,9 @@ export default {
     jogReleaseUnknown: '点动松开没有得到确认：设备可能仍在动作。服务端会在该按钮的最长保持时间到达后自动释放；请立即核对现场，必要时就地停机。'
   },
   alarmToast: {
-    openHint: '点击查看报警'
+    openHint: '点击查看报警',
+    simulatedTitle: '演练报警',
+    simulatedHint: '仿真演练，非正式现场报警'
   },
   pendingApprovals: {
     openList: '打开待复核',
@@ -1081,6 +1083,7 @@ export default {
     operator: '当前用户：{0}',
     unacked: '未确认报警',
     unackedByLevel: '按等级',
+    simulatedUnacked: '演练未确认',
     rtnUnack: '已恢复未确认',
     shelved: '暂挂',
     suppressed: '抑制',

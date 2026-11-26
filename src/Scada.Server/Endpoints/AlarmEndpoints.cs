@@ -230,7 +230,7 @@ public static class AlarmEndpoints
             var access = await http.GetAccessAsync();
             var counts = await alarmService.CountStatesAsync(VisibilityFilter(access, Permission.View), ct);
             var ackableUnack = await alarmService.CountAsync(null, null, cancellationToken: ct, liveOnly: true,
-                filter: VisibilityFilter(access, Permission.View, Permission.AckAlarm) with { State = AlarmListState.Unack });
+                filter: VisibilityFilter(access, Permission.View, Permission.AckAlarm) with { State = AlarmListState.Unack, Simulated = false });
             await shelf.EnsureLoadedAsync(ct);
             await using var db = await factory.CreateDbContextAsync(ct);
             var rules = await db.AlarmRules.AsNoTracking().Select(x => new { x.Id, x.TagId, x.OutOfService }).ToListAsync(ct);
@@ -254,6 +254,9 @@ public static class AlarmEndpoints
                 shelved = counts.Shelved,
                 suppressed = counts.Suppressed,
                 chattering = counts.Chattering,
+                simulatedUnack = counts.SimulatedUnack,
+                simulatedAcked = counts.SimulatedAcked,
+                simulatedRtnUnack = counts.SimulatedRtnUnack,
                 shelvedRules = shelf.Active.Count(x => visibleRuleIds.Contains(x.RuleId)),
                 outOfServiceRules = visibleRules.Count(x => x.OutOfService),
                 flood,

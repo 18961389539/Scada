@@ -19,9 +19,10 @@ public sealed record AlarmQueryFilter(
     bool IncludeSystemAlarms = true,
     AlarmCategory? Category = null,
     int[]? TagIds = null,
-    bool TouchWindow = false);
+    bool TouchWindow = false,
+    bool? Simulated = null);
 
-public sealed record AlarmStateCounts(int Unack, int Acked, int RtnUnack, int Shelved, int Suppressed, int Chattering);
+public sealed record AlarmStateCounts(int Unack, int Acked, int RtnUnack, int Shelved, int Suppressed, int Chattering, int SimulatedUnack = 0, int SimulatedAcked = 0, int SimulatedRtnUnack = 0);
 
 public sealed class AlarmService
 {
@@ -88,12 +89,15 @@ public sealed class AlarmService
         return await BuildQuery(db, null, null, false, false, true, true, filter)
             .GroupBy(_ => 1)
             .Select(group => new AlarmStateCounts(
-                group.Count(x => x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed),
-                group.Count(x => x.EndTs == null && x.AckTs != null && !x.Shelved && !x.Suppressed),
-                group.Count(x => x.EndTs != null && x.AckTs == null && !x.Shelved && !x.Suppressed),
-                group.Count(x => x.EndTs == null && x.Shelved),
-                group.Count(x => x.EndTs == null && x.Suppressed),
-                group.Count(x => x.EndTs == null && x.Chattering)))
+                group.Count(x => !x.Simulated && x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                group.Count(x => !x.Simulated && x.EndTs == null && x.AckTs != null && !x.Shelved && !x.Suppressed),
+                group.Count(x => !x.Simulated && x.EndTs != null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                group.Count(x => !x.Simulated && x.EndTs == null && x.Shelved),
+                group.Count(x => !x.Simulated && x.EndTs == null && x.Suppressed),
+                group.Count(x => !x.Simulated && x.EndTs == null && x.Chattering),
+                group.Count(x => x.Simulated && x.EndTs == null && x.AckTs == null && !x.Shelved && !x.Suppressed),
+                group.Count(x => x.Simulated && x.EndTs == null && x.AckTs != null && !x.Shelved && !x.Suppressed),
+                group.Count(x => x.Simulated && x.EndTs != null && x.AckTs == null && !x.Shelved && !x.Suppressed)))
             .SingleOrDefaultAsync(cancellationToken) ?? new AlarmStateCounts(0, 0, 0, 0, 0, 0);
     }
 
@@ -159,6 +163,7 @@ public sealed class AlarmService
             if (filter.Category is { } category) query = query.Where(x => x.Category == category);
             if (filter.TagId is { } tagId) query = query.Where(x => x.TagId == tagId);
             if (filter.TagIds is { Length: > 0 } selectedTags) query = query.Where(x => x.TagId != null && selectedTags.Contains(x.TagId.Value));
+            if (filter.Simulated is bool simulated) query = query.Where(x => x.Simulated == simulated);
             if (touch && from is long touchFrom && to is long touchTo)
                 query = query.Where(x =>
                     (x.StartTs >= touchFrom && x.StartTs <= touchTo)

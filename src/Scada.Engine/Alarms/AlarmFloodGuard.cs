@@ -60,12 +60,15 @@ public sealed class AlarmFloodGuard
     public bool FirstOutEnabled => _settings.AlarmFloodFirstOut;
     public AlarmLevel SuppressMaxLevel => _settings.AlarmFloodSuppressMaxLevel;
 
-    public AlarmFloodDecision OnRaise(int? areaId, long now)
+    public AlarmFloodDecision OnRaise(int? areaId, long now, bool simulated = false)
     {
         lock (_gate)
         {
             var state = StateOf(areaId);
             Prune(state, now);
+            // 演练触发不计入官方洪水窗口，避免一次演练让整片区域进入洪水并抑制正式报警。
+            if (simulated)
+                return new AlarmFloodDecision(state.Raises.Count, StartThreshold, ExitThreshold, state.InFlood, false, false, false);
             state.Raises.Enqueue(now);
             var count = state.Raises.Count;
             var entered = false;

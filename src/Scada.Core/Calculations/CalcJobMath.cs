@@ -39,7 +39,7 @@ public sealed class JobRuntimeState
     public void Add(string key, double delta) => Values[key] = Values.GetValueOrDefault(key) + delta;
 }
 
-public sealed record PeriodSnapshot(string PeriodKey, long PeriodStartTs, Dictionary<string, double> Values);
+public sealed record PeriodSnapshot(string PeriodKey, long PeriodStartTs, Dictionary<string, double> Values, bool IncludesSimulation = false);
 
 public static class CalcJobMath
 {
@@ -259,7 +259,7 @@ public static class CalcJobMath
 
     public static PeriodSnapshot ResetPeriod(JobRuntimeState state, string key)
     {
-        var snapshot = new PeriodSnapshot(key, state.PeriodStartTs, new Dictionary<string, double>(state.Values));
+        var snapshot = new PeriodSnapshot(key, state.PeriodStartTs, new Dictionary<string, double>(state.Values), state.PeriodIncludesSimulation);
         foreach (var name in state.Values.Keys.Where(IsPeriodKey).ToList()) state.Values[name] = 0;
         state.PeriodIncludesSimulation = false;
         return snapshot;
