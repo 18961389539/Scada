@@ -5,7 +5,8 @@ public enum HistoryGapKind
     BadQuality,
     Missing,
     Rejected,
-    SpoolDropped
+    SpoolDropped,
+    Simulated
 }
 
 /// <summary>

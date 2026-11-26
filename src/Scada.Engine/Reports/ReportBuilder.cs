@@ -6,6 +6,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
 using Scada.Data;
+using Scada.Engine.History;
 
 namespace Scada.Engine.Reports;
 
@@ -17,7 +18,7 @@ public sealed record ReportCoverage(double Ratio, bool Incomplete, int ExpectedH
 {
     public static ReportCoverage None { get; } = new(1, false, 0, 0, [], []);
 }
-public sealed record ReportTable(string Title, string PeriodKey, ReportPeriod Period, long From, long To, IReadOnlyList<ReportColumnHeader> Columns, IReadOnlyList<ReportRow> Rows, ReportRow Summary, long GeneratedTs, ReportCoverage? Coverage = null);
+public sealed record ReportTable(string Title, string PeriodKey, ReportPeriod Period, long From, long To, IReadOnlyList<ReportColumnHeader> Columns, IReadOnlyList<ReportRow> Rows, ReportRow Summary, long GeneratedTs, ReportCoverage? Coverage = null, IReadOnlyList<HistoryGap>? Gaps = null);
 public sealed class ReportTemplateException(string message) : Exception(message);
 
 public static class ReportPeriods
@@ -231,9 +232,13 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         // 差值与累计都基于原始样本（只取好质量、有限值），一次取整期 ±1 小时。
         var rawTags = columns.Where(c => c.Kind is ReportColumnKind.TagDiff or ReportColumnKind.TagSum).Select(c => c.TagId!.Value).Distinct().ToArray();
         var raw = new Dictionary<int, List<HistoryPoint>>();
+        var gapSeries = new List<HistorySeries>();
         if (rawTags.Length > 0)
             foreach (var series in await history.RawAsync(rawTags, from - ReportMath.EdgeMs, to + ReportMath.EdgeMs, ct))
-                raw[series.TagId] = series.Points.Where(p => p.Quality == TagQuality.Good && double.IsFinite(p.Value)).OrderBy(p => p.Ts).ToList();
+            {
+                gapSeries.Add(series);
+                raw[series.TagId] = series.Points.Where(p => p.Quality == TagQuality.Good && !p.Simulated && double.IsFinite(p.Value)).OrderBy(p => p.Ts).ToList();
+            }
 
         await using var db = await factory.CreateDbContextAsync(ct);
         await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
@@ -359,7 +364,8 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         ApplyFormulas(summary);
         var headers = columns.Select(c => new ReportColumnHeader(c.Key, c.Title, c.Unit, c.Decimals, c.Kind)).ToList();
         var coverage = MeasureCoverage(columns, result, from, to, zone, hourly, raw);
-        return new ReportTable(template.Name, periodKey, template.Period, from, to, headers, result, new ReportRow("合计/汇总", from, to, summary), ScadaTime.NowMs(), coverage);
+        var gaps = HistoryGapFinder.FromSeries(gapSeries, from, to, HistoryResolution.Hour);
+        return new ReportTable(template.Name, periodKey, template.Period, from, to, headers, result, new ReportRow("合计/汇总", from, to, summary), ScadaTime.NowMs(), coverage, gaps);
     }
 
     // 有样本小时数 / 周期小时数。缺测不改均值或积分公式，只把覆盖情况写入结果。
@@ -377,7 +383,7 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         {
             var tagId = column.TagId!.Value;
             if (column.Kind is ReportColumnKind.TagDiff or ReportColumnKind.TagSum)
-                return (raw.GetValueOrDefault(tagId) ?? []).Any(p => p.Ts >= rf && p.Ts < rt && p.Quality == TagQuality.Good && double.IsFinite(p.Value));
+                return (raw.GetValueOrDefault(tagId) ?? []).Any(p => p.Ts >= rf && p.Ts < rt && p.Quality == TagQuality.Good && !p.Simulated && double.IsFinite(p.Value));
             return hourly.Any(p => p.TagId == tagId && p.Ts >= rf && p.Ts < rt && p.Count > 0);
         }
 

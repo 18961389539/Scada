@@ -1,3 +1,4 @@
+using Scada.Server.Health;
 using System.Security.Cryptography;
 using System.Security.Cryptography.Pkcs;
 using System.Security.Cryptography.X509Certificates;
@@ -27,6 +28,27 @@ public sealed class ReportSigner
     public string KeysDirectory => Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_settings.ConfigDbPath))!, "keys");
     public string CertificatePath => string.IsNullOrWhiteSpace(_settings.ReportSigningCertPath) ? Path.Combine(KeysDirectory, DefaultFileName) : Path.GetFullPath(_settings.ReportSigningCertPath);
     public X509Certificate2 Certificate => _cert.Value;
+
+    /// <summary>读取已有证书的公开信息；文件不存在时不会自动生成自签名证书。</summary>
+    public CertificatePublicInfo? TryGetExistingPublicInfo()
+    {
+        if (!Enabled) return null;
+        if (_cert.IsValueCreated)
+            return CertificatePublicInfo.From(_cert.Value, "report-signing");
+        var path = CertificatePath;
+        if (!File.Exists(path)) return null;
+        try
+        {
+            using var cert = X509CertificateLoader.LoadPkcs12FromFile(path, _settings.ReportSigningCertPassword);
+            return CertificatePublicInfo.From(cert, "report-signing");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "无法读取报表签名证书的公开信息");
+            return null;
+        }
+    }
+
 
     private X509Certificate2 Load()
     {

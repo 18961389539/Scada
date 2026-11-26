@@ -10,6 +10,7 @@
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="external-load-error" />
       <el-alert v-if="areasError" :title="areasError" type="error" :closable="false" show-icon data-test="ext-areas-error" />
       <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon data-test="ext-action-error" />
+      <el-alert v-for="warning in certWarnings" :key="warning.code" type="warning" :closable="false" show-icon :title="warning.message" data-test="ext-cert-warning" />
 
       <div v-if="status" class="status-row" data-test="ext-status">
         <div class="status-item">
@@ -202,6 +203,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { externalApi, type ExternalApiKey, type ExternalEndpointStatus, type ExternalStatus } from '../api/external'
+import { healthApi } from '../api'
 import { http, errorMessage } from '../api/http'
 import { formatTime } from '../utils'
 import { tr } from '../i18n'
@@ -209,6 +211,7 @@ import { useEditDialog } from '../composables/useEditDialog'
 
 const loading = ref(false), saving = ref(false), dialog = ref(false), secretDialog = ref(false)
 const keys = ref<ExternalApiKey[]>([]), areas = ref<{ id: number; name: string }[]>([]), status = ref<ExternalStatus | null>(null)
+const certWarnings = ref<{ code: string; message: string }[]>([])
 const loadError = ref(''), areasError = ref(''), actionError = ref(''), createError = ref(''), copyError = ref('')
 const secret = ref('')
 const form = reactive({ name: '', scopes: ['ReadTags'] as string[], areaIds: [] as number[], rateLimitPerMinute: 120, notes: '' })
@@ -269,11 +272,17 @@ function slaveTitle(item?: ExternalEndpointStatus): string {
 async function load() {
   loading.value = true
   try {
-    ;[keys.value, status.value, areas.value] = await Promise.all([
+    const [keyRows, statusRow, areaRows, health] = await Promise.all([
       externalApi.listKeys(),
       externalApi.status(),
-      http.get('/areas').then(r => r.data).then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('externalApiView.areasFailed')); return areas.value })
+      http.get('/areas').then(r => r.data).then(list => { areasError.value = ''; return list }).catch((error) => { areasError.value = errorMessage(error, tr('externalApiView.areasFailed')); return areas.value }),
+      healthApi.get().catch(() => null)
     ])
+    keys.value = keyRows
+    status.value = statusRow
+    areas.value = areaRows
+    certWarnings.value = (health?.warnings ?? []).filter(w =>
+      w.code.startsWith('report_signing_cert') || w.code.startsWith('external_tcp_tls_cert'))
     loadError.value = ''
   } catch (e) {
     loadError.value = errorMessage(e, tr('externalApiView.actionFailed'))

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Data;
 
 namespace Scada.Engine.Templates;
@@ -251,6 +252,27 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
         foreach (var tag in plan.Tags.Values)
             if (allTags.Any(x => !replacedIds.Contains(x.Id) && x.DeviceId == tag.DeviceId && x.Name == tag.Name)) plan.Errors.Add($"测点名称冲突：{tag.Name}");
         if (plan.Tags.Values.GroupBy(x => (x.DeviceId, x.Name)).Any(x => x.Count() > 1)) plan.Errors.Add("合并后出现同名测点");
+        var previousById = allTags.ToDictionary(x => x.Id);
+        var combined = allTags.Where(x => !replacedIds.Contains(x.Id)).Concat(plan.Tags.Values).ToList();
+        foreach (var group in combined.GroupBy(x => x.DeviceId))
+        {
+            var list = group.ToList();
+            var grand = new HashSet<(int, int)>();
+            for (var i = 0; i < list.Count; i++)
+            for (var j = i + 1; j < list.Count; j++)
+            {
+                var a = list[i];
+                var b = list[j];
+                if (a.Id == 0 || b.Id == 0) continue;
+                if (!previousById.TryGetValue(a.Id, out var pa) || !previousById.TryGetValue(b.Id, out var pb)) continue;
+                var aUnchanged = !plan.Tags.Values.Any(x => x.Id == a.Id) || AddressOverlap.UnchangedForCompatibility(a, pa);
+                var bUnchanged = !plan.Tags.Values.Any(x => x.Id == b.Id) || AddressOverlap.UnchangedForCompatibility(b, pb);
+                if (aUnchanged && bUnchanged && AddressOverlap.Conflicts(pa, device, [pb]).Count > 0)
+                    grand.Add(a.Id < b.Id ? (a.Id, b.Id) : (b.Id, a.Id));
+            }
+            foreach (var o in AddressOverlap.ConflictsAmong(list, device, grand))
+                plan.Errors.Add($"测点「{o.TagName}」地址重叠：与「{o.OtherTagName}」冲突：{o.Reason}");
+        }
         var tagMap = allTags.Where(x => !plan.DeleteTagIds.Contains(x.Id)).ToDictionary(x => x.Id);
         foreach (var tag in plan.Tags.Values) tagMap[tag.Id] = tag;
         var targets = (await db.ProcessScreens.Where(x => x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();

@@ -37,6 +37,14 @@ public sealed class ExternalTcpHost(
 
     public int ConnectionCount => _sessions.Count;
 
+    public Scada.Server.Health.CertificatePublicInfo? TryGetTlsPublicInfo()
+    {
+        var opt = options.CurrentValue.Tcp;
+        if (!opt.Enabled || !opt.Tls || _tlsCert is null) return null;
+        return Scada.Server.Health.CertificatePublicInfo.From(_tlsCert, "external-tcp-tls");
+    }
+
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _ = Task.Run(() => PushLoopAsync(stoppingToken), stoppingToken);

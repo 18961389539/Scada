@@ -7,6 +7,7 @@ export interface HaStatus {
   enabled: boolean; nodeId: string; role: 'Primary' | 'Standby' | 'Standalone'; term: number; generation: number; selfUrl: string | null; peerUrl: string | null
   peer: HaPeer | null; peerSeenTs: number; witness: string | null; lease: HaLease | null; witnessError: string | null; autoFailover: boolean; promotedTs: number
   configSyncTs: number; historySyncTs: number; historyRowsBehind: number; configApplied: number; historyRowsApplied: number; replicationError: string | null
+  runtimeSyncTs?: number; runtimeRowsApplied?: number; runtimeRowsBehind?: number; peerSpoolBytes?: number; peerSpoolApproxCount?: number
   switchovers: number; events: HaEvent[]
 }
 export interface BackupDrill { fileName: string; ok: boolean; problems: string[]; durationMs: number; devices: number; tags: number; historyFiles: number; ts: string }

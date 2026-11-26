@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Data;
 using Scada.Data.RuntimeCleanup;
 
@@ -138,10 +139,28 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         var duplicate = excludeTagId is int exclude
             ? await db.Tags.AnyAsync(x => x.Id != exclude && x.DeviceId == deviceId && x.Name == tag.Name, cancellationToken)
             : await db.Tags.AnyAsync(x => x.DeviceId == deviceId && x.Name == tag.Name, cancellationToken);
-        return duplicate
-            ? (TagCommandError.DuplicateName,
-                [new ValidationIssue("tag.name.duplicate", nameof(Tag.Name), DuplicateNameMessage)])
-            : (TagCommandError.None, []);
+        if (duplicate)
+            return (TagCommandError.DuplicateName,
+                [new ValidationIssue("tag.name.duplicate", nameof(Tag.Name), DuplicateNameMessage)]);
+
+        if (tag.Kind == TagKind.Physical)
+        {
+            Tag? previous = excludeTagId is int existingId
+                ? await db.Tags.AsNoTracking().SingleOrDefaultAsync(x => x.Id == existingId, cancellationToken)
+                : null;
+            if (previous is null || !AddressOverlap.UnchangedForCompatibility(tag, previous))
+            {
+                var others = await db.Tags.AsNoTracking()
+                    .Where(x => x.DeviceId == deviceId && x.Kind == TagKind.Physical && (excludeTagId == null || x.Id != excludeTagId))
+                    .ToListAsync(cancellationToken);
+                var overlaps = AddressOverlap.Conflicts(tag, device, others, previous);
+                if (overlaps.Count > 0)
+                    return (TagCommandError.AddressOverlap, overlaps.Select(o =>
+                        new ValidationIssue(AddressOverlap.IssueCode, nameof(Tag.Address),
+                            $"与测点「{o.OtherTagName}」{(o.OtherTagId > 0 ? $"#{o.OtherTagId}" : "")}冲突：{o.Reason}")).ToList());
+            }
+        }
+        return (TagCommandError.None, []);
     }
 
     /// <summary>兼容入口：MCP 与工程导入仍只消费首条文案。</summary>
@@ -188,7 +207,8 @@ public enum TagCommandError
     DuplicateName,
     NotPhysical,
     Referenced,
-    Conflict
+    Conflict,
+    AddressOverlap
 }
 
 public sealed record TagCommandResult(
@@ -211,6 +231,7 @@ public sealed record TagCommandResult(
         TagCommandError.NotPhysical => "tag.kind.notPhysical",
         TagCommandError.Referenced => "tag.referenced",
         TagCommandError.Conflict => "tag.conflict",
+        TagCommandError.AddressOverlap => AddressOverlap.IssueCode,
         _ => "tag.request"
     };
 }

@@ -22,6 +22,8 @@ public sealed class SpcMonitorService(
     ILogger<SpcMonitorService> logger) : BackgroundService
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    public string? GetSkipReason(int chartId) => _states.TryGetValue(chartId, out var state) ? state.LastSkipReason : null;
     private readonly Dictionary<int, ChartState> _states = new();
     private IReadOnlyList<SpcChart> _charts = [];
     private long _chartsLoadedTs = long.MinValue;
@@ -33,6 +35,7 @@ public sealed class SpcMonitorService(
         public int Revision { get; set; }
         public List<double> Pending { get; } = [];
         public int MissingCount { get; set; }
+            public string? LastSkipReason { get; set; }
     }
 
     public async Task SampleOnceAsync(long now, CancellationToken ct = default, bool forceReload = false)
@@ -75,14 +78,18 @@ public sealed class SpcMonitorService(
             state.NextDueTs = now + chart.SamplingIntervalSec * 1000L;
 
             var value = cache.Get(chart.TagId);
-            if (value is not { Quality: TagQuality.Good } || !double.IsFinite(value.Value))
+            if (value is not { Quality: TagQuality.Good, Simulated: false } || !double.IsFinite(value.Value))
             {
-                // 质量无效的这一拍不计入子组；已有未完成样本作废，避免通讯恢复后把中断两端的值凑成同一组。
+                // 质量无效或仿真的这一拍不计入子组；已有未完成样本作废，避免通讯恢复后把中断两端的值凑成同一组。
                 if (state.Pending.Count > 0) state.Pending.Clear();
                 state.MissingCount++;
+                state.LastSkipReason = value is { Simulated: true }
+                    ? "仿真采样已排除，不计入控制图"
+                    : "测点质量无效，本拍已跳过";
                 continue;
             }
 
+            state.LastSkipReason = null;
             var size = chart.ChartType == SpcChartType.Individuals ? 1 : Math.Clamp(chart.SubgroupSize, 2, 10);
             state.Pending.Add(value.Value);
             if (state.Pending.Count < size) continue;

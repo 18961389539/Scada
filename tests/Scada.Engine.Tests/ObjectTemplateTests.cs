@@ -274,7 +274,7 @@ public class ObjectTemplateTests
     [Fact]
     public async Task BatchUpgradeWithOneConflictLeavesAllInstancesUnchanged()
     {
-        await using var rig = await Rig.CreateAsync(); var a = await rig.CreateInstanceAsync("A"); var b = await rig.CreateInstanceAsync("B");
+        await using var rig = await Rig.CreateAsync(); var a = await rig.CreateInstanceAsync("A"); var b = await rig.CreateInstanceAsync("B", 10);
         var baseline = ObjectTemplateJson.Read<ObjectInstanceBaseline>(b.BaselineJson);
         await using (var db = rig.Factory.CreateDbContext()) { var tag = await db.Tags.FindAsync(baseline.Tags["frequency"].Id); tag!.MaxValue = 60; await db.SaveChangesAsync(); }
         var updated = ObjectTemplateExamples.Pump(); updated.Tags.Single(x => x.Key == "frequency").Properties.MaxValue = 80;
@@ -350,7 +350,7 @@ public class ObjectTemplateTests
             db.ObjectTemplates.Add(template); await db.SaveChangesAsync(); rig.TemplateId = template.Id;
             db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = template.Id, Version = 1, DocumentJson = template.DraftJson, CreatedBy = "test" }); await db.SaveChangesAsync(); return rig;
         }
-        public async Task<DeviceObjectInstance> CreateInstanceAsync(string name = "P01") { await Service.CreateAsync(TemplateId, new(1, [new(name, 1, 0)]), null, "test", default); await using var db = Factory.CreateDbContext(); return await db.ObjectInstances.AsNoTracking().SingleAsync(x => x.Name == name); }
+        public async Task<DeviceObjectInstance> CreateInstanceAsync(string name = "P01", int baseAddress = 0) { await Service.CreateAsync(TemplateId, new(1, [new(name, 1, baseAddress)]), null, "test", default); await using var db = Factory.CreateDbContext(); return await db.ObjectInstances.AsNoTracking().SingleAsync(x => x.Name == name); }
         public async Task PublishAsync(int version, ObjectTemplateDocument doc) { Assert.Empty(ObjectTemplateValidator.Validate(doc)); await using var db = Factory.CreateDbContext(); db.ObjectTemplateVersions.Add(new DeviceObjectTemplateVersion { TemplateId = TemplateId, Version = version, DocumentJson = ObjectTemplateJson.Write(doc), CreatedBy = "test" }); await db.SaveChangesAsync(); }
         public Task<IReadOnlyList<object>> ApplyAsync(DeviceObjectInstance i, ObjectPlanPreview plan, Dictionary<string, string>? resolutions = null) => Service.UpgradeAsync(new([new(i.Id, plan.Version, i.Revision, plan.State, resolutions ?? [])]), null, "test", default);
         public async ValueTask DisposeAsync()

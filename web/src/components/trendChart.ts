@@ -126,6 +126,7 @@ function gapAreas(tagId: number, gaps: HistoryGap[], palette: ChartPalette): Lin
   const color = (kind: HistoryGap['kind']) => kind === 'BadQuality' ? 'rgba(200, 80, 80, 0.18)'
     : kind === 'Rejected' ? 'rgba(180, 120, 0, 0.22)'
     : kind === 'SpoolDropped' ? 'rgba(160, 60, 160, 0.18)'
+    : kind === 'Simulated' ? 'rgba(30, 120, 180, 0.18)'
     : 'rgba(120, 120, 120, 0.16)'
   return {
     silent: true,

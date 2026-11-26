@@ -80,11 +80,12 @@
               data-test="wo-area-filter" @change="loadOrders">
               <el-option v-for="a in areas" :key="a.id" :label="a.name" :value="a.id" />
             </el-select>
+            <el-checkbox v-model="orderOverdueOnly" data-test="wo-overdue-filter">{{ $t('assets.workOrder.overdueFilter') }}</el-checkbox>
             <span class="spacer" />
             <el-button v-if="canControlAny" type="primary" data-test="wo-add" @click="openOrder()">{{ $t('assets.addWorkOrder') }}</el-button>
           </div>
           <el-alert v-if="orderError" :title="orderError" type="error" :closable="false" show-icon data-test="wo-error" />
-          <el-table :data="orders" size="small" v-loading="orderLoading" :empty-text="$t('assets.workOrder.empty')" data-test="wo-table">
+          <el-table :data="displayedOrders" size="small" v-loading="orderLoading" :empty-text="$t('assets.workOrder.empty')" data-test="wo-table" :row-class-name="workOrderRowClass">
             <el-table-column prop="number" :label="$t('assets.workOrder.number')" width="170" show-overflow-tooltip />
             <el-table-column prop="title" :label="$t('assets.workOrder.title')" min-width="160" show-overflow-tooltip />
             <el-table-column :label="$t('assets.workOrder.asset')" min-width="130" show-overflow-tooltip>
@@ -107,6 +108,14 @@
               </template>
             </el-table-column>
             <el-table-column prop="assignee" :label="$t('assets.workOrder.assignee')" width="110" show-overflow-tooltip />
+            <el-table-column :label="$t('assets.workOrder.plannedEnd')" width="150">
+              <template #default="{ row }">
+                <span :class="{ 'wo-overdue-text': isOverdueOrder(row) }" data-test="wo-planned-end">
+                  {{ row.plannedEndTs ? formatTime(row.plannedEndTs) : '-' }}
+                  <span v-if="isOverdueOrder(row)"> {{ $t('assets.workOrder.overdue') }}</span>
+                </span>
+              </template>
+            </el-table-column>
             <el-table-column :label="$t('assets.workOrder.createdAt')" width="150">
               <template #default="{ row }">{{ formatTime(row.createdTs) }}</template>
             </el-table-column>
@@ -310,6 +319,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { areaApi, assetApi, deviceApi, sparePartApi, workOrderApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -328,7 +338,9 @@ import type {
 } from '../types'
 
 const auth = useAuthStore()
-const tab = ref('ledger')
+const route = useRoute()
+const tab = ref(typeof route.query.tab === 'string' ? route.query.tab : 'ledger')
+const orderOverdueOnly = ref(false)
 const areas = ref<Area[]>([])
 const devices = ref<Device[]>([])
 const assets = ref<Asset[]>([])
@@ -378,6 +390,14 @@ const controlAreas = computed(() => areas.value.filter(a => can(auth.user, 'Cont
 const canConfigureArea = (areaId: number) => can(auth.user, 'Configure', areaId)
 const canControlArea = (areaId: number) => can(auth.user, 'Control', areaId)
 const isClosed = (status: WorkOrderStatus) => status === 'Completed' || status === 'Cancelled'
+function isOverdueOrder(row: MaintenanceWorkOrder): boolean {
+  if (!row.plannedEndTs || isClosed(row.status)) return false
+  return row.plannedEndTs < Date.now()
+}
+const displayedOrders = computed(() => orderOverdueOnly.value ? orders.value.filter(isOverdueOrder) : orders.value)
+function workOrderRowClass({ row }: { row: MaintenanceWorkOrder }): string {
+  return isOverdueOrder(row) ? 'wo-overdue' : ''
+}
 
 const assetDialog = ref(false)
 const orderDialog = ref(false)
@@ -751,4 +771,7 @@ onMounted(async () => {
 .low-stock-tag {
   margin-left: 4px;
 }
+
+.wo-overdue td { background: var(--el-color-danger-light-9); }
+.wo-overdue-text { color: var(--el-color-danger); font-weight: 600; }
 </style>

@@ -79,6 +79,29 @@
         </ul>
       </section>
       <section>
+        <h2>{{ $t('dutyHandover.workOrders') }}</h2>
+        <p v-if="!openWorkOrders.length" data-test="handover-work-orders-empty">{{ $t('dutyHandover.noOpenWorkOrders') }}</p>
+        <ul v-else data-test="handover-work-orders">
+          <li v-for="order in openWorkOrders" :key="order.id">
+            <router-link data-test="handover-work-order-link" :to="{ path: '/assets', query: { tab: 'workOrders' } }">
+              {{ order.number }} · {{ order.title }}
+              <span v-if="isOverdueOrder(order)"> · {{ $t('dutyHandover.overdue') }} · {{ $t('dutyHandover.plannedEnd') }} {{ order.plannedEndTs ? formatTime(order.plannedEndTs) : '-' }}</span>
+            </router-link>
+          </li>
+        </ul>
+      </section>
+      <section>
+        <h2>{{ $t('dutyHandover.externalWrites') }}</h2>
+        <p v-if="!externalWrites.length" data-test="handover-external-writes-empty">{{ $t('dutyHandover.noExternalWrites') }}</p>
+        <ul v-else data-test="handover-external-writes">
+          <li v-for="item in externalWrites" :key="item.id">
+            {{ formatTime(item.ts) }} · {{ item.tagName }} · {{ item.source || item.origin }} · {{ item.result }}
+            <span v-if="item.userName"> · {{ $t('dutyHandover.byUser', [item.userName]) }}</span>
+          </li>
+        </ul>
+        <p><router-link data-test="handover-audit-link" to="/system?tab=logs">{{ $t('dutyHandover.viewAudit') }}</router-link></p>
+      </section>
+      <section>
         <h2>{{ $t('dutyHandover.sound') }}</h2>
         <p data-test="handover-sound">{{ soundEnabled ? $t('dutyHandover.unmuted') : $t('dutyHandover.muted') }}</p>
       </section>
@@ -95,8 +118,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import RuntimeBanners from '../components/RuntimeBanners.vue'
-import { alarmApi, ruleApi } from '../api'
-import { controlApi, type ControlLockout, type ControlRun, type DeviceControlState } from '../api/control'
+import { alarmApi, ruleApi, workOrderApi } from '../api'
+import { controlApi, type ControlLockout, type ControlRun, type DeviceControlState, type ExternalWrite } from '../api/control'
 import { recipeApi, type RecipeDownload } from '../api/recipes'
 import { pendingControlRequests, type ControlRequestRow } from '../composables/pendingApprovals'
 import { useAlarmSound } from '../composables/useAlarmSound'
@@ -105,7 +128,7 @@ import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { formatTime, levelLabel } from '../utils'
 import { tr } from '../i18n'
-import type { AlarmEvent, AlarmLevel } from '../types'
+import type { AlarmEvent, AlarmLevel, MaintenanceWorkOrder } from '../types'
 
 const auth = useAuthStore()
 const { soundEnabled } = useAlarmSound()
@@ -120,6 +143,8 @@ const shelved = ref(0)
 const suppressed = ref(0)
 const pending = ref<ControlRequestRow[]>([])
 const runningSequences = ref<ControlRun[]>([])
+const openWorkOrders = ref<MaintenanceWorkOrder[]>([])
+const externalWrites = ref<ExternalWrite[]>([])
 const runningRecipes = ref<RecipeDownload[]>([])
 const lockouts = ref<ControlLockout[]>([])
 const localDevices = ref<DeviceControlState[]>([])
@@ -146,6 +171,11 @@ function runStatusLabel(status: string): string {
   return labels[status] ?? status
 }
 
+function isOverdueOrder(order: MaintenanceWorkOrder): boolean {
+  if (!order.plannedEndTs) return false
+  if (order.status === 'Completed' || order.status === 'Cancelled') return false
+  return order.plannedEndTs < Date.now()
+}
 function isInterruptedSequence(run: ControlRun): boolean {
   if (run.status !== 'Failed' && run.status !== 'Aborted') return false
   const message = (run as ControlRun & { message?: string }).message || ''
@@ -197,7 +227,7 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [events, summary, shelves, requests, runs, downloads, lockoutPage, modes] = await Promise.all([
+    const [events, summary, shelves, requests, runs, downloads, lockoutPage, modes, , orderRows, writeRows] = await Promise.all([
       alarmApi.query({ live: true, unackedOnly: true, includeShelved: true, priorityFirst: true, limit: 2000 }),
       alarmApi.summary().catch(() => null),
       ruleApi.shelves().catch(() => []),
@@ -206,7 +236,9 @@ async function load(): Promise<void> {
       recipeApi.downloads().catch(() => ({ items: [] as RecipeDownload[] })),
       controlApi.lockouts().catch(() => ({ items: [] as ControlLockout[] })),
       controlApi.modes().catch(() => [] as DeviceControlState[]),
-      refreshHealth()
+      refreshHealth(),
+      workOrderApi.list({ take: 100 }).catch(() => [] as MaintenanceWorkOrder[]),
+      controlApi.externalWrites(20).catch(() => [] as ExternalWrite[])
     ])
     const counts: Record<string, number> = { Critical: 0, Warning: 0, Info: 0 }
     for (const alarm of events as AlarmEvent[]) {
@@ -226,6 +258,11 @@ async function load(): Promise<void> {
     const runItems = Array.isArray(runs) ? runs : (runs as { items?: ControlRun[] }).items ?? []
     const downloadItems = Array.isArray(downloads) ? downloads : (downloads as { items?: RecipeDownload[] }).items ?? []
     runningSequences.value = runItems.filter(run => run.status === 'Running')
+    const orderList = Array.isArray(orderRows) ? orderRows : []
+    openWorkOrders.value = orderList.filter(order => order.status !== 'Completed' && order.status !== 'Cancelled')
+      .sort((a, b) => Number(isOverdueOrder(b)) - Number(isOverdueOrder(a)) || (a.plannedEndTs ?? 0) - (b.plannedEndTs ?? 0))
+    externalWrites.value = Array.isArray(writeRows) ? writeRows : []
+
     interruptedSequences.value = runItems.filter(isInterruptedSequence)
     runningRecipes.value = downloadItems.filter(download => download.status === 'Pending' || download.status === 'Running')
     partialRecipes.value = downloadItems.filter(isAttentionRecipe)

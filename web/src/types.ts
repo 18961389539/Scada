@@ -466,7 +466,7 @@ export interface HistorySnapshotResult {
   items: HistorySnapshotItem[]
 }
 
-export type HistoryGapKind = 'BadQuality' | 'Missing' | 'Rejected' | 'SpoolDropped'
+export type HistoryGapKind = 'BadQuality' | 'Missing' | 'Rejected' | 'SpoolDropped' | 'Simulated'
 
 export interface HistoryGap {
   tagId?: number | null
@@ -819,6 +819,7 @@ export interface SpcChart {
   description: string
   revision: number
   latestSample: SpcSample | null
+  skipReason?: string | null
   activeRules: SpcViolationRule[]
 }
 

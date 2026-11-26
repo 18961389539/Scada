@@ -158,7 +158,7 @@ public sealed class ControlCommandService
         return result;
     }
 
-    public async Task<ControlCheck?> CheckAsync(int tagId, double value, ControlActor actor, CancellationToken ct)
+    public async Task<ControlCheck?> CheckAsync(int tagId, double value, ControlActor actor, CancellationToken ct, ControlOrigin origin = ControlOrigin.Operator)
     {
         if (!_config.TryGetTag(tagId, out var tag)) return null;
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
@@ -175,6 +175,7 @@ public sealed class ControlCommandService
         else
         {
             if (QualityRefusal(cached) is string qualityRefusal) refusals.Add(qualityRefusal);
+            if (SimulationWriteRefusal(device, origin) is string simulationRefusal) refusals.Add(simulationRefusal);
             if (!tag.Writable) refusals.Add("测点不可写");
             mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
             if (mode == DeviceControlMode.Local) refusals.Add($"设备 {device.Name} 处于就地控制，中心不能下发");
@@ -211,7 +212,7 @@ public sealed class ControlCommandService
         return check;
     }
 
-    public async Task<ControlCheck?> CheckTextAsync(int tagId, string text, ControlActor actor, CancellationToken ct)
+    public async Task<ControlCheck?> CheckTextAsync(int tagId, string text, ControlActor actor, CancellationToken ct, ControlOrigin origin = ControlOrigin.Operator)
     {
         if (!_config.TryGetTag(tagId, out var tag)) return null;
         await using var db = await _contextFactory.CreateDbContextAsync(ct);
@@ -229,6 +230,7 @@ public sealed class ControlCommandService
         else
         {
             if (QualityRefusal(cached) is string qualityRefusal) refusals.Add(qualityRefusal);
+            if (SimulationWriteRefusal(device, origin) is string simulationRefusal) refusals.Add(simulationRefusal);
             if (!tag.Writable) refusals.Add("测点不可写");
             mode = (await runtime.DeviceControlStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct))?.Mode ?? DeviceControlMode.Remote;
             if (mode == DeviceControlMode.Local) refusals.Add($"设备 {device.Name} 处于就地控制，中心不能下发");
@@ -267,6 +269,17 @@ public sealed class ControlCommandService
         return (cached.Quality, reason);
     }
 
+    public static bool IsLocalSimulationWrite(ControlOrigin origin) =>
+        origin is ControlOrigin.Operator or ControlOrigin.Screen or ControlOrigin.Sequence
+            or ControlOrigin.Recipe or ControlOrigin.Script or ControlOrigin.Annunciator;
+
+    public static string? SimulationWriteRefusal(Device? device, ControlOrigin origin)
+    {
+        if (device is not { SimulationEnabled: true }) return null;
+        if (IsLocalSimulationWrite(origin)) return null;
+        return $"设备 {device.Name} 处于仿真，外部或自动化写入不会下到现场，已拒绝";
+    }
+
     internal static string? QualityRefusal(TagValue? cached)
     {
         if (cached is null || cached.Quality == TagQuality.Good) return null;
@@ -289,7 +302,7 @@ public sealed class ControlCommandService
     {
         if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(s.TagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
-        var check = await CheckTextAsync(s.TagId, s.Text ?? "", s.Actor, ct);
+        var check = await CheckTextAsync(s.TagId, s.Text ?? "", s.Actor, ct, s.Origin);
         if (check is null) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         var interactive = s.Origin is ControlOrigin.Operator or ControlOrigin.Screen;
         var refusals = check.Refusals.ToList();
@@ -345,7 +358,7 @@ public sealed class ControlCommandService
         if (OutputBlocked() is { } blocked) return blocked;
         if (!_config.TryGetTag(s.TagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
         if (tag.DataType == TagDataType.String) return new(false, "字符串测点请使用文本写入", Outcome: GatewayCommandOutcome.NotSent);
-        var check = (await CheckAsync(s.TagId, s.Value, s.Actor, ct))!;
+        var check = (await CheckAsync(s.TagId, s.Value, s.Actor, ct, s.Origin))!;
         var refusals = check.Refusals.ToList();
         var interactive = s.Origin is ControlOrigin.Operator or ControlOrigin.Screen;
         long? grantTs = null;

@@ -17,7 +17,7 @@ public sealed record HaEvent(long Ts, string Kind, string Message, long Term, st
 public sealed record HaStatus(bool Enabled, string NodeId, string Role, long Term, long Generation, string? SelfUrl, string? PeerUrl, HaPeerStatus? Peer, long PeerSeenTs,
     string? Witness, HaLease? Lease, string? WitnessError, bool AutoFailover, long PromotedTs, long ConfigSyncTs, long HistorySyncTs, long HistoryRowsBehind,
     long ConfigApplied, long HistoryRowsApplied, long RuntimeSyncTs, long RuntimeRowsApplied, string? ReplicationError, long Switchovers, IReadOnlyList<HaEvent> Events,
-    long RuntimeRowsBehind = 0);
+    long RuntimeRowsBehind = 0, long PeerSpoolBytes = 0, long PeerSpoolApproxCount = 0);
 
 // 主备协调：心跳 + 仲裁租约（带任期）防双主；只有持有有效租约的节点是主机。
 // 主机续租失败且本地租约期限已到 → 自我隔离降为备机；备机仅在租约过期（加时钟偏差余量）后才能接管。
@@ -84,7 +84,7 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
         return new(_options.Enabled, _options.Enabled ? _options.NodeId : "standalone", _options.Enabled ? (_primary ? "Primary" : "Standby") : "Standalone", _state.Term, Generation,
             _options.SelfUrl, _options.Enabled ? _options.PeerUrl : null, _peer, _peerSeenTs, _witness?.Name, _lease, _witnessError, _options.AutoFailover && _witness is not null,
             _promotedTs, _replication.LastConfigSyncTs, _replication.LastHistorySyncTs, _replication.HistoryRowsBehind, _replication.ConfigApplied, _replication.HistoryRowsApplied,
-            _replication.LastRuntimeSyncTs, _replication.RuntimeRowsApplied, _replication.LastError, Interlocked.Read(ref _switchovers), events, _replication.RuntimeRowsBehind);
+            _replication.LastRuntimeSyncTs, _replication.RuntimeRowsApplied, _replication.LastError, Interlocked.Read(ref _switchovers), events, _replication.RuntimeRowsBehind, _replication.PeerSpool?.Bytes ?? 0, _replication.PeerSpool?.ApproxCount ?? 0);
     }
 
     public IEnumerable<SystemWarning> Warnings()

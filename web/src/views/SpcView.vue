@@ -20,6 +20,7 @@
         </el-popconfirm>
       </div>
       <el-alert v-if="loadError" :title="loadError" type="error" :closable="false" show-icon data-test="spc-error" />
+      <el-alert v-if="selectedChart?.skipReason" :title="$t('spcSkip.reason', [selectedChart.skipReason])" type="warning" :closable="false" show-icon data-test="spc-skip-reason" />
       <el-empty v-if="!charts.length && !loadError" :description="$t('spc.noCharts')" />
 
       <template v-if="selectedChart">

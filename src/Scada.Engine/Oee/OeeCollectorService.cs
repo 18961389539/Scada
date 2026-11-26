@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,10 @@ public sealed class OeeCollectorService(
     private readonly HashSet<int> _stateQualityFrozen = [];
     // 已为当前冻结段打过日志的产线，质量恢复后清除，避免采样循环刷屏。
     private readonly HashSet<int> _reportedQualityFreezes = [];
+    private readonly ConcurrentDictionary<int, string> _freezeReasons = new();
+
+    public string? GetFreezeReason(int lineId) => _freezeReasons.TryGetValue(lineId, out var reason) ? reason : null;
+
 
     public async Task SampleOnceAsync(long now, CancellationToken ct)
     {
@@ -56,7 +61,7 @@ public sealed class OeeCollectorService(
             if (line.StateTagId is int stId)
             {
                 var v = cache.Get(stId);
-                stateQualityValid = v is { Quality: TagQuality.Good } && double.IsFinite(v.Value);
+                stateQualityValid = v is { Quality: TagQuality.Good, Simulated: false } && double.IsFinite(v.Value);
                 if (stateQualityValid)
                 {
                     state = OeeService.MapStateDetailed(line.StateMapJson, v!.Value, out var mapError);
@@ -206,16 +211,22 @@ public sealed class OeeCollectorService(
 
             if (stateFrozen || countFrozen)
             {
+                var why = DescribeFreeze(line, stateFrozen, countFrozen);
+                _freezeReasons[line.Id] = why;
                 if (_reportedQualityFreezes.Add(line.Id))
-                    logger.LogWarning("产线 {LineId}「{LineName}」的{What}因测点质量无效被冻结，将保持上一拍有效值直到质量恢复",
-                        line.Id, line.Name, FreezeLabel(stateFrozen, countFrozen));
+                    logger.LogWarning("产线 {LineId}「{LineName}」的{What}因{Why}被冻结，将保持上一拍有效值直到恢复",
+                        line.Id, line.Name, FreezeLabel(stateFrozen, countFrozen), why);
             }
-            else _reportedQualityFreezes.Remove(line.Id);
+            else
+            {
+                _reportedQualityFreezes.Remove(line.Id);
+                _freezeReasons.TryRemove(line.Id, out _);
+            }
         }
         await db.SaveChangesAsync(ct);
         await runtime.SaveChangesAsync(ct);
 
-        double? Read(int? tagId) => tagId is int id && cache.Get(id) is { Quality: TagQuality.Good } v && double.IsFinite(v.Value) ? v.Value : null;
+        double? Read(int? tagId) => tagId is int id && cache.Get(id) is { Quality: TagQuality.Good, Simulated: false } v && double.IsFinite(v.Value) ? v.Value : null;
         static double Delta(double? prev, double? cur)
         {
             if (prev is null || cur is null) return 0;
@@ -227,6 +238,26 @@ public sealed class OeeCollectorService(
             (true, false) => "状态",
             _ => "计数"
         };
+        string DescribeFreeze(ProductionLine line, bool stateFrozen, bool countFrozen)
+        {
+            var parts = new List<string>();
+            void Check(int? id, string label)
+            {
+                if (id is not int tagId) return;
+                var value = cache.Get(tagId);
+                if (value is { Simulated: true }) parts.Add($"{label}为仿真值");
+                else if (value is null || value.Quality != TagQuality.Good || !double.IsFinite(value.Value))
+                    parts.Add(value is null ? $"{label}无有效值" : $"{label}质量{value.Quality}");
+            }
+            if (stateFrozen) Check(line.StateTagId, "状态测点");
+            if (countFrozen)
+            {
+                Check(line.GoodCountTagId, "良品计数");
+                Check(line.RejectCountTagId, "次品计数");
+                Check(line.TotalCountTagId, "总计数");
+            }
+            return parts.Count > 0 ? string.Join("，", parts) : "测点质量无效或为仿真值";
+        }
     }
 
     // 把报警导入为待确认停机候选（同报警不重复）。

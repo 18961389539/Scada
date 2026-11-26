@@ -363,9 +363,57 @@ public static class ControlEndpoints
             if (!(await http.GetAccessAsync()).Has(Permission.Control, run.AreaId)) return await Audit.ForbidAsync(http, $"中止顺控运行 #{id}", "无该区域的控制权限", "ControlSequenceRun", id);
             return await workflow.AbortAsync(id, Actor(http), ct) ? Results.Accepted() : Results.Conflict(new { message = "运行已结束" });
         }).RequireAuthorization(AccessPolicies.Control);
+
+        group.MapGet("/external-writes", async (
+            int? take, HttpContext http, IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            IConfigSnapshot config, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            var limit = Math.Clamp(take ?? 20, 1, 50);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var rows = await runtime.OperationLogs.AsNoTracking()
+                .Where(x => x.TargetType == "Control" && x.Result.StartsWith("成功"))
+                .OrderByDescending(x => x.Ts)
+                .Take(400)
+                .ToListAsync(ct);
+            var items = new List<object>();
+            foreach (var row in rows)
+            {
+                if (!TryReadExternalWrite(row.Details, out var origin, out var source)) continue;
+                var tagId = row.TagId ?? (int.TryParse(row.TargetId, out var parsed) ? parsed : 0);
+                if (tagId <= 0 || !access.CanTag(Permission.View, tagId)) continue;
+                var tagName = config.TryGetTag(tagId, out var tag) ? tag.Name : $"#{tagId}";
+                items.Add(new
+                {
+                    row.Id, row.Ts, tagId, tagName, row.UserName, row.Action, row.Result,
+                    row.OldValue, row.NewValue, origin, source
+                });
+                if (items.Count >= limit) break;
+            }
+            return Results.Ok(items);
+        });
     }
 
     public static ControlActor Actor(HttpContext http) => new(http.User.GetUserId(), http.User.GetUserName());
+
+    private static bool TryReadExternalWrite(string? details, out string origin, out string? source)
+    {
+        origin = "";
+        source = null;
+        if (string.IsNullOrWhiteSpace(details)) return false;
+        try
+        {
+            using var doc = JsonDocument.Parse(details);
+            origin = doc.RootElement.TryGetProperty("origin", out var o) ? o.GetString() ?? "" : "";
+            source = doc.RootElement.TryGetProperty("source", out var s) ? s.GetString() : null;
+        }
+        catch (JsonException) { return false; }
+        if (string.Equals(origin, "External", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!string.IsNullOrEmpty(source) && (source.StartsWith("外部", StringComparison.Ordinal) || source.Contains("MCP", StringComparison.OrdinalIgnoreCase)))
+            return true;
+        return false;
+    }
+
 
     private static string SequenceFingerprint(ControlSequence sequence) => BatchConfirmationStore.Fingerprint(
         sequence.Id.ToString(CultureInfo.InvariantCulture), sequence.Revision.ToString(CultureInfo.InvariantCulture),

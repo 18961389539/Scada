@@ -62,5 +62,21 @@ export const controlApi = {
   },
   runs: async (sequenceId?: number, before?: number) => readPage(await http.get<ControlRun[]>('/control/runs', { params: { sequenceId, before } })),
   run: async (id: number) => (await http.get<ControlRun>(`/control/runs/${id}`)).data,
-  abort: async (id: number) => http.post(`/control/runs/${id}/abort`)
+  abort: async (id: number) => http.post(`/control/runs/${id}/abort`),
+  externalWrites: async (take = 20) => (await http.get<ExternalWrite[]>('/control/external-writes', { params: { take } })).data
 }
+
+export interface ExternalWrite {
+  id: number
+  ts: number
+  tagId: number
+  tagName: string
+  userName: string | null
+  action: string
+  result: string
+  oldValue: string | null
+  newValue: string | null
+  origin: string
+  source: string | null
+}
+

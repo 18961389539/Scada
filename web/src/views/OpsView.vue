@@ -25,12 +25,15 @@
           <el-descriptions-item :label="$t('opsView.kc79d88')">{{ ha.autoFailover ? $t('opsView.k256783') : $t('opsView.k6c14bd') }}</el-descriptions-item>
           <el-descriptions-item :label="$t('opsView.kaafdc7')">{{ $t('opsView.kd7b6ad', [ha.configSyncTs ? formatTime(ha.configSyncTs) : '-', ha.configApplied]) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('opsView.kb51418')">{{ $t('opsView.k81d109', [ha.historySyncTs ? formatTime(ha.historySyncTs) : '-', ha.historyRowsBehind]) }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('haOps.runtimeBehind')">{{ $t('haOps.runtimeBehindValue', [ha.runtimeRowsBehind ?? 0]) }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('haOps.spoolBehind')">{{ $t('haOps.spoolBehindValue', [ha.peerSpoolApproxCount ?? 0, ha.peerSpoolBytes ?? 0]) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('opsView.k5387b4')">{{ ha.switchovers }}</el-descriptions-item>
         </el-descriptions>
         <el-alert type="info" :closable="false" show-icon data-test="ha-peer-transport"
           :title="$t('opsView.peerTransportHint')" style="margin-top: 8px" />
         <el-alert v-if="ha.witnessError" type="error" :closable="false" :title="$t('opsView.k98e6fc', [ha.witnessError])" style="margin-top: 8px" />
         <el-alert v-if="ha.replicationError" type="warning" :closable="false" :title="$t('opsView.k9f2469', [ha.replicationError])" style="margin-top: 8px" />
+        <el-alert v-for="warning in certWarnings" :key="warning.code" type="warning" :closable="false" show-icon :title="warning.message" data-test="ops-cert-warning" style="margin-top: 8px" />
         <el-table :data="ha.events" size="small" style="margin-top: 8px" max-height="240" :empty-text="readError || $t('opsView.kfad64b')" data-test="ha-events">
           <el-table-column :label="$t('opsView.k89b4aa')" width="170" show-overflow-tooltip><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
           <el-table-column :label="$t('opsView.ke4e46c')" width="100" show-overflow-tooltip><template #default="{ row }">{{ eventKind(row.kind) }}</template></el-table-column>
@@ -143,6 +146,8 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { opsApi } from '../api/ops'
+import { healthApi } from '../api'
+import type { Health } from '../types'
 import type { BackupRun, BackupSecurity, BackupSummary, DesktopClient, DesktopClientList, HaStatus } from '../api/ops'
 import { errorMessage } from '../api/http'
 import { downloadBlob, formatBytes, formatTime } from '../utils'
@@ -241,28 +246,49 @@ async function authorizedDownload(url: string, method: 'GET' | 'POST', fallbackN
 
 async function refresh(): Promise<void> {
   try {
-    const [s, r, b, t, security] = await Promise.all([
+    const [s, r, b, t, security, health] = await Promise.all([
       opsApi.status(), opsApi.runs(), opsApi.backups(), opsApi.targets(),
-      opsApi.backupSecurity().catch(() => null)
+      opsApi.backupSecurity().catch(() => null),
+      healthApi.get().catch(() => null)
     ])
     ha.value = s; runs.value = r; backups.value = b; targets.value = t
     backupSecurity.value = security
+    certWarnings.value = (health?.warnings ?? []).filter(w =>
+      w.code.startsWith('report_signing_cert') || w.code.startsWith('external_tcp_tls_cert'))
     readError.value = ''; statusError.value = ''
   } catch (e) {
     readError.value = errorMessage(e, tr('opsView.actionFailed'))
   }
 }
 
+function haLagCounts() {
+  return {
+    history: ha.value?.historyRowsBehind ?? 0,
+    runtime: ha.value?.runtimeRowsBehind ?? 0,
+    spool: ha.value?.peerSpoolApproxCount ?? 0,
+    spoolBytes: ha.value?.peerSpoolBytes ?? 0
+  }
+}
+function haIsBehind() {
+  const lag = haLagCounts()
+  return lag.history > 0 || lag.runtime > 0 || lag.spool > 0 || lag.spoolBytes > 0
+}
+
 async function act(kind: 'switchover' | 'promote'): Promise<void> {
   if (haBusy.value) return
   const title = kind === 'switchover' ? tr('opsView.k353b2a') : tr('opsView.k10d585')
+  const lag = haLagCounts()
+  const lagText = tr('haOps.lagSummary', [lag.history, lag.runtime, lag.spool])
   let reason: string
   try {
-    const result = await ElMessageBox.prompt(kind === 'switchover'
+    const result = await ElMessageBox.prompt((kind === 'switchover'
       ? tr('opsView.k76648b')
-      : tr('opsView.k9771fd'), title,
+      : tr('opsView.k9771fd')) + '\n' + lagText, title,
       { inputValidator: (v: string) => (!!v && v.trim().length > 0 && v.length <= 200) || tr('opsView.k18169c'), confirmButtonText: tr('opsView.kf526c8'), cancelButtonText: tr('opsView.k4d0b46') })
     reason = result.value.trim()
+    if (haIsBehind()) {
+      await ElMessageBox.confirm(tr('haOps.lagConfirm', [lag.history, lag.runtime, lag.spool]), tr('haOps.lagConfirmTitle'), { type: 'warning', confirmButtonText: tr('haOps.lagConfirmOk'), cancelButtonText: tr('opsView.k4d0b46') })
+    }
   } catch { return }
   if (haBusy.value) return
   haBusy.value = true
@@ -273,7 +299,8 @@ async function act(kind: 'switchover' | 'promote'): Promise<void> {
       try { await opsApi.promote(reason, false) }
       catch (e) {
         if (ha.value?.witness) throw e
-        await ElMessageBox.confirm(tr('opsView.k3cbaa9', [errorMessage(e, tr('opsView.actionFailed'))]), tr('opsView.kc24622'), { type: 'warning', confirmButtonText: tr('opsView.kc24622'), cancelButtonText: tr('opsView.k4d0b46') })
+        const forceLag = haLagCounts()
+        await ElMessageBox.confirm(tr('opsView.k3cbaa9', [errorMessage(e, tr('opsView.actionFailed'))]) + '\n' + tr('haOps.lagSummary', [forceLag.history, forceLag.runtime, forceLag.spool]), tr('opsView.kc24622'), { type: 'warning', confirmButtonText: tr('opsView.kc24622'), cancelButtonText: tr('opsView.k4d0b46') })
         await opsApi.promote(reason, true)
       }
     }

@@ -755,10 +755,10 @@ export default {
     switchLabel: '仿真设备（不连接现场）',
     switchHint: '仿真设备不打开现场连接；协议参数保留，切回真实设备时可直接复用。',
     enableConfirmTitle: '开启设备仿真？',
-    enableConfirmBody: '仿真值会写入历史，也可能被上级主站读取。请确认这是有意开启。',
+    enableConfirmBody: '仿真值会写入历史，也可能被上级主站读取。外部主站、API 或 MCP 对仿真设备的写入会被拒绝，不会下到现场。请确认这是有意开启。',
     enableConfirmOk: '确认开启',
     enableConfirmCancel: '取消',
-    warning: '仿真值会进入实时、报警、历史、报表和 OEE。投运前请在独立数据目录或测试环境使用。',
+    warning: '仿真值会进入实时、报警、历史、报表和 OEE。外部主站、API 或 MCP 对仿真设备的写入会被拒绝，不会下到现场。投运前请在独立数据目录或测试环境使用。',
     waveform: '波形',
     period: '周期 (s)',
     min: '最小值',
@@ -865,6 +865,7 @@ export default {
       number: '工单号', title: '标题', asset: '关联资产', area: '区域', type: '类型', priority: '优先级',
       status: '状态', assignee: '负责人', reporter: '报修人', createdAt: '创建时间',
       plannedStart: '计划开始', plannedEnd: '计划结束', startedAt: '实际开始', completedAt: '完成时间',
+      overdue: '逾期', overdueFilter: '仅看逾期', overdueHighlight: '已逾期',
       downtime: '停机分钟', resolution: '处理结果', description: '故障或任务描述',
       empty: '暂无维护工单', addTitle: '新建维护工单', editTitle: '编辑维护工单',
       start: '开始', hold: '挂起', resume: '恢复', complete: '完成', cancelOrder: '取消工单',
@@ -1088,6 +1089,15 @@ export default {
     unknownResult: '结果未知',
     device: '设备',
     tag: '测点',
+    workOrders: '未关闭工单',
+    overdueWorkOrders: '逾期工单',
+    noOpenWorkOrders: '没有未关闭或逾期的维护工单',
+    plannedEnd: '计划结束',
+    overdue: '逾期',
+    externalWrites: '近期成功的外部或 MCP 写入',
+    noExternalWrites: '近期没有成功的外部或 MCP 写入',
+    viewAudit: '打开审计日志',
+    byUser: '操作者 {0}',
   },
 
   runtimeBanners: {
@@ -1096,13 +1106,40 @@ export default {
     openPrimary: '打开主机',
     primaryUrl: '主机地址：{0}',
     simulationTitle: '有设备处于仿真',
-    simulationBody: '下列已启用设备正在使用仿真值。这些值会写入历史，也可能被上级主站读取，不要当成现场合格值。'
+    simulationBody: '下列已启用设备正在使用仿真值。这些值会写入历史，也可能被上级主站读取，不要当成现场合格值。外部主站、API 或 MCP 对仿真设备的写入会被拒绝，不会下到现场。'
   },
   alarmReconnect: {
     missedTitle: '断线期间的紧急报警',
     missedBody: '重连后发现 {0} 条仍活动或刚恢复但未确认的紧急报警，请查看。',
     open: '查看报警',
     dismiss: '知道了'
+  },
+  haOps: {
+    lagSummary: '历史落后 {0} 行，运行库落后 {1} 行，未复制暂存约 {2} 条。',
+    lagConfirm: '当前历史落后 {0} 行、运行库落后 {1} 行、未复制暂存约 {2} 条。请确认仍然切换或接管。',
+    lagConfirmTitle: '数据尚未对齐',
+    lagConfirmOk: '确认落后仍继续',
+    runtimeBehind: '运行库同步',
+    spoolBehind: '未复制暂存',
+    runtimeBehindValue: '落后 {0} 行',
+    spoolBehindValue: '约 {0} 条（{1} 字节）'
+  },
+  oeeFreeze: {
+    reason: '产线因{0}被冻结，将保持上一拍有效值，直到测点恢复。'
+  },
+  spcSkip: {
+    reason: '{0}'
+  },
+  reportGaps: {
+    title: '历史缺口（含仿真采样）',
+    simulated: '仿真采样',
+    empty: '该期间没有质量、仿真或缺失缺口。'
+  },
+  trendsGap: {
+    simulated: '仿真采样'
+  },
+  certExpiry: {
+    title: '证书即将到期或已过期'
   },
   kioskStatus: {
     reconnecting: '正在重新连接',

@@ -7,6 +7,8 @@ using Scada.Data;
 using Scada.Data.RuntimeCleanup;
 using Scada.Server.Auth;
 
+using Scada.Engine.Spc;
+
 namespace Scada.Server.Endpoints;
 
 public sealed record SpcChartRequest(
@@ -31,7 +33,7 @@ public sealed record SpcChartView(
     long? LimitsEstablishedTs, bool LimitsProvisional, double? SpecUpperLimit, double? SpecLowerLimit,
     bool RuleBeyond3Sigma, bool RuleTwoOfThreeBeyond2Sigma, bool RuleFourOfFiveBeyond1Sigma,
     bool RuleEightOnOneSide, bool RuleRangeBeyondLimit, string Description, int Revision,
-    SpcSampleView? LatestSample, IReadOnlyList<string> ActiveRules);
+    SpcSampleView? LatestSample, IReadOnlyList<string> ActiveRules, string? SkipReason = null);
 
 public sealed record SpcViolationView(
     long Id, int ChartId, long SampleId, string Rule, long Ts, int? AlarmEventId, long? RecoveredTs, string Message);
@@ -44,7 +46,7 @@ public static class SpcEndpoints
 
         group.MapGet("/charts", async (
             HttpContext http, IDbContextFactory<ConfigDbContext> factory,
-            IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            IDbContextFactory<RuntimeDbContext> runtimeFactory, SpcMonitorService monitor, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -73,13 +75,13 @@ public static class SpcEndpoints
                     .OrderByDescending(x => x.Ts).FirstOrDefault();
                 return View(chart, tags.GetValueOrDefault(chart.TagId), latest,
                     active.Where(x => x.ChartId == chart.Id && x.Revision == chart.Revision));
-            }).ToList();
+            }).Select(v => v with { SkipReason = monitor.GetSkipReason(v.Id) }).ToList();
             return Results.Ok(views);
         });
 
         group.MapGet("/charts/{id:int}", async (
             int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory,
-            IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+            IDbContextFactory<RuntimeDbContext> runtimeFactory, SpcMonitorService monitor, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var chart = await db.SpcCharts.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -93,7 +95,7 @@ public static class SpcEndpoints
                 .OrderByDescending(x => x.Ts).FirstOrDefaultAsync(ct);
             var active = await runtime.SpcViolations.AsNoTracking()
                 .Where(x => x.ChartId == chart.Id && x.Revision == chart.Revision && x.RecoveredTs == null).ToListAsync(ct);
-            return Results.Ok(View(chart, tag, latest, active));
+            return Results.Ok(View(chart, tag, latest, active) with { SkipReason = monitor.GetSkipReason(chart.Id) });
         });
 
         group.MapGet("/charts/{id:int}/samples", async (

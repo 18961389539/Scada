@@ -1,3 +1,4 @@
+import type { HistoryGap } from '../types'
 import { http, readPage } from './http'
 
 export type ReportPeriod = 'Shift' | 'Day' | 'Month'
@@ -36,7 +37,7 @@ export interface ReportCoverageData {
   columns: { key: string; ratio: number; incomplete: boolean; expectedHours: number; coveredHours: number }[]
   rows: { label: string; from: number; to: number; ratio: number; incomplete: boolean; expectedHours: number; coveredHours: number }[]
 }
-export interface ReportTableData { title: string; periodKey: string; columns: { key: string; title: string; unit: string | null; decimals: number }[]; rows: ReportRowData[]; summary: ReportRowData; coverage?: ReportCoverageData | null }
+export interface ReportTableData { title: string; periodKey: string; columns: { key: string; title: string; unit: string | null; decimals: number }[]; rows: ReportRowData[]; summary: ReportRowData; coverage?: ReportCoverageData | null; gaps?: HistoryGap[] | null }
 
 export const reportCenterApi = {
   templates: async () => (await http.get<ReportTemplate[]>('/report-templates')).data,

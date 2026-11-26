@@ -9,6 +9,7 @@ export interface ProductionLine {
   goodCountTagId?: number | null; rejectCountTagId?: number | null; totalCountTagId?: number | null
   productId?: number | null; idealCycleSec: number; ratedUnitsPerHour?: number | null; targetUnitsPerHour?: number | null
   enabled: boolean; revision: number; updatedTs: number; updatedBy?: string | null
+  freezeReason?: string | null
 }
 export interface ProductionProduct {
   id: number; name: string; code?: string | null; areaId?: number | null

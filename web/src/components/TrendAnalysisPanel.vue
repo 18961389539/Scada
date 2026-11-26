@@ -114,7 +114,7 @@ const props = defineProps<{
 
 const gaps = computed(() => props.gaps ?? [])
 function gapKindLabel(kind: HistoryGap['kind']): string {
-  const key = ({ BadQuality: 'trendsView.gapBadQuality', Missing: 'trendsView.gapMissing', Rejected: 'trendsView.gapRejected', SpoolDropped: 'trendsView.gapSpoolDropped' } as const)[kind]
+  const key = ({ BadQuality: 'trendsView.gapBadQuality', Missing: 'trendsView.gapMissing', Rejected: 'trendsView.gapRejected', SpoolDropped: 'trendsView.gapSpoolDropped', Simulated: 'trendsGap.simulated' } as const)[kind]
   return key ? tr(key) : kind
 }
 function percent(ts: number): string {

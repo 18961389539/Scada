@@ -755,10 +755,10 @@ export default {
     switchLabel: 'Simulated device (does not connect to the field)',
     switchHint: 'A simulated device opens no field connection. Protocol settings are kept for switching back to the real device.',
     enableConfirmTitle: 'Enable device simulation?',
-    enableConfirmBody: 'Simulated values are written to history and may be read by an upstream master station. Confirm this is intentional.',
+    enableConfirmBody: 'Simulated values are written to history and may be read by an upstream master station. External master, API or MCP writes to a simulated device are refused and will not reach the field. Confirm this is intentional.',
     enableConfirmOk: 'Enable',
     enableConfirmCancel: 'Cancel',
-    warning: 'Simulated values flow into realtime, alarms, history, reports and OEE. Use a separate data directory or test environment before commissioning.',
+    warning: 'Simulated values flow into realtime, alarms, history, reports and OEE. External master, API or MCP writes to a simulated device are refused and will not reach the field. Use a separate data directory or test environment before commissioning.',
     waveform: 'Waveform',
     period: 'Period (s)',
     min: 'Minimum',
@@ -865,6 +865,7 @@ export default {
       number: 'Number', title: 'Title', asset: 'Asset', area: 'Area', type: 'Type', priority: 'Priority',
       status: 'Status', assignee: 'Assignee', reporter: 'Reporter', createdAt: 'Created',
       plannedStart: 'Planned start', plannedEnd: 'Planned end', startedAt: 'Started', completedAt: 'Completed',
+      overdue: 'Overdue', overdueFilter: 'Overdue only', overdueHighlight: 'Overdue',
       downtime: 'Downtime (min)', resolution: 'Resolution', description: 'Fault or task description',
       empty: 'No maintenance work orders', addTitle: 'New maintenance work order', editTitle: 'Edit maintenance work order',
       start: 'Start', hold: 'Hold', resume: 'Resume', complete: 'Complete', cancelOrder: 'Cancel order',
@@ -1088,6 +1089,15 @@ export default {
     unknownResult: 'Result unknown',
     device: 'Device',
     tag: 'Tag',
+    workOrders: 'Open work orders',
+    overdueWorkOrders: 'Overdue work orders',
+    noOpenWorkOrders: 'No open or overdue maintenance work orders',
+    plannedEnd: 'Planned end',
+    overdue: 'Overdue',
+    externalWrites: 'Recent successful external or MCP writes',
+    noExternalWrites: 'No recent successful external or MCP writes',
+    viewAudit: 'Open audit log',
+    byUser: 'By {0}',
   },
 
   runtimeBanners: {
@@ -1096,13 +1106,40 @@ export default {
     openPrimary: 'Open primary',
     primaryUrl: 'Primary URL: {0}',
     simulationTitle: 'Devices are in simulation',
-    simulationBody: 'The following enabled devices are using simulated values. Those values are archived and may be read by an upstream master station; do not treat them as live field data.'
+    simulationBody: 'The following enabled devices are using simulated values. Those values are archived and may be read by an upstream master station; do not treat them as live field data. External master, API or MCP writes to a simulated device are refused and will not reach the field.'
   },
   alarmReconnect: {
     missedTitle: 'Critical alarms during the disconnect',
     missedBody: 'After reconnecting, {0} critical alarm(s) are still active or have returned but are unacknowledged. Please review them.',
     open: 'Open alarms',
     dismiss: 'Dismiss'
+  },
+  haOps: {
+    lagSummary: 'History is {0} rows behind, runtime is {1} rows behind, unreplicated spool is about {2} records.',
+    lagConfirm: 'History is {0} rows behind, runtime is {1} rows behind, and unreplicated spool is about {2} records. Confirm you still want to switch over or take over.',
+    lagConfirmTitle: 'Replica is behind',
+    lagConfirmOk: 'Continue despite lag',
+    runtimeBehind: 'Runtime sync',
+    spoolBehind: 'Unreplicated spool',
+    runtimeBehindValue: '{0} rows behind',
+    spoolBehindValue: 'About {0} records ({1} bytes)'
+  },
+  oeeFreeze: {
+    reason: 'This line is frozen because {0}. The last good values will be held until the tags recover.'
+  },
+  spcSkip: {
+    reason: '{0}'
+  },
+  reportGaps: {
+    title: 'History gaps (including simulated samples)',
+    simulated: 'Simulated samples',
+    empty: 'No quality, simulation, or missing gaps in this period.'
+  },
+  trendsGap: {
+    simulated: 'Simulated samples'
+  },
+  certExpiry: {
+    title: 'A certificate is expiring or has expired'
   },
   kioskStatus: {
     reconnecting: 'Reconnecting',

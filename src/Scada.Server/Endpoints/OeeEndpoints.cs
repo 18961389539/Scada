@@ -37,12 +37,12 @@ public static class OeeEndpoints
         var group = app.MapGroup("/api/oee").RequireAuthorization().AddEndpointFilter<AuditFailuresFilter>();
 
         // ---- 配置：产线 / 产品 / 班次 / 原因 ----
-        group.MapGet("/lines", async (HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapGet("/lines", async (HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Engine.Oee.OeeCollectorService collector, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await f.CreateDbContextAsync(ct);
             return Results.Ok((await db.ProductionLines.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct))
-                .Where(x => access.Has(Permission.View, x.AreaId)).Select(LineView));
+                .Where(x => access.Has(Permission.View, x.AreaId)).Select(x => LineView(x, collector.GetFreezeReason(x.Id))));
         });
         group.MapPost("/lines", (ProductionLineRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveLine(null, r, http, f, runtimeFactory, ct));
         group.MapPut("/lines/{id:int}", (int id, ProductionLineRequest r, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => SaveLine(id, r, http, f, runtimeFactory, ct));
@@ -453,10 +453,11 @@ public static class OeeEndpoints
         return Results.Ok(ReasonView(row));
     }
 
-    private static object LineView(ProductionLine x) => new
+    private static object LineView(ProductionLine x, string? freezeReason = null) => new
     {
         x.Id, x.Name, x.AreaId, x.Description, x.StateTagId, x.StateMapJson, x.GoodCountTagId, x.RejectCountTagId, x.TotalCountTagId,
-        x.ProductId, x.IdealCycleSec, x.RatedUnitsPerHour, x.TargetUnitsPerHour, x.Enabled, x.Revision, x.UpdatedTs, x.UpdatedBy
+        x.ProductId, x.IdealCycleSec, x.RatedUnitsPerHour, x.TargetUnitsPerHour, x.Enabled, x.Revision, x.UpdatedTs, x.UpdatedBy,
+        freezeReason
     };
     private static object ProductView(ProductionProduct x) => new { x.Id, x.Name, x.Code, x.AreaId, x.IdealCycleSec, x.RatedUnitsPerHour, x.Description, x.Revision, x.UpdatedTs, x.UpdatedBy };
     private static object ShiftView(ProductionShift x) => new { x.Id, x.Name, x.AreaId, x.StartMinute, x.EndMinute, x.Days, x.Enabled, x.Revision, x.UpdatedTs, x.UpdatedBy };

@@ -5,6 +5,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Calculations;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using System.Text.RegularExpressions;
 using Scada.Data;
 using Scada.Server.Endpoints;
@@ -154,6 +155,7 @@ public sealed class TagExcelService
         var physicalNames = new HashSet<(int DeviceId, string Name)>();
         var devices = await db.Devices.ToDictionaryAsync(x => x.Name, cancellationToken);
         var tags = await db.Tags.Where(x => x.Kind == TagKind.Physical).ToDictionaryAsync(x => (x.DeviceId!.Value, x.Name), cancellationToken);
+        var baseline = tags.Values.Where(x => x.Id != 0).ToDictionary(x => x.Id, x => x.Clone());
         var touchedDevices = new HashSet<int>();
 
         for (var row = 2; row <= lastRow; row++)
@@ -270,9 +272,33 @@ public sealed class TagExcelService
         }
         errors.AddRange(laneErrors);
 
+        var overlapErrors = new List<string>();
+        foreach (var deviceId in touchedDevices)
+        {
+            var device = devices.Values.Single(x => x.Id == deviceId);
+            var deviceTags = tags.Values.Where(x => x.DeviceId == deviceId && x.Kind == TagKind.Physical).ToList();
+            var grand = new HashSet<(int, int)>();
+            for (var i = 0; i < deviceTags.Count; i++)
+            for (var j = i + 1; j < deviceTags.Count; j++)
+            {
+                var a = deviceTags[i];
+                var b = deviceTags[j];
+                if (a.Id == 0 || b.Id == 0) continue;
+                if (!baseline.TryGetValue(a.Id, out var pa) || !baseline.TryGetValue(b.Id, out var pb)) continue;
+                if (AddressOverlap.UnchangedForCompatibility(a, pa) && AddressOverlap.UnchangedForCompatibility(b, pb)
+                    && AddressOverlap.Conflicts(pa, device, [pb]).Count > 0)
+                    grand.Add(a.Id < b.Id ? (a.Id, b.Id) : (b.Id, a.Id));
+            }
+            foreach (var o in AddressOverlap.ConflictsAmong(deviceTags, device, grand))
+                overlapErrors.Add($"设备「{device.Name}」地址重叠：与测点「{o.OtherTagName}」{(o.OtherTagId > 0 ? $"#{o.OtherTagId}" : "")}冲突：{o.Reason}");
+        }
+        errors.AddRange(overlapErrors);
+
         if (hasCalculations && errors.Count > 0) return new(0, 0, skipped, errors.Prepend("含计算定义的工作簿须整体有效，未导入任何行").Take(50).ToArray());
         // 档位是设备级约束，超限时不能部分入库，否则现场会先采到不完整点表。
         if (laneErrors.Count > 0)
+            return new(0, 0, skipped + created + updated, errors.Take(50).ToList());
+        if (overlapErrors.Count > 0)
             return new(0, 0, skipped + created + updated, errors.Take(50).ToList());
         if (!dryRun) await db.SaveChangesAsync(cancellationToken);
         var calculationCreated = 0;

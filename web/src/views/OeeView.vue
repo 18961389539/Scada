@@ -38,6 +38,7 @@
           <el-alert v-if="report?.usedRollups" type="info" :closable="false" show-icon class="note" data-test="oee-rollup-note" :title="$t(report.faultCountsStored ? 'oee.rollupCountNote' : 'oee.rollupNote', [formatTime(report.detailFrom)])" />
           <!-- 没有任何计划生产时间与产量时，A/P/Q/OEE 全是「—」。不解释的话会被当成系统故障。 -->
           <el-alert v-if="kpi && !kpi.plannedMs && !kpi.total" type="warning" :closable="false" show-icon class="note" data-test="oee-empty" :title="$t('oee.noData')" />
+          <el-alert v-if="selectedLine?.freezeReason" type="warning" :closable="false" show-icon class="note" data-test="oee-freeze" :title="$t('oeeFreeze.reason', [selectedLine.freezeReason])" />
           <template v-if="kpi">
             <section aria-labelledby="oee-core-title" class="kpi-section">
               <h2 id="oee-core-title" class="kpi-section-title">{{ $t('oeeHierarchy.coreMetrics') }}</h2>
@@ -151,6 +152,7 @@ const range = ref<[Date, Date] | null>([new Date(Date.now() - 86400000), new Dat
 const activeQuick = ref<number | null>(24)
 const drillOrigin = ref<{ range: [number, number]; quick: number | null } | null>(null)
 const areaId = ref<number>(), lineId = ref<number>(), productId = ref<number>(), shiftId = ref<number>()
+const selectedLine = computed(() => lines.value.find(line => line.id === lineId.value))
 const areas = ref<{ id: number; name: string }[]>([]), lines = ref<ProductionLine[]>([]), products = ref<ProductionProduct[]>([])
 const shifts = ref<ProductionShift[]>([])
 const report = ref<OeeReport | null>(null)
