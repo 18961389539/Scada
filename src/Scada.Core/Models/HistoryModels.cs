@@ -32,7 +32,8 @@ public sealed record HistoryTagAnalysis(
     double? Max,
     double IntegralHours,
     IReadOnlyList<HistoryQualityInterval> Quality,
-    bool QualityTruncated);
+    bool QualityTruncated,
+    long SimulatedMs = 0);
 
 public sealed record HistoryAnalysisResult(
     long From,

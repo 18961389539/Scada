@@ -2492,7 +2492,8 @@
     "trend": "OEE trend",
     "validationFailed": "Fix the highlighted fields first",
     "vsTarget": "Production vs target",
-    "yes": "Yes"
+    "yes": "Yes",
+    "reasonRequiredWhenConfirmed": "A reason is required to confirm downtime"
   },
   "opcBrowserDialog": {
     "applyFailed": "Tag creation failed",
@@ -4305,7 +4306,7 @@
     "aggregateBooleanAxis": "Boolean sample mean (0–1)",
     "aggregateBooleanHint": "These are aggregate means. Fractional Boolean values are not intermediate physical states. Select a 1-hour or 6-hour range to inspect raw changes.",
     "analysisFailed": "Failed to load analysis",
-    "analysisHint": "Time-weighted by hold duration; only Good quality counts",
+    "analysisHint": "Time-weighted by hold duration; only non-simulated Good quality counts toward average, integral and availability. Simulated duration is listed separately.",
     "analysisLimit": "Quality intervals and time-weighted analysis cover the last 24 hours and up to 20 tags",
     "analysisTitle": "History analysis",
     "autoRefresh": "Auto refresh",
@@ -4376,7 +4377,8 @@
     "exportNotExactRaw": "This file is the data shown in the chart, not the undownsampled raw samples",
     "sourceColumn": "Source",
     "sourceSimulation": "Simulation",
-    "sourceField": "Field"
+    "sourceField": "Field",
+    "simulatedDuration": "Simulated duration"
   },
   "userAssignmentsDialog": {
     "k215093": "Select role",

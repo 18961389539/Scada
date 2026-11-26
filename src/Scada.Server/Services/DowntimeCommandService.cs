@@ -16,7 +16,8 @@ public enum DowntimeCommandError
     None,
     NotFound,
     LineMissing,
-    ReasonMissing
+    ReasonMissing,
+    ReasonRequired
 }
 
 public sealed class DowntimeCommandResult
@@ -55,6 +56,11 @@ public sealed class DowntimeCommandService
         var noteChanged = applyNote && note != row.Note;
         if (row.Confirmed && !reasonChanged && !noteChanged)
             return DowntimeCommandResult.Ok(row, line, unchanged: true, "Downtime event was already confirmed; nothing changed.");
+        var finalReason = reasonId ?? row.ReasonId;
+        if (finalReason is not int confirmedReason || confirmedReason <= 0)
+            return DowntimeCommandResult.Failed(DowntimeCommandError.ReasonRequired, "确认停机必须填写停机原因", row, line);
+        if (!await db.DowntimeReasons.AnyAsync(x => x.Id == confirmedReason, cancellationToken))
+            return DowntimeCommandResult.Failed(DowntimeCommandError.ReasonMissing, "Downtime reason does not exist.", row, line);
 
         var now = ScadaTime.NowMs();
         var already = row.Confirmed;

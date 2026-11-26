@@ -9,6 +9,9 @@ public class HistoryAnalysisTests
     private static HistorySeries Series(int tagId, params (long Ts, double Value, TagQuality Quality)[] points) =>
         new() { TagId = tagId, Points = points.Select(x => new HistoryPoint(x.Ts, x.Value, x.Quality)).ToList() };
 
+    private static HistorySeries Series(int tagId, params HistoryPoint[] points) =>
+        new() { TagId = tagId, Points = points.ToList() };
+
     [Fact]
     public void TimeWeightedAverageIgnoresBadQualityAndMergesIntervals()
     {
@@ -69,5 +72,24 @@ public class HistoryAnalysisTests
         var result = Assert.Single(HistoryAnalysis.Analyze([Series(5, points)], 0, 30_000, maxIntervals: 4));
         Assert.Equal(4, result.Quality.Count);
         Assert.True(result.QualityTruncated);
+    }
+
+    [Fact]
+    public void SimulatedSamplesAreExcludedFromOfficialStatistics()
+    {
+        var series = Series(6,
+            new HistoryPoint(0, 10, TagQuality.Good),
+            new HistoryPoint(10_000, 99, TagQuality.Good, Simulated: true),
+            new HistoryPoint(20_000, 30, TagQuality.Good));
+        var result = Assert.Single(HistoryAnalysis.Analyze([series], 0, 30_000));
+
+        Assert.Equal(3, result.Samples);
+        Assert.Equal(2, result.GoodSamples);
+        Assert.Equal(20_000, result.GoodMs);
+        Assert.Equal(10_000, result.SimulatedMs);
+        Assert.Equal(20, result.TimeWeightedAvg);
+        Assert.Equal(10, result.Min);
+        Assert.Equal(30, result.Max);
+        Assert.Equal(Math.Round((10 * 10_000d + 30 * 10_000d) / 3_600_000d, 4), result.IntegralHours);
     }
 }

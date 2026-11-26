@@ -35,6 +35,11 @@
         <el-table-column :label="$t('trendsView.coverage')" width="100" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ row.coverage }}%</template>
         </el-table-column>
+        <el-table-column :label="$t('trendsView.simulatedDuration')" width="120" align="right" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="mono">{{ row.simulatedMs ? (row.simulatedMs / 1000).toFixed(1) + ' s' : '-' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="$t('trendsView.samples')" width="110" align="right" show-overflow-tooltip>
           <template #default="{ row }">{{ row.goodSamples }} / {{ row.samples }}</template>
         </el-table-column>
@@ -94,6 +99,7 @@ export interface TrendAnalysisRow {
   coverage: number
   goodSamples: number
   samples: number
+  simulatedMs: number
   quality: { quality: TagQuality; from: number; to: number }[]
   qualityTruncated: boolean
 }

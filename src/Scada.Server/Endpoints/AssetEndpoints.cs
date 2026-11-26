@@ -229,7 +229,14 @@ public static class AssetEndpoints
                 order.Resolution = resolution;
                 order.CompletedTs = now;
             }
-            else if (request.Status == WorkOrderStatus.Cancelled) order.CompletedTs = now;
+            else if (request.Status == WorkOrderStatus.Cancelled)
+            {
+                var reason = request.Resolution?.Trim();
+                if (string.IsNullOrEmpty(reason)) reason = request.Note?.Trim();
+                if (string.IsNullOrEmpty(reason)) return EndpointHelpers.BadRequest("取消工单必须填写原因");
+                order.Resolution = reason;
+                order.CompletedTs = now;
+            }
             if (request.DowntimeMinutes is int downtime) order.DowntimeMinutes = downtime;
             order.Status = request.Status; order.UpdatedTs = now; order.UpdatedBy = http.User.GetUserName();
             var error = AssetValidation.WorkOrder(order);

@@ -10,7 +10,7 @@ using HistoryValue = Scada.Core.Models.HistoryValue;
 
 namespace Scada.Server.Endpoints;
 
-public sealed record HistorySnapshotItem(int TagId, double? Value, TagQuality? Quality, long? SourceTs, string? Error, string? Text = null);
+public sealed record HistorySnapshotItem(int TagId, double? Value, TagQuality? Quality, long? SourceTs, string? Error, string? Text = null, bool Simulated = false);
 
 public static class HistoryEndpoints
 {
@@ -96,7 +96,7 @@ public static class HistoryEndpoints
                 var row = values.GetValueOrDefault(tag.Id);
                 return row is null
                     ? new HistorySnapshotItem(tag.Id, null, null, null, "该时刻之前没有历史数据")
-                    : new HistorySnapshotItem(tag.Id, row.Value, row.Quality, row.Ts, null, row.Text);
+                    : new HistorySnapshotItem(tag.Id, row.Value, row.Quality, row.Ts, null, row.Text, row.Simulated);
             }).OrderBy(x => x.TagId).ToArray();
             return Results.Ok(new { ts = at, found = values.Count, items });
         }).WithSummary("Restore the last historical sample of each tag before a timestamp");

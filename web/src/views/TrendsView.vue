@@ -341,6 +341,7 @@ interface AnalysisRow {
   coverage: number
   goodSamples: number
   samples: number
+  simulatedMs: number
   quality: { quality: TagQuality; from: number; to: number }[]
   qualityTruncated: boolean
 }
@@ -358,6 +359,7 @@ const analysisRows = computed<AnalysisRow[]>(() => {
     coverage: item.coverage,
     goodSamples: item.goodSamples,
     samples: item.samples,
+    simulatedMs: item.simulatedMs ?? 0,
     quality: item.quality,
     qualityTruncated: item.qualityTruncated
   }))

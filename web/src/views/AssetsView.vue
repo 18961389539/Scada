@@ -686,22 +686,37 @@ async function saveOrder() {
     orderSaving.value = false
   }
 }
-async function setOrderStatus(row: MaintenanceWorkOrder, status: WorkOrderStatus) {
+async function setOrderStatus(row: MaintenanceWorkOrder, status: WorkOrderStatus, extra?: { resolution?: string; downtimeMinutes?: number; note?: string }) {
   orderError.value = ''
   try {
-    await workOrderApi.setStatus(row.id, { status })
+    await workOrderApi.setStatus(row.id, { status, ...extra })
     await Promise.all([loadOrders(), loadAssets()])
   } catch (e) {
     orderError.value = errorMessage(e, tr('assets.actionFailed'))
   }
 }
 async function cancelOrder(row: MaintenanceWorkOrder) {
+  let reason = ''
   try {
-    await ElMessageBox.confirm(tr('assets.workOrder.confirmCancel', [row.number]), tr('assets.workOrder.cancelOrder'), { type: 'warning' })
+    const result = await ElMessageBox.prompt(
+      tr('assets.workOrder.confirmCancel', [row.number]),
+      tr('assets.workOrder.cancelOrder'),
+      {
+        type: 'warning',
+        inputType: 'textarea',
+        inputPlaceholder: tr('assets.workOrder.cancelReason'),
+        inputValidator: (value) => (value && value.trim() ? true : tr('assets.workOrder.cancelReasonRequired'))
+      }
+    )
+    reason = String(result.value ?? '').trim()
   } catch {
     return
   }
-  await setOrderStatus(row, 'Cancelled')
+  if (!reason) {
+    orderError.value = tr('assets.workOrder.cancelReasonRequired')
+    return
+  }
+  await setOrderStatus(row, 'Cancelled', { resolution: reason })
 }
 function openComplete(row: MaintenanceWorkOrder): void {
   void completeDialog.value?.open(row)

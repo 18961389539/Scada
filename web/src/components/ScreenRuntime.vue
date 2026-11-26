@@ -532,7 +532,9 @@ async function pollReplay(): Promise<void> {
         quality,
         ts: at,
         sourceTs: item.sourceTs ?? null,
-        error: item.error ?? (item.value == null ? tr('screenReplay.noData') : null)
+        error: item.error ?? (item.value == null ? tr('screenReplay.noData') : null),
+        text: item.text ?? null,
+        simulated: item.simulated === true
       }
     }
     samplesReady.value = true

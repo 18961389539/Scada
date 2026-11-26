@@ -124,15 +124,17 @@ public sealed class ReportService
 
     private List<ReportPoint> BuildPoints(string type, IEnumerable<AggregatePoint> rows)
     {
+        // Count==0 的窗口（含仅仿真占位 0）不作为数值点输出。
+        var live = rows.Where(x => x.Count > 0);
         if (!string.Equals(type, "monthly", StringComparison.OrdinalIgnoreCase))
         {
-            return rows
+            return live
                 .OrderBy(x => x.Ts)
                 .Select(x => new ReportPoint(x.Ts, x.Avg, x.Min, x.Max, x.Count))
                 .ToList();
         }
 
-        return rows
+        return live
             .GroupBy(x => TimeZoneInfo.ConvertTime(DateTimeOffset.FromUnixTimeMilliseconds(x.Ts), Zone).Date)
             .OrderBy(g => g.Key)
             .Select(g =>

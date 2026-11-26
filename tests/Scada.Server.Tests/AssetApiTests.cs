@@ -131,7 +131,10 @@ public sealed class AssetApiTests : IClassFixture<AuthorizationTests.Site>
 
         var cancellable = await Json(await opA.PostAsJsonAsync("/api/work-orders", WorkOrderBody("待取消", null, assetId)));
         var cancellableId = cancellable.GetProperty("id").GetInt32();
-        await Json(await opA.PostAsJsonAsync($"/api/work-orders/{cancellableId}/status", new { status = "Cancelled" }));
+        Assert.Equal(HttpStatusCode.BadRequest, (await opA.PostAsJsonAsync($"/api/work-orders/{cancellableId}/status", new { status = "Cancelled" })).StatusCode);
+        var cancelled = await Json(await opA.PostAsJsonAsync($"/api/work-orders/{cancellableId}/status", new { status = "Cancelled", resolution = "计划变更，不再施工" }));
+        Assert.Equal("Cancelled", cancelled.GetProperty("status").GetString());
+        Assert.Equal("计划变更，不再施工", cancelled.GetProperty("resolution").GetString());
         Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/work-orders/{cancellableId}")).StatusCode);
 
         // 库存流水：入库、盘点调整和出库数量校验；有流水的备件不能删除。

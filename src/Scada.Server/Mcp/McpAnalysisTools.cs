@@ -100,7 +100,7 @@ public sealed class McpAnalysisTools(
     }
 
     [McpServerTool(Name = "query_aggregates", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Read stored 5-minute or hourly aggregate buckets (avg/min/max/count) for 1-10 configured tags: FiveMinute up to 7 days, Hour up to 366 days. No raw fallback and no recent-raw fill; missing buckets are not zero. maxPoints (20-2000) is the total bucket budget; larger requests are rejected instead of truncated. Uses the analysis query budget.")]
+    [Description("Read stored 5-minute or hourly aggregate buckets (avg/min/max/count/simulatedCount) for 1-10 configured tags: FiveMinute up to 7 days, Hour up to 366 days. No raw fallback and no recent-raw fill; missing buckets are omitted. Simulated-only buckets have null avg/min/max and simulatedCount > 0; they are not returned as numeric zeros. maxPoints (20-2000) is the total bucket budget; larger requests are rejected instead of truncated. Uses the analysis query budget.")]
     public async Task<McpAggregateResult> QueryAggregates(int[] tagIds, long from, long to,
         [Description("Stored resolution: FiveMinute or Hour. Raw is not available.")] HistoryResolution resolution,
         CancellationToken cancellationToken, int maxPoints = 500)
@@ -128,7 +128,7 @@ public sealed class McpAnalysisTools(
             var points = await historyStore.QueryAggregatePointsAsync(ids, from, to, resolution, ct);
             var byTag = points.GroupBy(x => x.TagId).ToDictionary(g => g.Key, g => g.ToArray());
             var series = ids.Where(byTag.ContainsKey).Select(id => new McpAggregateSeries(id,
-                byTag[id].Select(x => new McpAggregatePoint(x.Ts, x.Avg, x.Min, x.Max, x.Count)).ToArray())).ToArray();
+                byTag[id].Where(x => x.Count > 0 || x.SimulatedCount > 0).Select(ToPoint).ToArray())).ToArray();
             return new McpAggregateResult(resolution.ToString(), series,
                 ids.Where(id => !byTag.ContainsKey(id)).ToArray(), maxPoints, ScadaTime.NowMs(), false);
         }, cancellationToken);
@@ -166,7 +166,12 @@ public sealed class McpAnalysisTools(
     public sealed record McpTagAnalysis(HistoryTagAnalysis Statistics, long? BelowLimitMs, long? AboveLimitMs);
     public sealed record McpHistoryAnalysis(long From, long To, double? LowerLimit, double? UpperLimit,
         IReadOnlyList<McpTagAnalysis> Tags, long DataAsOf, bool Truncated);
-    public sealed record McpAggregatePoint(long Ts, double Avg, double Min, double Max, int Count);
+    internal static McpAggregatePoint ToPoint(AggregatePoint x) =>
+        x.Count > 0
+            ? new(x.Ts, x.Avg, x.Min, x.Max, x.Count, x.SimulatedCount)
+            : new(x.Ts, null, null, null, x.Count, x.SimulatedCount);
+
+    public sealed record McpAggregatePoint(long Ts, double? Avg, double? Min, double? Max, int Count, int SimulatedCount = 0);
     public sealed record McpAggregateSeries(int TagId, IReadOnlyList<McpAggregatePoint> Points);
     public sealed record McpAggregateResult(string Resolution, IReadOnlyList<McpAggregateSeries> Series,
         int[] MissingTagIds, int PointBudget, long DataAsOf, bool Truncated);

@@ -443,6 +443,7 @@ async function saveDt(): Promise<void> {
   if (disposed || !dtDlg.value) return
   const form = dtForm.value
   if (!form.lineId || !form.start || !canControlLine(form.lineId)) { formError.value = t('oee.lineRequired'); return }
+  if (form.confirmed && !(form.reasonId && form.reasonId > 0)) { formError.value = t('oee.reasonRequiredWhenConfirmed'); return }
   const body = { lineId: form.lineId, startTs: form.start.getTime(), endTs: dtOngoing.value ? null : form.end?.getTime(),
     state: form.state, reasonId: form.reasonId, note: form.note, confirmed: form.confirmed }
   const ok = await saveWith(dtFormRef.value, () => dtEditId.value === null ? oeeApi.createDowntime(body) : oeeApi.updateDowntime(dtEditId.value, body), loadDowntimes)
@@ -454,7 +455,12 @@ async function confirmDt(id: number) {
   confirming.value.push(id)
   actionError.value = ''
   try {
-    await oeeApi.confirmDowntime(id)
+    if (!row.reasonId) {
+      actionError.value = t('oee.reasonRequiredWhenConfirmed')
+      editDowntime(row)
+      return
+    }
+    await oeeApi.confirmDowntime(id, row.reasonId)
     if (!disposed) await loadDowntimes()
   } catch (error) {
     if (!disposed) actionError.value = errorMessage(error, t('oee.saveFailed'))

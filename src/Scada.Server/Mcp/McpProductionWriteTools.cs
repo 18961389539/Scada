@@ -30,9 +30,9 @@ public sealed class McpProductionWriteTools(
     McpIdempotency idempotency)
 {
     [McpServerTool(Name = "confirm_downtime", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Confirm one downtime event as mcp:lan and optionally classify it with a reasonId and note (max 500 characters). Confirmation triggers an OEE rollup rebuild from the event start. Repeating the same confirmation is a no-op. success=false when the event or line does not exist.")]
+    [Description("Confirm one downtime event as mcp:lan and classify it with a reasonId when the event is not yet classified; an optional note is at most 500 characters. Confirmation triggers an OEE rollup rebuild from the event start. Repeating the same confirmation is a no-op. success=false when the event or line does not exist.")]
     public async Task<McpDowntimeConfirmed> ConfirmDowntime(long downtimeId, CancellationToken cancellationToken,
-        [Description("Optional downtime reason ID used to classify the event.")] int? reasonId = null,
+        [Description("Downtime reason ID required to confirm an unclassified event; may be omitted when the event already has a reason.")] int? reasonId = null,
         [Description("Optional note, at most 500 characters.")] string? note = null)
     {
         if (downtimeId <= 0) throw new McpToolException(McpErrorCodes.InvalidArgument, "downtimeId must be positive.");
@@ -51,6 +51,8 @@ public sealed class McpProductionWriteTools(
             cancellationToken);
         if (result.Error is DowntimeCommandError.NotFound)
             throw new McpToolException(McpErrorCodes.NotFound, "Downtime event does not exist.");
+        if (result.Error is DowntimeCommandError.ReasonRequired)
+            throw new McpToolException(McpErrorCodes.InvalidArgument, result.Message ?? "A downtime reason is required to confirm the event.");
         if (result.Error is DowntimeCommandError.ReasonMissing)
             throw new McpToolException(McpErrorCodes.NotFound, "Downtime reason does not exist.");
         var row = result.Event!;

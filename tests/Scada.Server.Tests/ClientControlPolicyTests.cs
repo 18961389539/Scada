@@ -31,6 +31,7 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/calc-jobs/8/invoke")]
     [InlineData("/api/calc-jobs/8/reset")]
     [InlineData("/api/calc-jobs/8/maintenance-done")]
+    [InlineData("/api/devices/12/diagnostics/reconnect")]
     public void ControlPath_Includes_Field_Changing_Routes(string path)
     {
         Assert.Matches(ClientControlPolicy.ControlPath(), path);
@@ -42,6 +43,9 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/annunciators")]
     [InlineData("/api/annunciators/2")]
     [InlineData("/api/devices/2/test")]
+    [InlineData("/api/devices/2/test-draft")]
+    [InlineData("/api/devices/test-draft")]
+    [InlineData("/api/devices/2/diagnostics")]
     [InlineData("/api/recipes/5")]
     [InlineData("/api/control/sequences")]
     [InlineData("/api/simulation/4")]
@@ -80,6 +84,7 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/invoke"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/reset"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/maintenance-done"),
+            ("Endpoints/CollectorDiagnosticEndpoints.cs", "/api/devices/1/diagnostics/reconnect"),
         };
         var missing = new List<string>();
         foreach (var (file, sample) in required)
@@ -100,6 +105,10 @@ public sealed class ClientControlPolicyTests
     [InlineData("POST", "/api/calc-jobs/8/reset", true)]
     [InlineData("POST", "/api/calc-jobs/8/maintenance-done", true)]
     [InlineData("GET", "/api/calc-jobs/8/reset", false)]
+    [InlineData("POST", "/api/devices/12/diagnostics/reconnect", true)]
+    [InlineData("GET", "/api/devices/12/diagnostics/reconnect", false)]
+    [InlineData("POST", "/api/devices/12/test", false)]
+    [InlineData("POST", "/api/devices/test-draft", false)]
     public void IsControlRequest_IncludesDeleteFaultAndCalcReset(string method, string path, bool expected)
     {
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();

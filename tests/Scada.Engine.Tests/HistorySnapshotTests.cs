@@ -35,4 +35,20 @@ public sealed class HistorySnapshotTests
         Assert.Equal(TagQuality.CommFailure, second.Quality);
         Assert.DoesNotContain(rows, row => row.TagId == 3);
     }
+
+    [Fact]
+    public async Task LastBeforePreservesSimulatedFlag()
+    {
+        using var dir = new TempDir();
+        var store = new HistoryStore(new HistoryDbFactory(Options.Create(new ScadaSettings { HistoryRoot = dir.Path })));
+        var ts = new DateTimeOffset(2026, 4, 1, 12, 0, 0, TimeSpan.Zero).ToUnixTimeMilliseconds();
+        await store.WriteRawAsync([
+            new HistoryValue(8, ts, 42, TagQuality.Good, Simulated: true)
+        ], default);
+
+        var row = Assert.Single(await store.LastBeforeAsync([8], ts + 1, default));
+        Assert.Equal(42, row.Value);
+        Assert.True(row.Simulated);
+        Assert.Equal(TagQuality.Good, row.Quality);
+    }
 }

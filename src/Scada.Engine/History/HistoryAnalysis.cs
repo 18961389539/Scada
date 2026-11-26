@@ -3,8 +3,8 @@ using Scada.Core.Models;
 
 namespace Scada.Engine.History;
 
-// 历史区间分析：采样值按“保持到下一次采样”处理，只有 Good 质量进入时间加权均值/积分/极值，
-// 其余质量单独形成区间，便于现场区分“没有数据”和“数据不可信”。
+// 历史区间分析：采样值按“保持到下一次采样”处理，只有非仿真的 Good 质量进入时间加权均值/积分/极值和可用时间，
+// 仿真时长单独列出；其余质量单独形成区间，便于现场区分“没有数据”和“数据不可信”。仿真缺口仍由调用方用 HistoryGapKind.Simulated 标注。
 public static class HistoryAnalysis
 {
     public const int MaxQualityIntervals = 2000;
@@ -32,6 +32,7 @@ public static class HistoryAnalysis
         var weighted = 0d;
         var goodMs = 0L;
         var goodSamples = 0;
+        var simulatedMs = 0L;
         double? min = null;
         double? max = null;
 
@@ -51,6 +52,11 @@ public static class HistoryAnalysis
                 intervals.Add(new HistoryQualityInterval(point.Quality, point.Ts, end));
             }
 
+            if (point.Simulated)
+            {
+                simulatedMs += duration;
+                continue;
+            }
             if (point.Quality != TagQuality.Good) continue;
             weighted += point.Value * duration;
             goodMs += duration;
@@ -74,6 +80,7 @@ public static class HistoryAnalysis
             max is double maxValue ? Math.Round(maxValue, 4) : null,
             Math.Round(weighted / 3_600_000d, 4),
             intervals,
-            truncated);
+            truncated,
+            simulatedMs);
     }
 }

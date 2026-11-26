@@ -176,6 +176,28 @@ public class ReportBuilderHistoryTests
         Assert.Contains(table.Gaps ?? [], g => g.Kind == Scada.Core.Models.HistoryGapKind.Simulated && g.TagId == 2 && g.From == Day + H);
     }
 
+    [Fact]
+    public async Task DailyAndMonthlyReportsOmitSimulatedOnlyWindowsFromNumericPoints()
+    {
+        var store = new FakeHistory();
+        for (var t = Day; t < Day + H; t += 600_000) store.Add(2, P(t, 10));
+        for (var t = Day + H; t < Day + 2 * H; t += 600_000)
+            store.Add(2, new Scada.Core.Models.HistoryPoint(t, 999, Scada.Core.Enums.TagQuality.Good, Simulated: true));
+        var service = new ReportService(store);
+        var daily = await service.BuildAsync("daily", [2], Day, Day + 24 * H, default);
+        var dailyPoint = Assert.Single(Assert.Single(daily.Series).Points);
+        Assert.Equal(Day, dailyPoint.Ts);
+        Assert.Equal(10, dailyPoint.Avg, 6);
+        Assert.True(dailyPoint.Count > 0);
+
+        var monthly = await service.BuildAsync("monthly", [2], Day, Day + 24 * H, default);
+        var monthPoint = Assert.Single(Assert.Single(monthly.Series).Points);
+        Assert.Equal(10, monthPoint.Avg, 6);
+        Assert.Equal(10, monthPoint.Min, 6);
+        Assert.Equal(10, monthPoint.Max, 6);
+        Assert.True(monthPoint.Count > 0);
+    }
+
     private sealed class Factory(Microsoft.Data.Sqlite.SqliteConnection connection) : Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>
     {
         public Scada.Data.ConfigDbContext CreateDbContext() => new(new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Scada.Data.ConfigDbContext>().UseSqlite(connection).Options);

@@ -459,6 +459,7 @@ export interface HistorySnapshotItem {
   sourceTs?: number | null
   error?: string | null
   text?: string | null
+  simulated?: boolean
 }
 
 export interface HistorySnapshotResult {
@@ -503,6 +504,7 @@ export interface HistoryTagAnalysis {
   integralHours: number
   quality: HistoryQualityInterval[]
   qualityTruncated: boolean
+  simulatedMs?: number
 }
 
 export interface HistoryAnalysisResult {

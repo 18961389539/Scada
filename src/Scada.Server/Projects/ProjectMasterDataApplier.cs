@@ -133,6 +133,8 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
     {
         // 测点第一遍：计算测点先用占位表达式，待计算任务的派生测点生成后再写入真实表达式。
         var expressions = new Dictionary<Tag, (PlanEntry Entry, string Expression)>();
+        // 同一包内尚未 Save 的物理测点，供后续条目做地址重叠与 NodeId 占用检查。
+        var acceptedByDevice = new Dictionary<int, List<Tag>>();
         foreach (var entry in Upserts(work, "tags"))
         {
             var raw = (JsonObject)entry.Data!.DeepClone(); var expression = raw["expression"]?.GetValue<string>() ?? ""; raw["expression"] = "";
@@ -145,6 +147,29 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             if (incoming.Kind == TagKind.Calculated) incoming.Expression = "0";
             var device = incoming.DeviceId is int d ? await Db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == d, ct) : null;
             if (ConfigurationValidator.Tag(incoming, device) is string error) { Error(entry, error); continue; }
+            if (existing is not null) incoming.Id = existing.Id;
+            if (incoming.Kind == TagKind.Physical && incoming.DeviceId is int deviceId && device is not null)
+            {
+                var peers = acceptedByDevice.GetValueOrDefault(deviceId) ?? [];
+                var existingPhysical = await Db.Tags.AsNoTracking()
+                    .Where(x => x.Kind == TagKind.Physical && x.DeviceId == deviceId && (existing == null || x.Id != existing.Id))
+                    .ToListAsync(ct);
+                var others = existingPhysical.Concat(peers);
+                var overlaps = AddressOverlap.Conflicts(incoming, device, others, existing);
+                if (overlaps.Count > 0) { Error(entry, AddressOverlap.FormatList(overlaps)); continue; }
+                if (!string.IsNullOrEmpty(incoming.NodeId))
+                {
+                    var occupiedName = others.FirstOrDefault(x => string.Equals(x.NodeId, incoming.NodeId, StringComparison.Ordinal))?.Name;
+                    if (occupiedName is not null)
+                    {
+                        Error(entry, $"设备上已存在相同 OPC 变量（测点「{occupiedName}」）");
+                        continue;
+                    }
+                }
+                if (!acceptedByDevice.TryGetValue(deviceId, out var accepted))
+                    acceptedByDevice[deviceId] = accepted = [];
+                accepted.Add(incoming);
+            }
             Tag target;
             if (existing is null) { incoming.CalculationRevision = 1; Db.Tags.Add(incoming); target = incoming; }
             else

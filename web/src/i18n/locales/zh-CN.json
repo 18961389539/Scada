@@ -2492,7 +2492,8 @@
     "trend": "OEE 趋势",
     "validationFailed": "请先修正表单中标红的问题",
     "vsTarget": "产量/目标",
-    "yes": "是"
+    "yes": "是",
+    "reasonRequiredWhenConfirmed": "确认停机必须填写停机原因"
   },
   "opcBrowserDialog": {
     "applyFailed": "创建测点失败",
@@ -4305,7 +4306,7 @@
     "aggregateBooleanAxis": "开关量采样均值（0–1）",
     "aggregateBooleanHint": "当前为聚合均值，开关量的小数不代表实际中间状态。查看原始开关变化请选择 1 小时或 6 小时范围。",
     "analysisFailed": "分析数据加载失败",
-    "analysisHint": "按采样保持时长加权，仅好质量参与均值与积分",
+    "analysisHint": "按采样保持时长加权，仅非仿真的好质量参与均值、积分与可用时间；仿真时长单独列出",
     "analysisLimit": "质量区间与时间加权分析仅支持最近 24 小时、最多 20 个测点",
     "analysisTitle": "历史分析",
     "autoRefresh": "自动刷新",
@@ -4376,7 +4377,8 @@
     "exportNotExactRaw": "本文件是当前图表所用数据，不是未抽稀的原始采样",
     "sourceColumn": "来源",
     "sourceSimulation": "仿真",
-    "sourceField": "现场"
+    "sourceField": "现场",
+    "simulatedDuration": "仿真时长"
   },
   "userAssignmentsDialog": {
     "k215093": "选择角色",

@@ -26,6 +26,7 @@ public sealed record ProductionProductRequest(string Name, string? Code, int? Ar
 public sealed record ProductionShiftRequest(string Name, int AreaId, int StartMinute, int EndMinute, int Days, bool Enabled, long Revision = 0);
 public sealed record DowntimeReasonRequest(string Code, string Name, int? AreaId, OeeLossCategory Category, bool IsPlanned, bool Enabled, long Revision = 0);
 public sealed record DowntimeEventRequest(int LineId, long StartTs, long? EndTs, int? ReasonId, LineState State, string? Note, bool Confirmed = true);
+public sealed record DowntimeConfirmRequest(int ReasonId);
 public sealed record CountCorrectionRequest(int LineId, int? ProductId, long PeriodFrom, long PeriodTo, double GoodDelta, double RejectDelta, double ScrapDelta, string Reason);
 
 public static class OeeEndpoints
@@ -152,6 +153,7 @@ public static class OeeEndpoints
             if (line is null) return Results.NotFound();
             if (!(await http.GetAccessAsync()).Has(Permission.Control, line.AreaId)) return await Audit.ForbidAsync(http, "录入停机", "无该区域的控制权限", "DowntimeEvent", null);
             if (r.EndTs is long e && e <= r.StartTs) return EndpointHelpers.BadRequest("结束时间须晚于开始时间");
+            if (RequireConfirmedReason(r) is string createReason) return EndpointHelpers.BadRequest(createReason);
             var row = new DowntimeEvent
             {
                 LineId = r.LineId, StartTs = r.StartTs, EndTs = r.EndTs, ReasonId = r.ReasonId, State = r.State,
@@ -174,6 +176,7 @@ public static class OeeEndpoints
             if (line is null || !(await http.GetAccessAsync()).Has(Permission.Control, line.AreaId)) return await Audit.ForbidAsync(http, "修改停机", "无该区域的控制权限", "DowntimeEvent", id);
             if (r.LineId != row.LineId) return EndpointHelpers.BadRequest("不能通过修改停机事件切换产线");
             if (r.EndTs is long end && end <= r.StartTs) return EndpointHelpers.BadRequest("结束时间须晚于开始时间");
+            if (RequireConfirmedReason(r) is string updateReason) return EndpointHelpers.BadRequest(updateReason);
             var before = DowntimeView(row, line.Name);
             row.StartTs = r.StartTs; row.EndTs = r.EndTs; row.ReasonId = r.ReasonId; row.State = r.State; row.Note = Trunc(r.Note, 500);
             row.Confirmed = r.Confirmed; row.UpdatedBy = http.User.GetUserName(); row.UpdatedTs = ScadaTime.NowMs();
@@ -183,7 +186,7 @@ public static class OeeEndpoints
             await rollups.RequestRebuildAsync(row.StartTs, ct);
             return Results.Ok(DowntimeView(row, line.Name));
         });
-        group.MapPost("/downtimes/{id:long}/confirm", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, OeeRollupService rollups, DowntimeCommandService downtimes, CancellationToken ct) =>
+        group.MapPost("/downtimes/{id:long}/confirm", async (long id, DowntimeConfirmRequest? request, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, OeeRollupService rollups, DowntimeCommandService downtimes, CancellationToken ct) =>
         {
             await using var db = await f.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
@@ -192,12 +195,16 @@ public static class OeeEndpoints
             var existingLine = await db.ProductionLines.AsNoTracking().SingleOrDefaultAsync(x => x.Id == existing.LineId, ct);
             if (existingLine is null || !(await http.GetAccessAsync()).Has(Permission.Control, existingLine.AreaId))
                 return await Audit.ForbidAsync(http, "确认停机", "无该区域的控制权限", "DowntimeEvent", id);
-            var result = await downtimes.ConfirmAsync(db, runtime, rollups, id, null, null, false, http.User.GetUserName(),
-                (row, line, already, _, _, _) => runtime.OperationLogs.Add(Audit.Change(http, $"确认停机候选 #{id}", "DowntimeEvent", id, new { confirmed = already }, new { confirmed = true })),
+            if (request?.ReasonId is not int reasonId || reasonId <= 0)
+                return EndpointHelpers.BadRequest(ConfirmedReasonRequired);
+            var result = await downtimes.ConfirmAsync(db, runtime, rollups, id, reasonId, null, false, http.User.GetUserName(),
+                (row, line, already, _, _, _) => runtime.OperationLogs.Add(Audit.Change(http, $"确认停机候选 #{id}", "DowntimeEvent", id, new { confirmed = already }, new { confirmed = true, reasonId })),
                 ct);
             if (result.Error is DowntimeCommandError.NotFound) return Results.NotFound();
             if (result.Error is DowntimeCommandError.LineMissing)
                 return await Audit.ForbidAsync(http, "确认停机", "无该区域的控制权限", "DowntimeEvent", id);
+            if (result.Error is DowntimeCommandError.ReasonRequired) return EndpointHelpers.BadRequest(result.Message ?? ConfirmedReasonRequired);
+            if (result.Error is DowntimeCommandError.ReasonMissing) return EndpointHelpers.BadRequest(result.Message ?? "停机原因不存在");
             return Results.Ok(DowntimeView(result.Event!, result.Line!.Name));
         });
         group.MapDelete("/downtimes/{id:long}", async (long id, HttpContext http, IDbContextFactory<ConfigDbContext> f, IDbContextFactory<RuntimeDbContext> runtimeFactory, OeeRollupService rollups, CancellationToken ct) =>
@@ -481,6 +488,14 @@ public static class OeeEndpoints
         return denied.Length == 0
             ? null
             : await Audit.ForbidAsync(http, action, $"无权配置引用测点：{string.Join(",", denied.Take(20))}", "Tag", string.Join(",", denied));
+    }
+
+    public const string ConfirmedReasonRequired = "确认停机必须填写停机原因";
+
+    private static string? RequireConfirmedReason(DowntimeEventRequest request)
+    {
+        if (!request.Confirmed) return null;
+        return request.ReasonId is int id && id > 0 ? null : ConfirmedReasonRequired;
     }
 
     private static string? Trunc(string? s, int n) => s is null ? null : s.Length <= n ? s : s[..n];

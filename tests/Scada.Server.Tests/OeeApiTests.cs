@@ -166,4 +166,32 @@ public sealed class OeeApiTests : IClassFixture<AuthorizationTests.Site>
         var saved = await Json(await admin.PutAsJsonAsync("/api/oee/thresholds", new { thresholds = body, revision = cur.GetProperty("revision").GetInt64() }));
         Assert.Equal(0.8, saved.GetProperty("thresholds").GetProperty("targetOee").GetDouble());
     }
+
+    [Fact]
+    public async Task ConfirmedDowntimeRequiresReasonOnCreateUpdateAndConfirm()
+    {
+        var (lineA, _, reasonId, t0) = await SeedAsync(2091);
+        var admin = await _site.ClientAsync("admin");
+        var refused = await admin.PostAsJsonAsync("/api/oee/downtimes", new
+        {
+            lineId = lineA, startTs = t0 + 10 * M, endTs = t0 + 20 * M, state = "Fault", confirmed = true
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        Assert.Contains("原因", await refused.Content.ReadAsStringAsync());
+
+        var draft = await Json(await admin.PostAsJsonAsync("/api/oee/downtimes", new
+        {
+            lineId = lineA, startTs = t0 + 10 * M, endTs = t0 + 20 * M, state = "Fault", confirmed = false
+        }));
+        var id = draft.GetProperty("id").GetInt64();
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PutAsJsonAsync($"/api/oee/downtimes/{id}", new
+        {
+            lineId = lineA, startTs = t0 + 10 * M, endTs = t0 + 20 * M, state = "Fault", confirmed = true
+        })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync($"/api/oee/downtimes/{id}/confirm", new { })).StatusCode);
+
+        var confirmed = await Json(await admin.PostAsJsonAsync($"/api/oee/downtimes/{id}/confirm", new { reasonId }));
+        Assert.True(confirmed.GetProperty("confirmed").GetBoolean());
+        Assert.Equal(reasonId, confirmed.GetProperty("reasonId").GetInt32());
+    }
 }
