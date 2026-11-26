@@ -8,6 +8,7 @@ using Scada.Core.Models;
 using Scada.Core.Scripting;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Engine.Calculations;
 using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
@@ -29,7 +30,8 @@ public sealed class ProjectApplyContext(
     string userName,
     IDbContextFactory<RuntimeDbContext> runtimeFactory,
     Scada.Core.Options.ScadaSettings? settings = null,
-    Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null)
+    Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null,
+    IConfiguredSerialProfiles? serialProfiles = null)
 {
     public static readonly JsonSerializerOptions ScreenJson = new(JsonSerializerDefaults.Web);
 
@@ -41,6 +43,7 @@ public sealed class ProjectApplyContext(
     public IDbContextFactory<RuntimeDbContext> RuntimeFactory { get; } = runtimeFactory;
     public Scada.Core.Options.ScadaSettings? Settings { get; } = settings;
     public Scada.Core.Interfaces.IProtocolDriverAvailability? Drivers { get; } = drivers;
+    public IConfiguredSerialProfiles? SerialProfiles { get; } = serialProfiles;
 
     public readonly long Now = ScadaTime.NowMs();
 

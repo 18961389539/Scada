@@ -115,7 +115,7 @@ public sealed class AggregationService : BackgroundService
         await _runLock.WaitAsync(cancellationToken);
         try
         {
-            if (!_role.IsActive) return (0, 0);
+            if (!_role.IsActive) throw new AggregationStandbyException();
             if (to <= from) throw new ArgumentOutOfRangeException(nameof(to), "时间范围无效");
             if (to - from > 366L * 24 * 3600_000) throw new ArgumentOutOfRangeException(nameof(to), "重建跨度不能超过 366 天");
             var generation = _role.Generation;
@@ -163,4 +163,10 @@ public sealed class AggregationService : BackgroundService
         }
         return true;
     }
+}
+
+/// <summary>备机不能重建历史聚合，需在主机上执行。</summary>
+public sealed class AggregationStandbyException() : InvalidOperationException("请在主机上重建历史聚合，备机不能执行重建")
+{
+    public const string Code = "aggregation.rebuild.standby";
 }

@@ -29,6 +29,8 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/simulation/4/fault")]
     [InlineData("/api/simulation/4/reset")]
     [InlineData("/api/calc-jobs/8/invoke")]
+    [InlineData("/api/calc-jobs/8/reset")]
+    [InlineData("/api/calc-jobs/8/maintenance-done")]
     public void ControlPath_Includes_Field_Changing_Routes(string path)
     {
         Assert.Matches(ClientControlPolicy.ControlPath(), path);
@@ -76,6 +78,8 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/SimulationEndpoints.cs", "/api/simulation/1/fault"),
             ("Endpoints/SimulationEndpoints.cs", "/api/simulation/1/reset"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/invoke"),
+            ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/reset"),
+            ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/maintenance-done"),
         };
         var missing = new List<string>();
         foreach (var (file, sample) in required)
@@ -87,6 +91,21 @@ public sealed class ClientControlPolicyTests
         }
         Assert.True(missing.Count == 0,
             "以下会改变现场或运行值的路径未纳入 ClientControlPolicy.ControlPath，只监视工作站或移动端禁写会被绕过：\n" + string.Join("\n", missing));
+    }
+
+    [Theory]
+    [InlineData("DELETE", "/api/simulation/4/fault", true)]
+    [InlineData("POST", "/api/simulation/4/fault", true)]
+    [InlineData("GET", "/api/simulation/4/fault", false)]
+    [InlineData("POST", "/api/calc-jobs/8/reset", true)]
+    [InlineData("POST", "/api/calc-jobs/8/maintenance-done", true)]
+    [InlineData("GET", "/api/calc-jobs/8/reset", false)]
+    public void IsControlRequest_IncludesDeleteFaultAndCalcReset(string method, string path, bool expected)
+    {
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        http.Request.Method = method;
+        http.Request.Path = path;
+        Assert.Equal(expected, ClientControlPolicy.IsControlRequest(http));
     }
 
     private static string FindRoot([System.Runtime.CompilerServices.CallerFilePath] string source = "")

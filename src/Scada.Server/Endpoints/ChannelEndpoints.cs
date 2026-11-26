@@ -55,7 +55,7 @@ public static class ChannelEndpoints
     }
 
     // 一个串口只能有一个归属：要么属于本通道，要么属于某台独占设备，要么属于另一条通道。
-    private static async Task<string?> ValidateSerialOwnershipAsync(ConfigDbContext db, AcquisitionChannel channel, CancellationToken ct)
+    private static async Task<string?> ValidateSerialOwnershipAsync(ConfigDbContext db, AcquisitionChannel channel, IConfiguredSerialProfiles? profiles, CancellationToken ct)
     {
         if (!ChannelProtocols.UsesSerial(channel.Protocol)) return null;
         var serial = ChannelProtocols.SerialCandidates;
@@ -70,7 +70,7 @@ public static class ChannelEndpoints
                 ? $"串口 {channel.SerialPort.Trim()} 已被启用设备「{busy.Name}」独占，请先把该设备绑定到本通道（或其它通道），或改用其它串口"
                 : $"串口 {channel.SerialPort.Trim()} 已被另一条通道上的设备「{busy.Name}」占用，请改用其它串口";
         }
-        var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured: null, ct, exceptChannelId: channel.Id);
+        var owners = await SerialPortOccupancyQuery.LoadAsync(db, profiles, ct, exceptChannelId: channel.Id);
         return SerialPortOccupancy.Conflict(owners, channel.SerialPort, ignore: owner => owner.Kind == SerialPortOccupancy.Device);
     }
 
@@ -124,7 +124,7 @@ public static class ChannelEndpoints
             ChannelRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            ConfigReloader reloader, IConfiguredSerialProfiles serialProfiles,
             CancellationToken cancellationToken) =>
         {
             var channel = Map(new AcquisitionChannel(), request);
@@ -134,7 +134,7 @@ public static class ChannelEndpoints
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             if (await db.Channels.AnyAsync(x => x.Name == channel.Name, cancellationToken)) return EndpointHelpers.BadRequest("通道名称已存在");
-            error = await ValidateSerialOwnershipAsync(db, channel, cancellationToken);
+            error = await ValidateSerialOwnershipAsync(db, channel, serialProfiles, cancellationToken);
             if (error is not null) return EndpointHelpers.BadRequest(error);
 
             db.Channels.Add(channel);
@@ -157,7 +157,7 @@ public static class ChannelEndpoints
             ChannelRequest request,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            ConfigReloader reloader, IConfiguredSerialProfiles serialProfiles,
             CancellationToken cancellationToken) =>
         {
             await using var db = await factory.CreateDbContextAsync(cancellationToken);
@@ -179,7 +179,7 @@ public static class ChannelEndpoints
             var mismatched = members.FirstOrDefault(x => x.Protocol != channel.Protocol);
             if (mismatched is not null)
                 return EndpointHelpers.BadRequest($"通道上已有使用 {mismatched.Protocol} 的设备「{mismatched.Name}」，请先解除绑定或保持协议一致");
-            error = await ValidateSerialOwnershipAsync(db, channel, cancellationToken);
+            error = await ValidateSerialOwnershipAsync(db, channel, serialProfiles, cancellationToken);
             if (error is not null) return EndpointHelpers.BadRequest(error);
 
             // 端点下发：通道是权威，成员设备的连接参数必须跟着走，否则旧连接会打到旧地址。
@@ -216,7 +216,7 @@ public static class ChannelEndpoints
             int id,
             HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
-            ConfigReloader reloader,
+            ConfigReloader reloader, IConfiguredSerialProfiles serialProfiles,
             CancellationToken cancellationToken) =>
         {
             await using var db = await factory.CreateDbContextAsync(cancellationToken);

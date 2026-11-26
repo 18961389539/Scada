@@ -8,6 +8,7 @@ using Scada.Core.Models;
 using Scada.Core.Scripting;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Engine.Calculations;
 using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
@@ -30,8 +31,9 @@ public sealed class ProjectApplier : ProjectSection
 {
     public ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs, AccessContext? access, int? userId, string userName,
         IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Core.Options.ScadaSettings? settings = null,
-        Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null)
-        : base(new ProjectApplyContext(db, jobs, access, userId, userName, runtimeFactory, settings, drivers))
+        Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null,
+        IConfiguredSerialProfiles? serialProfiles = null)
+        : base(new ProjectApplyContext(db, jobs, access, userId, userName, runtimeFactory, settings, drivers, serialProfiles))
     {
     }
 

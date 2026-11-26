@@ -109,9 +109,9 @@ public static class SerialProfileEndpoints
         }).Produces<string[]>();
 
         group.MapPost("", async (SerialProfileRequest request, IDbContextFactory<ConfigDbContext> factory,
-            IOptions<CSharpScriptOptions> options, ISerialProfileCatalog catalog, CancellationToken ct) =>
+            IOptions<CSharpScriptOptions> options, IConfiguredSerialProfiles serialProfiles, ISerialProfileCatalog catalog, CancellationToken ct) =>
         {
-            var error = await ValidateAsync(request, null, factory, options, ct);
+            var error = await ValidateAsync(request, null, factory, options, serialProfiles, ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
             var entity = new SerialProfileConfig();
@@ -124,9 +124,9 @@ public static class SerialProfileEndpoints
         }).Produces<SerialProfileResponse>();
 
         group.MapPut("/{id:int}", async (int id, SerialProfileRequest request, IDbContextFactory<ConfigDbContext> factory,
-            IOptions<CSharpScriptOptions> options, ISerialProfileCatalog catalog, CancellationToken ct) =>
+            IOptions<CSharpScriptOptions> options, IConfiguredSerialProfiles serialProfiles, ISerialProfileCatalog catalog, CancellationToken ct) =>
         {
-            var error = await ValidateAsync(request, id, factory, options, ct);
+            var error = await ValidateAsync(request, id, factory, options, serialProfiles, ct);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             await using var db = await factory.CreateDbContextAsync(ct);
             var entity = await db.SerialProfiles.FirstOrDefaultAsync(row => row.Id == id, ct);
@@ -155,7 +155,7 @@ public static class SerialProfileEndpoints
     }
 
     private static async Task<string?> ValidateAsync(SerialProfileRequest request, int? id, IDbContextFactory<ConfigDbContext> factory,
-        IOptions<CSharpScriptOptions> options, CancellationToken ct)
+        IOptions<CSharpScriptOptions> options, IConfiguredSerialProfiles serialProfiles, CancellationToken ct)
     {
         var name = request.Name?.Trim() ?? "";
         var profile = new SerialProfile
@@ -186,7 +186,7 @@ public static class SerialProfileEndpoints
         var busy = rows.FirstOrDefault(row => row.Enabled && row.Id != id && SerialProfileRules.SamePort(row.Port, profile.Port));
         if (busy is not null) return $"串口 {profile.Port} 已被串口配置「{busy.Name}」占用";
 
-        var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured, ct, exceptProfileId: id, exceptConfigName: name);
+        var owners = await SerialPortOccupancyQuery.LoadAsync(db, serialProfiles, ct, exceptProfileId: id, exceptConfigName: name);
         return SerialPortOccupancy.Conflict(owners, profile.Port);
     }
 

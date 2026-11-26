@@ -3,6 +3,7 @@ using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Services;
@@ -327,6 +328,18 @@ public static class TagEndpoints
                 return EndpointHelpers.ValidationProblem(
                     existing.Select(name => EndpointHelpers.Issue("tag.name.exists", nameof(Tag.Name), $"测点名称已存在：{name}")).ToArray(),
                     $"测点名称已存在：{string.Join("、", existing)}");
+            }
+
+            var others = await db.Tags.AsNoTracking()
+                .Where(x => x.DeviceId == device.Id && x.Kind == TagKind.Physical)
+                .ToListAsync(cancellationToken);
+            var overlaps = AddressOverlap.ConflictsAmong(tags.Concat(others), device);
+            if (overlaps.Count > 0)
+            {
+                return EndpointHelpers.ValidationProblem(
+                    overlaps.Take(20).Select(o => EndpointHelpers.Issue(AddressOverlap.IssueCode, nameof(Tag.Address),
+                        $"与测点「{o.OtherTagName}」{(o.OtherTagId > 0 ? $"#{o.OtherTagId}" : "")}冲突：{o.Reason}")).ToArray(),
+                    $"地址重叠：{AddressOverlap.FormatList(overlaps)}");
             }
 
             // 批量建点最多 500 个：逐条审计会淹没记录，改为保留下面这一条汇总。

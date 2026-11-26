@@ -13,7 +13,7 @@ public static class SerialPortOccupancyQuery
 
     public static async Task<List<SerialPortOwner>> LoadAsync(
         ConfigDbContext db,
-        IReadOnlyDictionary<string, SerialProfile>? configured,
+        IConfiguredSerialProfiles? profiles,
         CancellationToken ct,
         int? exceptProfileId = null,
         int? exceptDeviceId = null,
@@ -22,9 +22,9 @@ public static class SerialPortOccupancyQuery
         string? exceptConfigName = null)
     {
         var owners = new List<SerialPortOwner>();
-        owners.AddRange(SerialPortOccupancy.FromConfigFile(configured, exceptConfigName));
-        var profiles = await db.SerialProfiles.AsNoTracking().ToListAsync(ct);
-        owners.AddRange(SerialPortOccupancy.FromProfiles(profiles, exceptProfileId));
+        owners.AddRange(SerialPortOccupancy.FromConfigFile(profiles?.Current, exceptConfigName));
+        var profileRows = await db.SerialProfiles.AsNoTracking().ToListAsync(ct);
+        owners.AddRange(SerialPortOccupancy.FromProfiles(profileRows, exceptProfileId));
         var channels = await db.Channels.AsNoTracking().Where(row => row.Enabled).ToListAsync(ct);
         owners.AddRange(SerialPortOccupancy.FromChannels(channels, exceptChannelId));
         var serial = ChannelProtocols.SerialCandidates;

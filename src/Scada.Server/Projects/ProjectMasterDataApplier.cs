@@ -106,7 +106,7 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             if (existing is not null) incoming.Id = existing.Id;
             // 通道绑定完成后走与 REST/MCP 同一套 InspectIssuesAsync（本机采集隔离、站号、串口、重名）。
             // 协议字段校验也收在这里，并且在端点下发之后执行，避免空 Host/串口被通道覆盖前误拒。
-            var issues = await DeviceCommandService.InspectIssuesAsync(Db, incoming, existing?.Id, Settings, Drivers, ct);
+            var issues = await DeviceCommandService.InspectIssuesAsync(Db, incoming, existing?.Id, Settings, Drivers, ct, SerialProfiles);
             if (issues.Count > 0)
             {
                 Error(entry, string.Join("；", issues.Select(x => x.Message)));

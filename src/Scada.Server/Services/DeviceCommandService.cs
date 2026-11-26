@@ -31,7 +31,8 @@ public sealed class DeviceCommandService(
     IProtocolDriverAvailability drivers,
     ISimulationRuntime simulations,
     TagUsageService? usage = null,
-    RuntimeCleanupRunner? cleanup = null)
+    RuntimeCleanupRunner? cleanup = null,
+    IConfiguredSerialProfiles? serialProfiles = null)
 {
     public const string DuplicateNameMessage = "设备名称已存在";
 
@@ -186,7 +187,7 @@ public sealed class DeviceCommandService(
 
     public Task<IReadOnlyList<ValidationIssue>> InspectIssuesAsync(
         ConfigDbContext db, Device device, int? excludeDeviceId, CancellationToken cancellationToken)
-        => InspectIssuesAsync(db, device, excludeDeviceId, settings.Value, drivers, cancellationToken);
+        => InspectIssuesAsync(db, device, excludeDeviceId, settings.Value, drivers, cancellationToken, serialProfiles);
 
     /// <summary>
     /// 协议字段、本机采集隔离、通道站号、串口总线与全局重名。通道端点须先下发。
@@ -198,14 +199,15 @@ public sealed class DeviceCommandService(
         int? excludeDeviceId,
         ScadaSettings? settings,
         IProtocolDriverAvailability? drivers,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IConfiguredSerialProfiles? serialProfiles = null)
     {
         var issues = ConfigurationValidator.DeviceIssues(device, settings, drivers);
         if (issues.Count > 0) return issues;
         if (settings is { LocalCollectionEnabled: false } && LocalCollection.IsUnassignedEnabled(device))
             return [new ValidationIssue("device.gateway.required", nameof(Device.GatewayId), LocalCollection.UnassignedDeviceMessage)];
         if (await ValidateChannelStationAsync(db, device, cancellationToken) is { } station) return [station];
-        if (await ValidateSerialBusAsync(db, device, cancellationToken) is { } bus) return [bus];
+        if (await ValidateSerialBusAsync(db, device, cancellationToken, serialProfiles) is { } bus) return [bus];
 
         var duplicate = excludeDeviceId is int exclude
             ? await db.Devices.AnyAsync(x => x.Id != exclude && x.Name == device.Name, cancellationToken)
@@ -258,7 +260,7 @@ public sealed class DeviceCommandService(
     // 串口是独占资源：没有通道时，驱动为每台设备各打开一次 SerialPort，同一 COM 口上的
     // 第二台设备会在 Open() 失败后永久停留在重连退避（现场表现为"其中一台一直离线"）。
     // 绑定同一通道的设备共用一条链路（一次 Open、站号区分），因此只有"不同归属"才算冲突。
-    private static async Task<ValidationIssue?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    private static async Task<ValidationIssue?> ValidateSerialBusAsync(ConfigDbContext db, Device device, CancellationToken ct, IConfiguredSerialProfiles? serialProfiles = null)
     {
         if (device.SimulationEnabled || !device.Enabled || !SoftElementByteOrder.OccupiesSerialPort(device)) return null;
         var port = device.SerialPort.Trim();
@@ -281,7 +283,7 @@ public sealed class DeviceCommandService(
             return new ValidationIssue("device.serial.portConflict", nameof(Device.SerialPort), message);
         }
 
-        var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured: null, ct, exceptDeviceId: device.Id);
+        var owners = await SerialPortOccupancyQuery.LoadAsync(db, serialProfiles, ct, exceptDeviceId: device.Id);
         var occupancy = SerialPortOccupancy.Conflict(owners, port, ignore: owner =>
             owner.Kind == SerialPortOccupancy.Device
             || (owner.Kind == SerialPortOccupancy.Channel && device.ChannelId is int bound && owner.Id == bound));

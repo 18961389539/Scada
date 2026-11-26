@@ -753,7 +753,7 @@ export interface SparePart {
   updatedTs: number
 }
 
-export type SparePartInput = Omit<SparePart, 'id' | 'createdTs' | 'updatedTs'>
+export type SparePartInput = Omit<SparePart, 'id' | 'createdTs' | 'updatedTs'> & { stockReason?: string }
 
 export interface SparePartMovement {
   id: number

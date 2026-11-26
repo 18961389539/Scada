@@ -9,6 +9,11 @@
         <el-col :span="12"><el-form-item :label="$t('assets.part.unit')"><el-input v-model="form.unit" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('assets.part.stock')"><el-input-number v-model="form.stock" :min="0" style="width: 100%" data-test="part-stock" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('assets.part.minStock')"><el-input-number v-model="form.minStock" :min="0" style="width: 100%" /></el-form-item></el-col>
+        <el-col v-if="form.id && form.stock !== form.initialStock" :span="24">
+          <el-form-item :label="$t('assets.part.stockReason')" required>
+            <el-input v-model="form.stockReason" type="textarea" :rows="2" :placeholder="$t('assets.part.stockReasonHint')" data-test="part-stock-reason" />
+          </el-form-item>
+        </el-col>
         <el-col :span="12"><el-form-item :label="$t('assets.part.location')"><el-input v-model="form.location" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('assets.part.supplier')"><el-input v-model="form.supplier" /></el-form-item></el-col>
         <el-col :span="12"><el-form-item :label="$t('assets.part.unitPrice')"><el-input-number v-model="form.unitPrice" :min="0" :precision="2" style="width: 100%" /></el-form-item></el-col>
@@ -38,7 +43,8 @@ const error = ref('')
 const form = reactive({
   id: 0,
   code: '', name: '', specification: '', unit: '', stock: 0, minStock: 0, location: '', supplier: '',
-  unitPrice: null as number | null, description: '', enabled: true
+  unitPrice: null as number | null, description: '', enabled: true,
+  initialStock: 0, stockReason: ''
 })
 
 function open(row?: SparePart): void {
@@ -54,6 +60,8 @@ function open(row?: SparePart): void {
   form.unitPrice = row?.unitPrice ?? null
   form.description = row?.description ?? ''
   form.enabled = row?.enabled ?? true
+  form.initialStock = row?.stock ?? 0
+  form.stockReason = ''
   error.value = ''
   visible.value = true
 }
@@ -62,11 +70,16 @@ async function save(): Promise<void> {
   saving.value = true
   error.value = ''
   try {
+    if (form.id && form.stock !== form.initialStock && !form.stockReason.trim()) {
+      error.value = tr('assets.part.stockReasonRequired')
+      return
+    }
     const input: SparePartInput = {
       code: form.code.trim(), name: form.name.trim(), specification: form.specification.trim(),
       unit: form.unit.trim(), stock: form.stock, minStock: form.minStock, location: form.location.trim(),
       supplier: form.supplier.trim(), unitPrice: form.unitPrice, description: form.description.trim(),
-      enabled: form.enabled
+      enabled: form.enabled,
+      stockReason: form.id && form.stock !== form.initialStock ? form.stockReason.trim() : undefined
     }
     if (form.id) await sparePartApi.update(form.id, input)
     else await sparePartApi.create(input)

@@ -888,6 +888,7 @@ export default {
       stockOut: 'Stock out', adjust: 'Count', movementType: 'Type', quantity: 'Quantity', adjustQuantity: 'Counted balance',
       operator: 'Operator', time: 'Time', balanceAfter: 'Balance', workOrder: 'Work order', note: 'Note',
       movementTitle: 'Spare part movement', movementsTitle: 'Spare part movements: {0}', noMovements: 'No movements yet',
+      stockReason: 'Adjustment reason', stockReasonRequired: 'A reason is required when changing stock', stockReasonHint: 'A stock change is recorded as a count adjustment',
       adjustHint: 'A count sets the balance directly to the entered quantity', quantityHint: 'Must be greater than 0'
     }
   },
@@ -1177,6 +1178,7 @@ export default {
     confirm: 'Existing aggregate shards in the selected range will be overwritten with the current rules. Raw history will not be changed. Continue?',
     done: 'Rebuilt {0} 5-minute windows and {1} hourly windows',
     failed: 'Failed to rebuild history aggregates',
+    standby: 'Rebuild history aggregates on the primary node. A standby node cannot run a rebuild.',
     range: 'Choose a valid time range'
   },
 }

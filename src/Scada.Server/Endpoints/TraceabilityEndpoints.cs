@@ -35,10 +35,10 @@ public static class TraceabilityEndpoints
             var jobs = await db.TraceabilityJobs.AsNoTracking().OrderBy(job => job.Name).ToListAsync(ct);
             return TypedResults.Ok(jobs.Where(job => access.CanTag(Permission.View, job.TriggerTagId)).Select(job => View(job, service, scanners, access)).ToList());
         });
-        group.MapPost("/jobs", (TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
-            => SaveAsync(null, request, http, factory, runtimeFactory, service, scanners, ct)).RequireAuthorization(AccessPolicies.Configure);
-        group.MapPut("/jobs/{id:int}", (int id, TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
-            => SaveAsync(id, request, http, factory, runtimeFactory, service, scanners, ct)).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPost("/jobs", (TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, IConfiguredSerialProfiles serialProfiles, CancellationToken ct)
+            => SaveAsync(null, request, http, factory, runtimeFactory, service, scanners, serialProfiles, ct)).RequireAuthorization(AccessPolicies.Configure);
+        group.MapPut("/jobs/{id:int}", (int id, TraceabilityJobRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, IConfiguredSerialProfiles serialProfiles, CancellationToken ct)
+            => SaveAsync(id, request, http, factory, runtimeFactory, service, scanners, serialProfiles, ct)).RequireAuthorization(AccessPolicies.Configure);
         group.MapPost("/jobs/{id:int}/scan", async Task<IResult> (int id, TraceabilityScanRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, CancellationToken ct) =>
         {
             await using var db = await factory.CreateDbContextAsync(ct);
@@ -94,7 +94,7 @@ public static class TraceabilityEndpoints
     }
 
     private static async Task<IResult> SaveAsync(int? id, TraceabilityJobRequest request, HttpContext http,
-        IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, CancellationToken ct)
+        IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, TraceabilityService service, TraceabilityScannerHost scanners, IConfiguredSerialProfiles serialProfiles, CancellationToken ct)
     {
         if (request.SnTagIds is null || request.Fields is null || request.Fields.Any(field => field is null))
             return TypedResults.BadRequest(new { message = "请选择 SN 寄存器并至少配置一个采集字段" });
@@ -139,7 +139,7 @@ public static class TraceabilityEndpoints
                 }
                 if (job.SnSource == TraceabilitySnSource.Serial)
                 {
-                    var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured: null, ct, exceptJobId: job.Id);
+                    var owners = await SerialPortOccupancyQuery.LoadAsync(db, serialProfiles, ct, exceptJobId: job.Id);
                     if (SerialPortOccupancy.Conflict(owners, options.SerialPort) is { } occupied)
                         return TypedResults.Conflict(new { message = occupied });
                 }

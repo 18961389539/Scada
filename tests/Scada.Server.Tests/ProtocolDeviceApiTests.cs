@@ -81,13 +81,13 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         var u = Guid.NewGuid().ToString("N")[..5];
         var deviceId = (await Ok(await admin.PostAsJsonAsync("/api/devices", Device("批量设备" + u, "ModbusTcp", 1502, "")))).GetProperty("id").GetInt32();
 
-        var created = await Ok(await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-1", 10), BatchTag("批" + u + "-2", 11), BatchTag("批" + u + "-3", 12) } }));
+        var created = await Ok(await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-1", 10), BatchTag("批" + u + "-2", 12), BatchTag("批" + u + "-3", 14) } }));
         Assert.Equal(3, created.GetProperty("created").GetInt32());
         var tags = await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}");
         Assert.Equal(3, tags!.Length);
 
         // 重名和非法地址都必须整体拒绝，不能留下部分测点。
-        var duplicate = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-4", 20), BatchTag("批" + u + "-4", 21) } });
+        var duplicate = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-4", 20), BatchTag("批" + u + "-4", 22) } });
         Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
         var duplicateBody = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("tag.name.duplicateInBatch", duplicateBody.GetProperty("issues")[0].GetProperty("code").GetString());
@@ -107,6 +107,23 @@ public sealed class ProtocolDeviceApiTests : IClassFixture<AuthorizationTests.Si
         Assert.Contains(multiIssues, issue => issue.GetProperty("row").GetInt32() == 1 && issue.GetProperty("field").GetString() == "name");
         Assert.Contains(multiIssues, issue => issue.GetProperty("row").GetInt32() == 2 && issue.GetProperty("field").GetString() == "address");
         Assert.Equal(3, (await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}"))!.Length);
+    }
+
+    [Fact]
+    public async Task BatchTagCreationRejectsAddressOverlap()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var u = Guid.NewGuid().ToString("N")[..5];
+        var deviceId = (await Ok(await admin.PostAsJsonAsync("/api/devices", Device("重叠设备" + u, "ModbusTcp", 1502, "")))).GetProperty("id").GetInt32();
+        await Ok(await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-ok", 10) } }));
+        var overlap = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-hit", 11) } });
+        Assert.Equal(HttpStatusCode.BadRequest, overlap.StatusCode);
+        var body = await overlap.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("tag.address.overlap", body.GetProperty("issues")[0].GetProperty("code").GetString());
+        Assert.Equal(1, (await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}"))!.Length);
+        var inBatch = await admin.PostAsJsonAsync("/api/tags/batch", new { deviceId, tags = new[] { BatchTag("批" + u + "-a", 30), BatchTag("批" + u + "-b", 31) } });
+        Assert.Equal(HttpStatusCode.BadRequest, inBatch.StatusCode);
+        Assert.Equal(1, (await admin.GetFromJsonAsync<JsonElement[]>($"/api/tags?deviceId={deviceId}"))!.Length);
     }
 
     [Fact]

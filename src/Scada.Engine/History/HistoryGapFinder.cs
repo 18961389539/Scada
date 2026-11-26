@@ -109,9 +109,36 @@ public static class HistoryGapFinder
             }
         }
 
-        return gaps
-            .Where(x => x.To > x.From)
+        return Merge(gaps);
+    }
+
+    /// <summary>
+    /// 聚合窗口上的仿真计数：仅仿真窗口不输出数值点，由这里生成仿真缺口。
+    /// </summary>
+    public static IReadOnlyList<HistoryGap> FromSimulatedAggregates(
+        IEnumerable<AggregatePoint> points, long from, long to, HistoryResolution resolution)
+    {
+        var window = resolution switch
+        {
+            HistoryResolution.Hour => 3_600_000L,
+            HistoryResolution.FiveMinute => 5 * 60_000L,
+            _ => 0L
+        };
+        if (window <= 0) return [];
+        var gaps = new List<HistoryGap>();
+        foreach (var point in points)
+        {
+            if (point.SimulatedCount <= 0) continue;
+            var start = Math.Max(point.Ts, from);
+            var end = Math.Min(point.Ts + window, to);
+            if (end > start)
+                gaps.Add(new HistoryGap(point.TagId, start, end, HistoryGapKind.Simulated, "仿真采样"));
+        }
+        return Merge(gaps);
+    }
+
+    public static IReadOnlyList<HistoryGap> Merge(IEnumerable<HistoryGap> gaps) =>
+        gaps.Where(x => x.To > x.From)
             .OrderBy(x => x.TagId ?? 0).ThenBy(x => x.From).ThenBy(x => x.Kind)
             .ToArray();
-    }
 }

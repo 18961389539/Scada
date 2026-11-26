@@ -155,6 +155,27 @@ public class ReportBuilderHistoryTests
         Assert.Equal(1 / 24.0, table.Coverage.Ratio, 6);
     }
 
+    [Fact]
+    public async Task AverageOnlyReportMarksSimulatedHoursAsGaps()
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:"); await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        var store = new FakeHistory();
+        for (var t = Day; t < Day + H; t += 600_000) store.Add(2, P(t, 10));
+        for (var t = Day + H; t < Day + 2 * H; t += 600_000)
+            store.Add(2, new Scada.Core.Models.HistoryPoint(t, 999, Scada.Core.Enums.TagQuality.Good, Simulated: true));
+        var builder = new ReportBuilder(new ReportService(store), factory,
+            new Scada.Data.AccessModelProvider(_ => Task.FromResult(Scada.Core.Security.AccessModel.Build([], [], [], [], [], 0))), runtime);
+        var columns = new ReportColumn[] { new() { Key = "avg", Title = "功率均值", Kind = ReportColumnKind.TagAvg, TagId = 2 } };
+        var template = new ReportTemplate { Name = "日报", Period = ReportPeriod.Day, ColumnsJson = System.Text.Json.JsonSerializer.Serialize(columns, ReportTemplates.Json) };
+        var table = await builder.BuildAsync(template, "2026-10-01", Day, Day + 24 * H, Utc, default);
+        Assert.Equal(10, table.Rows[0].Values[0]);
+        Assert.Null(table.Rows[1].Values[0]);
+        Assert.Contains(table.Gaps ?? [], g => g.Kind == Scada.Core.Models.HistoryGapKind.Simulated && g.TagId == 2 && g.From == Day + H);
+    }
+
     private sealed class Factory(Microsoft.Data.Sqlite.SqliteConnection connection) : Microsoft.EntityFrameworkCore.IDbContextFactory<Scada.Data.ConfigDbContext>
     {
         public Scada.Data.ConfigDbContext CreateDbContext() => new(new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<Scada.Data.ConfigDbContext>().UseSqlite(connection).Options);
@@ -167,8 +188,18 @@ public class ReportBuilderHistoryTests
         public Task<IReadOnlyList<Scada.Core.Models.HistorySeries>> QueryRawAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Scada.Core.Models.HistorySeries>>(tagIds.Select(t => new Scada.Core.Models.HistorySeries { TagId = t, Points = (_points.GetValueOrDefault(t) ?? []).Where(p => p.Ts >= from && p.Ts <= to).ToList() }).ToList());
         public Task<IReadOnlyList<Scada.Core.Models.AggregatePoint>> QueryHourAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<Scada.Core.Models.AggregatePoint>>(tagIds.SelectMany(t => (_points.GetValueOrDefault(t) ?? []).Where(p => p.Ts >= from && p.Ts < to && p.Quality == Scada.Core.Enums.TagQuality.Good)
-                .GroupBy(p => p.Ts / H * H).Select(g => new Scada.Core.Models.AggregatePoint(t, g.Key, g.Average(p => p.Value), g.Min(p => p.Value), g.Max(p => p.Value), g.Count()))).ToList());
+            Task.FromResult<IReadOnlyList<Scada.Core.Models.AggregatePoint>>(tagIds.SelectMany(t => (_points.GetValueOrDefault(t) ?? []).Where(p => p.Ts >= from && p.Ts < to)
+                .GroupBy(p => p.Ts / H * H).Select(g =>
+                {
+                    var live = g.Where(p => p.Quality == Scada.Core.Enums.TagQuality.Good && !p.Simulated).ToList();
+                    var simulated = g.Count(p => p.Simulated);
+                    return new Scada.Core.Models.AggregatePoint(
+                        t, g.Key,
+                        live.Count == 0 ? 0 : live.Average(p => p.Value),
+                        live.Count == 0 ? 0 : live.Min(p => p.Value),
+                        live.Count == 0 ? 0 : live.Max(p => p.Value),
+                        live.Count, simulated);
+                }).Where(p => p.Count > 0 || p.SimulatedCount > 0)).ToList());
         public Task<IReadOnlyList<Scada.Core.Models.AggregatePoint>> QueryAggregatePointsAsync(IReadOnlyCollection<int> tagIds, long from, long to, Scada.Core.Models.HistoryResolution resolution, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Scada.Core.Models.AggregatePoint>>([]);
         public Task WriteRawAsync(IReadOnlyCollection<Scada.Core.Models.HistoryValue> values, CancellationToken ct) => Task.CompletedTask;

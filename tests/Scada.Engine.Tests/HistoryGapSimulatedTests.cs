@@ -27,4 +27,17 @@ public class HistoryGapSimulatedTests
         Assert.Contains(gaps, g => g.Kind == HistoryGapKind.Simulated && g.TagId == 7 && g.From == 2_000 && g.To == 4_000);
         Assert.DoesNotContain(gaps, g => g.Kind == HistoryGapKind.BadQuality);
     }
+
+    [Fact]
+    public void SimulatedOnlyAggregateWindows_AreReportedAsSimulatedGaps()
+    {
+        var points = new[]
+        {
+            new AggregatePoint(7, 0, 0, 0, 0, 0, SimulatedCount: 3),
+            new AggregatePoint(7, 3_600_000, 10, 10, 10, 5, SimulatedCount: 1)
+        };
+        var gaps = HistoryGapFinder.FromSimulatedAggregates(points, 0, 7_200_000, HistoryResolution.Hour);
+        Assert.Contains(gaps, g => g.Kind == HistoryGapKind.Simulated && g.TagId == 7 && g.From == 0 && g.To == 3_600_000);
+        Assert.Contains(gaps, g => g.Kind == HistoryGapKind.Simulated && g.TagId == 7 && g.From == 3_600_000 && g.To == 7_200_000);
+    }
 }

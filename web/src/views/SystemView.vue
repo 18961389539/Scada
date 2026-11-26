@@ -382,7 +382,10 @@ async function rebuildAggregates(): Promise<void> {
     rebuildResult.value = tr('historyAggregates.done', [result.fiveMinuteWindows, result.hourWindows])
     ElMessage.success(rebuildResult.value)
   } catch (e) {
-    rebuildError.value = errorMessage(e, tr('historyAggregates.failed'))
+    const data = (e as { response?: { status?: number; data?: { code?: string } } }).response
+    rebuildError.value = data?.status === 409 && data.data?.code === 'aggregation.rebuild.standby'
+      ? tr('historyAggregates.standby')
+      : errorMessage(e, tr('historyAggregates.failed'))
   } finally {
     rebuilding.value = false
   }

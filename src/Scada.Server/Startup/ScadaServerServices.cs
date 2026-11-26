@@ -146,6 +146,7 @@ internal static class ScadaServerServices
         builder.Services.AddSingleton<ScreenPublicationNotifier>();
         builder.Services.AddSingleton<ScreenRuntimeHealth>();
         builder.Services.AddSingleton<Scada.Engine.Health.IHealthContributor>(sp => sp.GetRequiredService<ScreenRuntimeHealth>());
+        builder.Services.AddSingleton<Scada.Data.Infrastructure.IConfiguredSerialProfiles, Scada.Engine.Calculations.ConfiguredSerialProfiles>();
         builder.Services.AddSingleton<DeviceCommandService>();
         builder.Services.AddSingleton<AlarmRuleCommandService>();
         builder.Services.AddSingleton<ScreenCommandService>();

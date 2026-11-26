@@ -15,7 +15,7 @@ public sealed class HistorySeries
 
 public sealed record AggregateValue(int TagId, long Ts, double Avg, double Min, double Max, int Count, int BadCount = 0, int SimulatedCount = 0);
 
-public sealed record AggregatePoint(int TagId, long Ts, double Avg, double Min, double Max, int Count);
+public sealed record AggregatePoint(int TagId, long Ts, double Avg, double Min, double Max, int Count, int SimulatedCount = 0);
 
 // 质量区间：采样值保持到下一次采样，界面据此画出质量色带；Good 之外的质量不参与时间加权统计。
 public sealed record HistoryQualityInterval(TagQuality Quality, long From, long To);

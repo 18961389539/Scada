@@ -46,8 +46,9 @@ export function buildTrendChart(traces: TrendTrace[], options: {
 }) {
   const { from, to, palette, labels } = options
   const aggregated = options.resolution !== 'Raw'
+  const hasGap = (tagId: number) => (options.gaps ?? []).some(gap => gap.tagId == null || gap.tagId === tagId)
   const tracks: { key: string; label: string; isBoolean: boolean; traces: TrendTrace[] }[] = []
-  for (const trace of traces.filter(trace => trace.points.length)) {
+  for (const trace of traces.filter(trace => trace.points.length || hasGap(trace.tagId))) {
     const unit = trace.unit.trim()
     // Missing units do not establish that two points have compatible dimensions.
     const key = trace.isBoolean ? `boolean:${trace.tagId}` : unit ? `unit:${unit}` : `tag:${trace.tagId}`

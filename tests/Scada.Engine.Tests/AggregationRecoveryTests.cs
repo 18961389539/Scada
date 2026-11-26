@@ -363,6 +363,35 @@ public sealed class AggregationRecoveryTests
         Assert.Equal(130, await db.AggHour.SumAsync(x => x.Count));
     }
 
+    [Fact]
+    public async Task SimulatedOnlyWindowsAreNotEmittedAsNumericPointsAndAppearAsSimulatedGaps()
+    {
+        using var site = new Site();
+        await site.Store.WriteRawAsync([
+            new HistoryValue(1, Ts(Start.AddSeconds(1)), 999, TagQuality.Good, Simulated: true)
+        ], default);
+        using var service = site.Service();
+        await service.RunOnceAsync(Start.AddHours(2), default);
+        await using var db = site.Factory.CreateAggregate(Start.Year);
+        var five = Assert.Single(await db.Agg5Min.ToListAsync());
+        Assert.Equal(0, five.Count);
+        Assert.Equal(1, five.SimulatedCount);
+        using var query = new HistoryQueryService(site.Store);
+        var result = await query.QueryAsync([1], Ts(Start), Ts(Start.AddHours(7)));
+        Assert.Equal(HistoryResolution.FiveMinute, result.Resolution);
+        Assert.DoesNotContain(result.Series.SelectMany(s => s.Points), point => double.IsFinite(point.Value));
+        Assert.Contains(result.Gaps ?? [], g => g.Kind == HistoryGapKind.Simulated && g.TagId == 1);
+    }
+
+    [Fact]
+    public async Task RebuildAsyncOnStandbyThrowsAndDoesNotWrite()
+    {
+        using var site = new Site();
+        using var service = site.Service(role: new Role { IsActive = false });
+        await Assert.ThrowsAsync<AggregationStandbyException>(() =>
+            service.RebuildAsync(Ts(Start), Ts(Start.AddHours(1)), default));
+    }
+
     private static async Task<HistoryDbContext> LegacyDatabase(string path)
     {
         var db = new HistoryDbContext(new DbContextOptionsBuilder<HistoryDbContext>()

@@ -364,7 +364,12 @@ public sealed class ReportBuilder(ReportService history, IDbContextFactory<Confi
         ApplyFormulas(summary);
         var headers = columns.Select(c => new ReportColumnHeader(c.Key, c.Title, c.Unit, c.Decimals, c.Kind)).ToList();
         var coverage = MeasureCoverage(columns, result, from, to, zone, hourly, raw);
-        var gaps = HistoryGapFinder.FromSeries(gapSeries, from, to, HistoryResolution.Hour);
+        var rawTagIds = gapSeries.Select(s => s.TagId).ToHashSet();
+        var averageTags = columns.Where(c => c.TagId is int && c.Kind is ReportColumnKind.TagAvg or ReportColumnKind.TagMax or ReportColumnKind.TagMin)
+            .Select(c => c.TagId!.Value).ToHashSet();
+        var simulated = HistoryGapFinder.FromSimulatedAggregates(
+            hourly.Where(p => averageTags.Contains(p.TagId) && !rawTagIds.Contains(p.TagId)), from, to, HistoryResolution.Hour);
+        var gaps = HistoryGapFinder.Merge(HistoryGapFinder.FromSeries(gapSeries, from, to, HistoryResolution.Hour).Concat(simulated));
         return new ReportTable(template.Name, periodKey, template.Period, from, to, headers, result, new ReportRow("合计/汇总", from, to, summary), ScadaTime.NowMs(), coverage, gaps);
     }
 

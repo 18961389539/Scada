@@ -888,6 +888,7 @@ export default {
       stockOut: '出库', adjust: '盘点', movementType: '类型', quantity: '数量', adjustQuantity: '盘点后结存',
       operator: '操作人', time: '时间', balanceAfter: '结存', workOrder: '关联工单', note: '备注',
       movementTitle: '备件出入库', movementsTitle: '备件流水：{0}', noMovements: '暂无出入库记录',
+      stockReason: '调整原因', stockReasonRequired: '修改库存须填写原因', stockReasonHint: '库存变化会记入盘点流水',
       adjustHint: '盘点会把结存直接设为填写数量', quantityHint: '必须大于 0'
     }
   },
@@ -1177,6 +1178,7 @@ export default {
     confirm: '将按当前口径覆盖所选时间范围内的已有聚合分片。原始历史不会改写。确认继续？',
     done: '已重建 {0} 个 5 分钟窗口、{1} 个小时窗口',
     failed: '重建历史聚合失败',
+    standby: '请在主机上重建历史聚合，备机不能执行重建',
     range: '请选择有效的时间范围'
   },
 }

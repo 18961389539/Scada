@@ -80,12 +80,26 @@ public partial class SqliteHistoryBackend : IHistoryBackend
             cancellationToken.ThrowIfCancellationRequested();
             if (!File.Exists(_factory.GetAggregatePath(year))) continue;
             await using var db = _factory.CreateAggregate(year);
-            var rows = resolution == HistoryResolution.FiveMinute
-                ? db.Agg5Min.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, null, x.SimulatedCount > 0))
-                : db.AggHour.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, null, x.SimulatedCount > 0));
-            await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
+            if (resolution == HistoryResolution.FiveMinute)
+            {
+                var rows = await db.Agg5Min.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
+                    .Select(x => new { x.TagId, x.Ts, x.Avg, x.Count, x.BadCount, x.SimulatedCount })
+                    .ToListAsync(cancellationToken);
+                foreach (var row in rows)
+                    if (ToHistoryValue(row.TagId, row.Ts, row.Avg, row.Count, row.BadCount, row.SimulatedCount) is { } value)
+                        yield return value;
+            }
+            else
+            {
+                var rows = await db.AggHour.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
+                    .Select(x => new { x.TagId, x.Ts, x.Avg, x.Count, x.BadCount, x.SimulatedCount })
+                    .ToListAsync(cancellationToken);
+                foreach (var row in rows)
+                    if (ToHistoryValue(row.TagId, row.Ts, row.Avg, row.Count, row.BadCount, row.SimulatedCount) is { } value)
+                        yield return value;
+            }
         }
     }
 
@@ -263,9 +277,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 .ToListAsync(cancellationToken);
 
             foreach (var row in rows)
-            {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, Simulated: row.SimulatedCount > 0));
-            }
+                AddAggregatePoint(result, row.TagId, row.Ts, row.Avg, row.Count, row.BadCount, row.SimulatedCount);
         }
 
         return result.Values.OrderBy(x => x.TagId).ToList();
@@ -289,9 +301,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 .ToListAsync(cancellationToken);
 
             foreach (var row in rows)
-            {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, Simulated: row.SimulatedCount > 0));
-            }
+                AddAggregatePoint(result, row.TagId, row.Ts, row.Avg, row.Count, row.BadCount, row.SimulatedCount);
         }
 
         return result.Values.OrderBy(x => x.TagId).ToList();
@@ -323,10 +333,11 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 })
                 .ToListAsync(cancellationToken);
 
+            // Count==0 且仅有仿真样本时仍落窗（保留 SimulatedCount），均/最小/最大占位 0，读路径不得当作数值点输出。
             partials.AddRange(rows.Where(x => x.Count > 0 || x.SimulatedCount > 0)
                 .Select(x => new AggregateValue(
                     x.TagId, to,
-                    x.Avg ?? 0, x.Min ?? 0, x.Max ?? 0,
+                    x.Count == 0 ? 0 : x.Avg ?? 0, x.Count == 0 ? 0 : x.Min ?? 0, x.Count == 0 ? 0 : x.Max ?? 0,
                     x.Count, x.BadCount, x.SimulatedCount)));
         }
 
@@ -377,12 +388,12 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 ? await db.Agg5Min.AsNoTracking()
                     .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
                     .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
-                    .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count))
+                    .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count, x.SimulatedCount))
                     .ToListAsync(cancellationToken)
                 : await db.AggHour.AsNoTracking()
                     .Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
                     .OrderBy(x => x.TagId).ThenBy(x => x.Ts)
-                    .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count))
+                    .Select(x => new AggregatePoint(x.TagId, x.Ts, x.Avg, x.Min, x.Max, x.Count, x.SimulatedCount))
                     .ToListAsync(cancellationToken);
             points.AddRange(rows);
         }
@@ -443,6 +454,25 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                .Append(",$bad").Append(index).Append(",$sim").Append(index).Append(')');
         }
         return sql.ToString();
+    }
+
+    private static HistoryValue? ToHistoryValue(int tagId, long ts, double avg, int count, int badCount, int _)
+    {
+        if (count <= 0) return null;
+        return new HistoryValue(tagId, ts, avg, badCount > 0 ? TagQuality.Uncertain : TagQuality.Good, null, false);
+    }
+
+    private static void AddAggregatePoint(Dictionary<int, HistorySeries> result, int tagId, long ts, double avg, int count, int badCount, int _)
+    {
+        EnsureSeries(result, tagId);
+        if (count <= 0) return;
+        AddPoint(result, tagId, new HistoryPoint(ts, avg, badCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
+    }
+
+    private static void EnsureSeries(Dictionary<int, HistorySeries> result, int tagId)
+    {
+        if (!result.ContainsKey(tagId))
+            result[tagId] = new HistorySeries { TagId = tagId };
     }
 
     private static void AddPoint(Dictionary<int, HistorySeries> result, int tagId, HistoryPoint point)

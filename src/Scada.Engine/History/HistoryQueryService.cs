@@ -76,22 +76,17 @@ public sealed class HistoryQueryService : IDisposable
         {
             var values = ReadLimitedAsync(reader.ReadAsync(tagIds, from, to, resolution, cancellationToken),
                 Math.Max(1, _settings.HistoryQueryMaxReadPoints), cancellationToken);
-            if (maxPoints <= 0) return WithGaps(new HistoryQueryResult(resolution, await CollectAsync(values, cancellationToken)), from, to);
+            if (maxPoints <= 0)
+                return await FinalizeAsync(new HistoryQueryResult(resolution, await CollectAsync(values, cancellationToken)), tagIds, from, to, cancellationToken);
             var (series, downsampled) = await HistoryDownsampler.ApplyStreamingAsync(
                 values, tagIds, from, to, maxPoints, cancellationToken);
-            return WithGaps(new HistoryQueryResult(resolution, series, downsampled, maxPoints), from, to);
+            return await FinalizeAsync(new HistoryQueryResult(resolution, series, downsampled, maxPoints), tagIds, from, to, cancellationToken);
         }
         if (span <= RawLimit)
-        {
-            return WithGaps(Limit(HistoryResolution.Raw, await _store.QueryRawAsync(tagIds, from, to, cancellationToken), maxPoints), from, to);
-        }
-
+            return await FinalizeAsync(Limit(HistoryResolution.Raw, await _store.QueryRawAsync(tagIds, from, to, cancellationToken), maxPoints), tagIds, from, to, cancellationToken);
         if (span <= FiveMinuteLimit)
-        {
-            return WithGaps(Limit(HistoryResolution.FiveMinute, await _store.QueryAggregate5MinAsync(tagIds, from, to, cancellationToken), maxPoints), from, to);
-        }
-
-        return WithGaps(Limit(HistoryResolution.Hour, await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken), maxPoints), from, to);
+            return await FinalizeAsync(Limit(HistoryResolution.FiveMinute, await _store.QueryAggregate5MinAsync(tagIds, from, to, cancellationToken), maxPoints), tagIds, from, to, cancellationToken);
+        return await FinalizeAsync(Limit(HistoryResolution.Hour, await _store.QueryAggregateHourAsync(tagIds, from, to, cancellationToken), maxPoints), tagIds, from, to, cancellationToken);
     }
 
     public Task<IReadOnlyList<HistoryValue>> SnapshotAsync(
@@ -153,10 +148,38 @@ public sealed class HistoryQueryService : IDisposable
 
     public void Dispose() => _slots.Dispose();
 
-    private HistoryQueryResult WithGaps(HistoryQueryResult result, long from, long to)
+    private async Task<HistoryQueryResult> FinalizeAsync(
+        HistoryQueryResult result, IReadOnlyCollection<int> tagIds, long from, long to, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<AggregatePoint>? aggregates = null;
+        if (result.Resolution is HistoryResolution.FiveMinute or HistoryResolution.Hour)
+            aggregates = await _store.QueryAggregatePointsAsync(tagIds, from, to, result.Resolution, cancellationToken);
+        return WithGaps(EnsureSimulatedSeries(result, aggregates), from, to, aggregates);
+    }
+
+    private static HistoryQueryResult EnsureSimulatedSeries(HistoryQueryResult result, IReadOnlyList<AggregatePoint>? aggregates)
+    {
+        if (aggregates is null) return result;
+        var series = result.Series.ToList();
+        var present = series.Select(x => x.TagId).ToHashSet();
+        foreach (var tagId in aggregates.Where(x => x.SimulatedCount > 0).Select(x => x.TagId).Distinct())
+        {
+            if (present.Add(tagId))
+                series.Add(new HistorySeries { TagId = tagId });
+        }
+        return result with { Series = series.OrderBy(x => x.TagId).ToList() };
+    }
+
+    private HistoryQueryResult WithGaps(HistoryQueryResult result, long from, long to, IReadOnlyList<AggregatePoint>? aggregates = null)
     {
         var loss = _loss?.Overlapping(from, to);
-        var gaps = HistoryGapFinder.FromSeries(result.Series, from, to, result.Resolution, loss);
+        var simulated = aggregates is null
+            ? Array.Empty<HistoryGap>()
+            : HistoryGapFinder.FromSimulatedAggregates(aggregates, from, to, result.Resolution);
+        var simulatedTags = simulated.Select(x => x.TagId).ToHashSet();
+        var seriesForMissing = result.Series.Where(s => s.Points.Count > 0 || !simulatedTags.Contains(s.TagId)).ToList();
+        var gaps = HistoryGapFinder.Merge(
+            HistoryGapFinder.FromSeries(seriesForMissing, from, to, result.Resolution, loss).Concat(simulated));
         return result with { Gaps = gaps };
     }
 

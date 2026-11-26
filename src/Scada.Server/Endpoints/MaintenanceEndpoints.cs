@@ -33,6 +33,10 @@ public static class MaintenanceEndpoints
                 await LogAsync(factory, runtimeFactory, http, "重建历史聚合", $"{request.From}-{request.To}", $"5分钟 {five} 窗，小时 {hour} 窗");
                 return Results.Ok(new { fiveMinuteWindows = five, hourWindows = hour });
             }
+            catch (AggregationStandbyException ex)
+            {
+                return Results.Conflict(new { message = ex.Message, code = AggregationStandbyException.Code });
+            }
             catch (ArgumentOutOfRangeException ex)
             {
                 return EndpointHelpers.BadRequest(ex.Message);

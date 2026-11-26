@@ -24,7 +24,8 @@ public sealed record WorkOrderPartRequest(int PartId, double Quantity, string? N
 
 public sealed record SparePartRequest(
     string Code, string Name, string? Specification, string? Unit, double Stock, double MinStock,
-    string? Location, string? Supplier, double? UnitPrice, string? Description, bool Enabled = true);
+    string? Location, string? Supplier, double? UnitPrice, string? Description, bool Enabled = true,
+    string? StockReason = null);
 
 public sealed record SparePartMovementRequest(SparePartMovementType Type, double Quantity, string? Note, int? WorkOrderId);
 
@@ -345,19 +346,59 @@ public static class AssetEndpoints
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var part = await db.SpareParts.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (part is null) return Results.NotFound();
-            var before = EndpointHelpers.JsonCopy(part);
-            part.Code = request.Code?.Trim() ?? ""; part.Name = request.Name?.Trim() ?? ""; part.Specification = request.Specification?.Trim() ?? "";
-            part.Unit = request.Unit?.Trim() ?? ""; part.Stock = request.Stock; part.MinStock = request.MinStock; part.Location = request.Location?.Trim() ?? "";
-            part.Supplier = request.Supplier?.Trim() ?? ""; part.UnitPrice = request.UnitPrice; part.Description = request.Description?.Trim() ?? "";
-            part.Enabled = request.Enabled; part.UpdatedTs = ScadaTime.NowMs();
-            var error = AssetValidation.SparePart(part);
-            if (error is not null) return EndpointHelpers.BadRequest(error);
-            if (await db.SpareParts.AnyAsync(x => x.Id != id && x.Code == part.Code, ct)) return EndpointHelpers.BadRequest("备件编号已存在");
-            try { await db.SaveChangesAsync(ct); }
-            catch (DbUpdateException) { return EndpointHelpers.BadRequest("备件编号已存在"); }
-            return Results.Ok(part);
+            Microsoft.Data.Sqlite.SqliteTransaction? tx = null;
+            try
+            {
+                var part = await db.SpareParts.FirstOrDefaultAsync(x => x.Id == id, ct);
+                if (part is null) return Results.NotFound();
+                var beforeStock = part.Stock;
+                var stockChanged = beforeStock != request.Stock;
+                var reason = request.StockReason?.Trim() ?? "";
+                if (stockChanged)
+                {
+                    var movementError = AssetValidation.Movement(SparePartMovementType.Adjust, request.Stock, reason);
+                    if (movementError is not null) return EndpointHelpers.BadRequest(movementError);
+                    if (reason.Length == 0) return EndpointHelpers.BadRequest("调整库存须填写原因");
+                    tx = await BeginWriteAsync(db, ct);
+                    part = await db.SpareParts.FirstOrDefaultAsync(x => x.Id == id, ct);
+                    if (part is null) return Results.NotFound();
+                    beforeStock = part.Stock;
+                    stockChanged = beforeStock != request.Stock;
+                }
+                part.Code = request.Code?.Trim() ?? ""; part.Name = request.Name?.Trim() ?? ""; part.Specification = request.Specification?.Trim() ?? "";
+                part.Unit = request.Unit?.Trim() ?? ""; part.Stock = request.Stock; part.MinStock = request.MinStock; part.Location = request.Location?.Trim() ?? "";
+                part.Supplier = request.Supplier?.Trim() ?? ""; part.UnitPrice = request.UnitPrice; part.Description = request.Description?.Trim() ?? "";
+                part.Enabled = request.Enabled; part.UpdatedTs = ScadaTime.NowMs();
+                var error = AssetValidation.SparePart(part);
+                if (error is not null) return EndpointHelpers.BadRequest(error);
+                if (await db.SpareParts.AnyAsync(x => x.Id != id && x.Code == part.Code, ct)) return EndpointHelpers.BadRequest("备件编号已存在");
+                if (stockChanged)
+                {
+                    db.SparePartMovements.Add(new SparePartMovement
+                    {
+                        PartId = part.Id, Type = SparePartMovementType.Adjust, Quantity = part.Stock, BalanceAfter = part.Stock,
+                        Operator = http.User.GetUserName(), Note = reason, Ts = part.UpdatedTs
+                    });
+                    runtime.OperationLogs.Add(Audit.Change(http, $"备件库存调整：{part.Name}", "SparePart", part.Id, new { stock = beforeStock }, new { stock = part.Stock, reason }));
+                }
+                try
+                {
+                    if (stockChanged)
+                    {
+                        using var suppress = Scada.Core.Security.AuditContext.Suppress();
+                        await db.SaveChangesAsync(ct);
+                    }
+                    else await db.SaveChangesAsync(ct);
+                    if (tx is not null) await tx.CommitAsync(ct);
+                }
+                catch (DbUpdateException) { return EndpointHelpers.BadRequest("备件编号已存在"); }
+                if (stockChanged) await runtime.SaveChangesAsync(ct);
+                return Results.Ok(part);
+            }
+            finally
+            {
+                if (tx is not null) await tx.DisposeAsync();
+            }
         }).RequireAuthorization(AccessPolicies.Configure);
 
         group.MapDelete("/{id:int}", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>

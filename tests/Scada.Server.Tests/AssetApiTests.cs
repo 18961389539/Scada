@@ -149,4 +149,38 @@ public sealed class AssetApiTests : IClassFixture<AuthorizationTests.Site>
         var removableId = removable.GetProperty("id").GetInt32();
         Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/spare-parts/{removableId}")).StatusCode);
     }
+
+    [Fact]
+    public async Task SparePartPutRequiresReasonAndWritesAdjustmentWhenStockChanges()
+    {
+        var cfgA = await _site.ClientAsync("cfgA");
+        var part = await Json(await cfgA.PostAsJsonAsync("/api/spare-parts", PartBody(Unique("SP-ADJ-"), 10, 2)));
+        var partId = part.GetProperty("id").GetInt32();
+        var body = PartBody(part.GetProperty("code").GetString()!, 7, 2);
+        Assert.Equal(HttpStatusCode.BadRequest, (await cfgA.PutAsJsonAsync($"/api/spare-parts/{partId}", body)).StatusCode);
+        var updated = await Json(await cfgA.PutAsJsonAsync($"/api/spare-parts/{partId}", new
+        {
+            code = part.GetProperty("code").GetString(), name = part.GetProperty("name").GetString(),
+            specification = "10mm", unit = "件", stock = 7.0, minStock = 2.0,
+            location = "备件库", supplier = "测试供应商", unitPrice = 12.5, description = "", enabled = true,
+            stockReason = "月度盘点纠错"
+        }));
+        Assert.Equal(7.0, updated.GetProperty("stock").GetDouble());
+        var history = await Json(await cfgA.GetAsync($"/api/spare-parts/{partId}/movements"));
+        var adjust = Assert.Single(history.EnumerateArray().ToArray());
+        Assert.Equal("Adjust", adjust.GetProperty("type").GetString());
+        Assert.Equal(7.0, adjust.GetProperty("quantity").GetDouble());
+        Assert.Equal(7.0, adjust.GetProperty("balanceAfter").GetDouble());
+        Assert.Equal("月度盘点纠错", adjust.GetProperty("note").GetString());
+        var renamed = await Json(await cfgA.PutAsJsonAsync($"/api/spare-parts/{partId}", new
+        {
+            code = part.GetProperty("code").GetString(), name = "仅改名称",
+            specification = "10mm", unit = "件", stock = 7.0, minStock = 2.0,
+            location = "备件库", supplier = "测试供应商", unitPrice = 12.5, description = "", enabled = true
+        }));
+        Assert.Equal("仅改名称", renamed.GetProperty("name").GetString());
+        Assert.Equal(7.0, renamed.GetProperty("stock").GetDouble());
+        var after = await Json(await cfgA.GetAsync($"/api/spare-parts/{partId}/movements"));
+        Assert.Equal(1, after.GetArrayLength());
+    }
 }

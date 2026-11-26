@@ -94,22 +94,24 @@ public sealed class ReportService
         var points = new List<AggregatePoint>();
         foreach (var series in raw)
         {
-            foreach (var group in series.Points
-                         .Where(x => x.Quality == TagQuality.Good)
-                         .GroupBy(x => AlignToHour(x.Ts)))
+            foreach (var group in series.Points.GroupBy(x => AlignToHour(x.Ts)))
             {
                 if (covered.Contains((series.TagId, group.Key)))
                 {
                     continue;
                 }
 
+                var live = group.Where(x => x.Quality == TagQuality.Good && !x.Simulated && double.IsFinite(x.Value)).ToList();
+                var simulatedCount = group.Count(x => x.Simulated);
+                if (live.Count == 0 && simulatedCount == 0) continue;
                 points.Add(new AggregatePoint(
                     series.TagId,
                     group.Key,
-                    group.Average(x => x.Value),
-                    group.Min(x => x.Value),
-                    group.Max(x => x.Value),
-                    group.Count()));
+                    live.Count == 0 ? 0 : live.Average(x => x.Value),
+                    live.Count == 0 ? 0 : live.Min(x => x.Value),
+                    live.Count == 0 ? 0 : live.Max(x => x.Value),
+                    live.Count,
+                    simulatedCount));
             }
         }
 

@@ -27,14 +27,14 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
         string.Equals(http.Request.Headers[ClientHeader].FirstOrDefault(), "mobile", StringComparison.OrdinalIgnoreCase);
 
     // 会改变现场的写路径：写值、画面动作、审批/驳回、顺控启停、配方下发/中止、挂牌、就地/远方、光字牌试验/消音、追溯扫码、仿真强制/故障/复位、已发布脚本调用。
-    // 就地/远方是 PUT /api/control/modes/{id}，因此策略同时匹配 POST 与 PUT。
-    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/(approve|reject)|control/sequences/\d+/start|control/runs/\d+/abort|control/lockouts|control/lockouts/\d+/remove|control/modes/\d+|recipes/\d+/download|recipes/downloads/\d+/abort|annunciators/\d+/(silence|clear-silence|test)|annunciators/silence-visible|traceability/jobs/\d+/scan|simulation/\d+/(force|release|fault|reset)|calc-jobs/\d+/invoke)$", RegexOptions.IgnoreCase)]
+    // 就地/远方是 PUT /api/control/modes/{id}；清除仿真故障是 DELETE /api/simulation/{id}/fault。因此策略匹配 POST、PUT 与 DELETE。
+    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/(approve|reject)|control/sequences/\d+/start|control/runs/\d+/abort|control/lockouts|control/lockouts/\d+/remove|control/modes/\d+|recipes/\d+/download|recipes/downloads/\d+/abort|annunciators/\d+/(silence|clear-silence|test)|annunciators/silence-visible|traceability/jobs/\d+/scan|simulation/\d+/(force|release|fault|reset)|calc-jobs/\d+/(invoke|reset|maintenance-done))$", RegexOptions.IgnoreCase)]
     public static partial Regex ControlPath();
 
     public static bool IsControlRequest(HttpContext http)
     {
         var method = http.Request.Method;
-        if (!HttpMethods.IsPost(method) && !HttpMethods.IsPut(method)) return false;
+        if (!HttpMethods.IsPost(method) && !HttpMethods.IsPut(method) && !HttpMethods.IsDelete(method)) return false;
         return ControlPath().IsMatch(http.Request.Path.Value ?? "");
     }
 

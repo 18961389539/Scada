@@ -9,6 +9,7 @@ using Scada.Core.Opc;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Models;
+using Scada.Core.Protocols;
 using Scada.Data;
 using ProtocolType = Scada.Core.Enums.ProtocolType;
 
@@ -66,17 +67,32 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         var device = await DeviceAsync(deviceId, ct);
         var metadata = await MetadataAsync(owner, device, request.Items.Select(x => x.NodeId).ToArray(), ct);
         await using var db = await factory.CreateDbContextAsync(ct);
-        var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var nodes = new HashSet<string>(); var rows = new List<OpcImportRow>(); var errors = new List<string>();
+        var existingTags = await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).ToListAsync(ct);
+        var names = existingTags.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var occupiedNodes = existingTags.Where(x => !string.IsNullOrEmpty(x.NodeId))
+            .GroupBy(x => x.NodeId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Name, StringComparer.Ordinal);
+        var nodes = new HashSet<string>(StringComparer.Ordinal); var rows = new List<OpcImportRow>(); var errors = new List<string>();
         for (var i = 0; i < request.Items.Count; i++)
         {
             var item = request.Items[i]; var info = metadata[i]; var name = item.Name?.Trim() ?? ""; var error = info.Error;
             if (name.Length is < 1 or > 100) error = "测点名称须为 1～100 个字符";
             else if (!names.Add(name)) error = "设备下测点名称已存在或本批次重复";
             else if (!nodes.Add(info.NodeId)) error = "同一变量被重复选择";
+            else if (occupiedNodes.TryGetValue(info.NodeId, out var existingName)) error = $"设备上已存在相同 OPC 变量（测点「{existingName}」）";
             else if (item.Writable && !info.Writable) error = "服务器未授予当前身份写入权限";
             if (error is not null) errors.Add($"{name}：{error}");
             rows.Add(new(info.NodeId, name, info.DataType, item.Writable, error));
+        }
+        var planned = rows.Where(x => x.Error is null && x.DataType is not null)
+            .Select(x => ImportTag(deviceId, x)).ToList();
+        foreach (var message in AddressOverlapErrors(planned, existingTags, device))
+        {
+            errors.Add(message);
+            var overlapName = message.Split('：', 2)[0];
+            for (var i = 0; i < rows.Count; i++)
+                if (rows[i].Error is null && rows[i].Name == overlapName)
+                    rows[i] = rows[i] with { Error = message[(overlapName.Length + 1)..] };
         }
         var id = Guid.NewGuid().ToString("N"); var preview = new OpcImportPreview(id, rows, errors, errors.Count == 0, DateTime.UtcNow.AddMinutes(10));
         _previews[id] = new(owner, deviceId, Fingerprint(device), preview, metadata, device.GatewayId); return preview;
@@ -97,15 +113,46 @@ public sealed class OpcCatalogService(IDbContextFactory<ConfigDbContext> factory
         if (!await AccessModelProvider.UserHasAsync(db, owner, Scada.Core.Security.Permission.Configure, device.AreaId, ct)) throw new GatewayRequestException(403, "导入权限已撤销");
         if (saved.Fingerprint != Fingerprint(device)) throw new InvalidOperationException("设备配置自预览后已变化，请重新预览");
         if (ObjectTemplateJson.Write(saved.Metadata) != ObjectTemplateJson.Write(metadata)) throw new InvalidOperationException("服务器变量类型或访问权限自预览后已变化，请重新预览");
-        var names = (await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).Select(x => x.Name).ToListAsync(ct)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existingTags = await db.Tags.AsNoTracking().Where(x => x.DeviceId == deviceId).ToListAsync(ct);
+        var names = existingTags.Select(x => x.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (saved.Preview.Rows.Any(x => names.Contains(x.Name))) throw new InvalidOperationException("测点名称自预览后已被使用，请重新预览");
-        var tags = saved.Preview.Rows.Select(x => new Tag { DeviceId = deviceId, Name = x.Name, NodeId = x.NodeId, Area = TagArea.OpcNode, DataType = x.DataType!.Value, Writable = x.Writable, TextLength = x.DataType == TagDataType.String ? 32 : 0 }).ToList();
+        var tags = saved.Preview.Rows.Select(x => ImportTag(deviceId, x)).ToList();
+        if (ImportConflicts(tags, existingTags, device) is { Count: > 0 } conflicts)
+            throw new InvalidOperationException("测点地址或 OPC 变量自预览后已冲突，请重新预览：" + string.Join("；", conflicts));
         // 一次导入可能上千个变量：保留下面这条汇总审计，抑制逐条。
         using var importAudit = Scada.Core.Security.AuditContext.Suppress();
         db.Tags.AddRange(tags);
         runtimeDb.OperationLogs.Add(new OperationLog { UserId = owner, UserName = userName, Ts = ScadaTime.NowMs(), Action = $"导入 OPC UA 变量：设备 #{deviceId}，{tags.Count} 个测点", Result = "成功" });
         await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct); await runtimeDb.SaveChangesAsync(ct); _previews.TryRemove(previewId, out _); return tags;
     }
+
+    public static Tag ImportTag(int deviceId, OpcImportRow row) => new()
+    {
+        DeviceId = deviceId, Name = row.Name, NodeId = row.NodeId, Area = TagArea.OpcNode,
+        DataType = row.DataType!.Value, Writable = row.Writable, TextLength = row.DataType == TagDataType.String ? 32 : 0
+    };
+
+    public static IReadOnlyList<string> ImportConflicts(IReadOnlyList<Tag> incoming, IReadOnlyList<Tag> existing, Device device)
+    {
+        var errors = new List<string>();
+        var occupied = existing.Where(x => !string.IsNullOrEmpty(x.NodeId))
+            .GroupBy(x => x.NodeId, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Name, StringComparer.Ordinal);
+        var batch = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var tag in incoming)
+        {
+            if (string.IsNullOrEmpty(tag.NodeId)) continue;
+            if (!batch.Add(tag.NodeId)) errors.Add($"{tag.Name}：同一变量被重复选择");
+            else if (occupied.TryGetValue(tag.NodeId, out var name)) errors.Add($"{tag.Name}：设备上已存在相同 OPC 变量（测点「{name}」）");
+        }
+        errors.AddRange(AddressOverlapErrors(incoming, existing, device));
+        return errors;
+    }
+
+    public static IReadOnlyList<string> AddressOverlapErrors(IEnumerable<Tag> incoming, IEnumerable<Tag> existing, Device device) =>
+        AddressOverlap.ConflictsAmong(incoming.Concat(existing), device)
+            .Select(o => $"{o.TagName}：与测点「{o.OtherTagName}」{(o.OtherTagId > 0 ? $"#{o.OtherTagId}" : "")}冲突：{o.Reason}")
+            .ToList();
 
     private async Task<Device> DeviceAsync(int id, CancellationToken ct)
     {

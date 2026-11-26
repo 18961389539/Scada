@@ -8,6 +8,7 @@ using Scada.Core.Models;
 using Scada.Core.Scripting;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Engine.Calculations;
 using Scada.Engine.Reports;
 using Scada.Server.Endpoints;
@@ -34,6 +35,7 @@ public abstract class ProjectSection(ProjectApplyContext context)
     protected string UserName => Ctx.UserName;
     protected Scada.Core.Options.ScadaSettings? Settings => Ctx.Settings;
     protected Scada.Core.Interfaces.IProtocolDriverAvailability? Drivers => Ctx.Drivers;
+    protected IConfiguredSerialProfiles? SerialProfiles => Ctx.SerialProfiles;
     protected RuntimeDbContext Runtime => Ctx.Runtime;
     protected long Now => Ctx.Now;
 
