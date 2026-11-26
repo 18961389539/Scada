@@ -91,5 +91,12 @@ public class HistoryAnalysisTests
         Assert.Equal(10, result.Min);
         Assert.Equal(30, result.Max);
         Assert.Equal(Math.Round((10 * 10_000d + 30 * 10_000d) / 3_600_000d, 4), result.IntegralHours);
+        Assert.Equal(
+            [new HistoryQualityInterval(TagQuality.Good, 0, 10_000), new(TagQuality.Good, 10_000, 20_000, Simulated: true), new(TagQuality.Good, 20_000, 30_000)],
+            result.Quality);
+
+        var (below, above) = HistoryAnalysis.OfficialLimitDurations(series.Points, 30_000, 15, 25);
+        Assert.Equal(10_000, below);
+        Assert.Equal(10_000, above);
     }
 }

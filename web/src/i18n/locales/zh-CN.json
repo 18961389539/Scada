@@ -3140,7 +3140,10 @@
     "searchDownloads": "搜索下发编号、配方或操作人",
     "searchRecipes": "搜索配方名称、说明或参数",
     "searchTemplates": "搜索模板名称、区域或测点",
-    "viewDownloads": "查看下发记录"
+    "viewDownloads": "查看下发记录",
+    "uploadSimulated": "以下参数当前为仿真值，无法作为正式配方上载：{0}",
+    "confirmUploadSimulated": "以下参数当前为仿真值：{0}。确认仍要上载为正式配方吗？",
+    "confirmUploadSimulatedTitle": "上载含仿真值"
   },
   "regionScreen": {
     "k25c408": "主页",
@@ -4348,7 +4351,7 @@
     "play": "播放",
     "playbackReset": "回到起点",
     "pointCount": "{0} 点 / {1} 测点",
-    "qualityHint": "Good 之外的质量不参与统计",
+    "qualityHint": "Good 之外的质量和仿真段不参与官方统计",
     "qualityTruncated": "质量区间过多，仅显示前段",
     "readyToQuery": "点击“查询”查看所选测点的历史数据",
     "resultContext": "当前结果：{0} 至 {1} · {2} 个测点",
@@ -4378,7 +4381,8 @@
     "sourceColumn": "来源",
     "sourceSimulation": "仿真",
     "sourceField": "现场",
-    "simulatedDuration": "仿真时长"
+    "simulatedDuration": "仿真时长",
+    "qualitySimulated": "仿真"
   },
   "userAssignmentsDialog": {
     "k215093": "选择角色",

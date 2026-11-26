@@ -60,7 +60,7 @@ public sealed class McpAnalysisTools(
     }
 
     [McpServerTool(Name = "analyze_history", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Analyze exact raw history for 1-10 tags over at most 24 hours: time-weighted average, min/max, quality coverage and optional below/above-limit duration. Uses Good samples held until the next sample, with no interpolation or extrapolation before the first sample. Never analyzes downsampled data.")]
+    [Description("Analyze exact raw history for 1-10 tags over at most 24 hours: time-weighted average, min/max, quality coverage, simulated duration and optional below/above-limit duration. Official averages and limit durations use non-simulated Good samples held until the next sample, with no interpolation or extrapolation before the first sample. Never analyzes downsampled data.")]
     public async Task<McpHistoryAnalysis> AnalyzeHistory(int[] tagIds, long from, long to,
         CancellationToken cancellationToken, double? lowerLimit = null, double? upperLimit = null)
     {
@@ -83,15 +83,7 @@ public sealed class McpAnalysisTools(
             var tags = series.Select(s =>
             {
                 var points = s.Points.Where(p => p.Ts >= from && p.Ts <= to).OrderBy(p => p.Ts).ToArray();
-                long below = 0, above = 0;
-                for (var i = 0; i < points.Length; i++)
-                {
-                    if (points[i].Quality != TagQuality.Good) continue;
-                    var end = i + 1 < points.Length ? points[i + 1].Ts : to;
-                    var duration = Math.Max(0, end - points[i].Ts);
-                    if (points[i].Value < lowerLimit) below += duration;
-                    if (points[i].Value > upperLimit) above += duration;
-                }
+                var (below, above) = HistoryAnalysis.OfficialLimitDurations(points, to, lowerLimit, upperLimit);
                 return new McpTagAnalysis(analyses[s.TagId], lowerLimit is null ? null : below, upperLimit is null ? null : above);
             }).ToArray();
             return new McpHistoryAnalysis(from, to, lowerLimit, upperLimit, tags,

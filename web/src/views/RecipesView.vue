@@ -433,13 +433,29 @@ async function removeRecipe(r: Recipe): Promise<void> {
   try { await ElMessageBox.confirm(tr('recipesView.k243149', [r.name]), tr('recipesView.k3755f5'), { type: 'warning' }) } catch { return }
   if (await guard(() => recipeApi.remove(r.id), tr('recipesView.k72250c'), actionError)) await refresh()
 }
+function simulatedUploadNames(error: unknown): string | null {
+  const data = (error as { response?: { data?: { code?: string; parameters?: string[]; message?: string } } }).response?.data
+  if (data?.code !== 'recipe.simulated') return null
+  return (data.parameters ?? []).join('、') || data.message || ''
+}
 async function upload(r: Recipe | null): Promise<void> {
   const templateId = r?.templateId ?? templateFilter.value; if (!templateId) return
   let input = ''
   try { input = (await ElMessageBox.prompt(r ? tr('recipesView.k6739cb', [r.name]) : tr('recipesView.kb4b7ad'), tr('recipesView.k66e0f9'), { inputValue: r ? tr('recipesView.k66e0f9') : '', inputPattern: r ? undefined : /\S/, inputErrorMessage: tr('recipesView.k1502ce') })).value ?? '' } catch { return }
-  if (await guard(async () => { const res = await recipeApi.upload(templateId, r?.id ?? null, r ? null : input.trim(), r ? input : null); if (res.warnings.length) ElMessage.warning(res.warnings.join('；')) }, tr('recipesView.kf17ff8'), actionError)) {
-    ElMessage.success(tr('recipesView.k4048be')); await refresh()
+  const run = (confirmSimulated: boolean) => recipeApi.upload(templateId, r?.id ?? null, r ? null : input.trim(), r ? input : null, confirmSimulated)
+    .then(res => { if (res.warnings.length) ElMessage.warning(res.warnings.join('；')) })
+  try {
+    await run(false)
+  } catch (error) {
+    const names = simulatedUploadNames(error)
+    if (names == null) {
+      actionError.value = errorMessage(error, tr('recipesView.kf17ff8'))
+      return
+    }
+    try { await ElMessageBox.confirm(tr('recipesView.confirmUploadSimulated', [names]), tr('recipesView.confirmUploadSimulatedTitle'), { type: 'warning' }) } catch { return }
+    if (!await guard(() => run(true), tr('recipesView.kf17ff8'), actionError)) return
   }
+  ElMessage.success(tr('recipesView.k4048be')); await refresh()
 }
 
 const downloadDialog = ref(false), downloadRecipe = ref<Recipe | null>(null), checkResult = ref<RecipeCheck | null>(null), checking = ref(false), submitting = ref(false)

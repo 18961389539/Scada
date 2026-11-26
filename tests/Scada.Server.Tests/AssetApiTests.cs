@@ -186,4 +186,51 @@ public sealed class AssetApiTests : IClassFixture<AuthorizationTests.Site>
         var after = await Json(await cfgA.GetAsync($"/api/spare-parts/{partId}/movements"));
         Assert.Equal(1, after.GetArrayLength());
     }
+
+
+    [Fact]
+    public async Task WorkOrderHoldAndAssetRetirementRequireReason()
+    {
+        var opA = await _site.ClientAsync("opA");
+        var cfgA = await _site.ClientAsync("cfgA");
+        var code = Unique("AST-R-");
+        var assetId = await CreateAsset(cfgA, code, _site.AreaA);
+        var order = await Json(await opA.PostAsJsonAsync("/api/work-orders", WorkOrderBody("待挂起", null, assetId)));
+        var orderId = order.GetProperty("id").GetInt32();
+        await Json(await opA.PostAsJsonAsync($"/api/work-orders/{orderId}/status", new { status = "InProgress" }));
+        Assert.Equal(HttpStatusCode.BadRequest, (await opA.PostAsJsonAsync($"/api/work-orders/{orderId}/status", new { status = "OnHold" })).StatusCode);
+        var held = await Json(await opA.PostAsJsonAsync($"/api/work-orders/{orderId}/status", new { status = "OnHold", resolution = "等待备件到货" }));
+        Assert.Equal("OnHold", held.GetProperty("status").GetString());
+        Assert.Equal("等待备件到货", held.GetProperty("resolution").GetString());
+        var resumed = await Json(await opA.PostAsJsonAsync($"/api/work-orders/{orderId}/status", new { status = "InProgress" }));
+        Assert.Equal("InProgress", resumed.GetProperty("status").GetString());
+
+        async Task<HttpResponseMessage> Put(string status, string? reason)
+        {
+            return await cfgA.PutAsJsonAsync($"/api/assets/{assetId}", new
+            {
+                code,
+                name = "测试资产-" + code,
+                category = "泵",
+                model = "M-100",
+                manufacturer = "测试厂商",
+                serialNumber = "SN-" + code,
+                location = "A区",
+                areaId = _site.AreaA,
+                deviceId = (int?)null,
+                status,
+                commissionedTs = (long?)null,
+                warrantyUntilTs = (long?)null,
+                description = "",
+                enabled = true,
+                statusReason = reason
+            });
+        }
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put("Retired", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Put("Retired", "  ")).StatusCode);
+        var retired = await Json(await Put("Retired", "设备到寿，安排报废"));
+        Assert.Equal("Retired", retired.GetProperty("status").GetString());
+        // already retired: further edits do not require a reason
+        Assert.True((await Put("Retired", null)).IsSuccessStatusCode);
+    }
 }

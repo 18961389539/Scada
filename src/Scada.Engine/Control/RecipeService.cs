@@ -292,13 +292,18 @@ public sealed class RecipeService(IDbContextFactory<ConfigDbContext> factory, ID
     }
 
     // 上载：把参数测点的当前实时值存为配方的新版本（或新配方）。任一参数无有效值则拒绝。
-    public List<RecipeValue> ReadLive(RecipeTemplate template, out List<string> missing)
+    public List<RecipeValue> ReadLive(RecipeTemplate template, out List<string> missing, out List<string> simulated)
     {
         missing = [];
+        simulated = [];
         var values = new List<RecipeValue>();
         foreach (var p in Parameters(template))
         {
-            if (cache.Get(p.TagId) is { Quality: TagQuality.Good } v && double.IsFinite(v.Value)) values.Add(new() { Key = p.Key, Value = v.Value });
+            if (cache.Get(p.TagId) is { Quality: TagQuality.Good } v && double.IsFinite(v.Value))
+            {
+                values.Add(new() { Key = p.Key, Value = v.Value });
+                if (v.Simulated) simulated.Add(p.Name);
+            }
             else missing.Add(p.Name);
         }
         return values;

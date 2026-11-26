@@ -124,7 +124,7 @@
                 <el-button link data-test="wo-parts" @click="openOrderParts(row)">{{ $t('assets.workOrder.parts') }}</el-button>
                 <template v-if="canControlArea(row.areaId)">
                   <el-button v-if="row.status === 'Open'" link type="primary" data-test="wo-start" @click="setOrderStatus(row, 'InProgress')">{{ $t('assets.workOrder.start') }}</el-button>
-                  <el-button v-if="row.status === 'InProgress'" link type="warning" data-test="wo-hold" @click="setOrderStatus(row, 'OnHold')">{{ $t('assets.workOrder.hold') }}</el-button>
+                  <el-button v-if="row.status === 'InProgress'" link type="warning" data-test="wo-hold" @click="holdOrder(row)">{{ $t('assets.workOrder.hold') }}</el-button>
                   <el-button v-if="row.status === 'OnHold'" link type="primary" data-test="wo-resume" @click="setOrderStatus(row, 'InProgress')">{{ $t('assets.workOrder.resume') }}</el-button>
                   <el-button v-if="row.status === 'InProgress' || row.status === 'OnHold'" link type="success" data-test="wo-complete" @click="openComplete(row)">{{ $t('assets.workOrder.complete') }}</el-button>
                   <el-button v-if="row.status !== 'Completed' && row.status !== 'Cancelled'" link type="danger" data-test="wo-cancel" @click="cancelOrder(row)">{{ $t('assets.workOrder.cancelOrder') }}</el-button>
@@ -558,6 +558,7 @@ function defaultArea(list: Area[]): number | null {
   return list[0]?.id ?? null
 }
 
+const originalAssetStatus = ref<AssetStatus | null>(null)
 function openAsset(row?: Asset) {
   assetForm.id = row?.id ?? 0
   assetForm.code = row?.code ?? ''
@@ -570,6 +571,7 @@ function openAsset(row?: Asset) {
   assetForm.areaId = row?.areaId ?? defaultArea(configurableAreas.value)
   assetForm.deviceId = row?.deviceId ?? null
   assetForm.status = row?.status ?? 'InService'
+  originalAssetStatus.value = row?.status ?? null
   assetForm.commissioned = row?.commissionedTs ? new Date(row.commissionedTs) : null
   assetForm.warranty = row?.warrantyUntilTs ? new Date(row.warrantyUntilTs) : null
   assetForm.description = row?.description ?? ''
@@ -597,12 +599,35 @@ async function saveAsset() {
       dialogError.value = tr('assets.noAreas')
       return
     }
+    let statusReason: string | undefined
+    if (assetForm.id && assetForm.status === 'Retired' && originalAssetStatus.value !== 'Retired') {
+      try {
+        const result = await ElMessageBox.prompt(
+          tr('assets.asset.confirmRetire'),
+          tr('assets.asset.editTitle'),
+          {
+            type: 'warning',
+            inputType: 'textarea',
+            inputPlaceholder: tr('assets.asset.retireReason'),
+            inputValidator: (value) => (value && value.trim() ? true : tr('assets.asset.retireReasonRequired'))
+          }
+        )
+        statusReason = String(result.value ?? '').trim()
+      } catch {
+        return
+      }
+      if (!statusReason) {
+        dialogError.value = tr('assets.asset.retireReasonRequired')
+        return
+      }
+    }
     const input: AssetInput = {
       code: assetForm.code.trim(), name: assetForm.name.trim(), category: assetForm.category.trim(),
       model: assetForm.model.trim(), manufacturer: assetForm.manufacturer.trim(), serialNumber: assetForm.serialNumber.trim(),
       location: assetForm.location.trim(), areaId, deviceId: assetForm.deviceId, status: assetForm.status,
       commissionedTs: assetForm.commissioned?.getTime() ?? null, warrantyUntilTs: assetForm.warranty?.getTime() ?? null,
-      description: assetForm.description.trim(), enabled: assetForm.enabled
+      description: assetForm.description.trim(), enabled: assetForm.enabled,
+      statusReason
     }
     if (assetForm.id) await assetApi.update(assetForm.id, input)
     else await assetApi.create(input)
@@ -694,6 +719,29 @@ async function setOrderStatus(row: MaintenanceWorkOrder, status: WorkOrderStatus
   } catch (e) {
     orderError.value = errorMessage(e, tr('assets.actionFailed'))
   }
+}
+async function holdOrder(row: MaintenanceWorkOrder) {
+  let reason = ''
+  try {
+    const result = await ElMessageBox.prompt(
+      tr('assets.workOrder.confirmHold', [row.number]),
+      tr('assets.workOrder.hold'),
+      {
+        type: 'warning',
+        inputType: 'textarea',
+        inputPlaceholder: tr('assets.workOrder.holdReason'),
+        inputValidator: (value) => (value && value.trim() ? true : tr('assets.workOrder.holdReasonRequired'))
+      }
+    )
+    reason = String(result.value ?? '').trim()
+  } catch {
+    return
+  }
+  if (!reason) {
+    orderError.value = tr('assets.workOrder.holdReasonRequired')
+    return
+  }
+  await setOrderStatus(row, 'OnHold', { resolution: reason })
 }
 async function cancelOrder(row: MaintenanceWorkOrder) {
   let reason = ''

@@ -274,7 +274,7 @@ public sealed class CalcJobEngine(
                 if (!inputs.TryGetValue(item.TagId, out var current) || !double.IsFinite(item.Value)) continue;
                 var quality = item.Quality is "Good" or "Bad" or "Uncertain" or "CommFailure" or "Stale" ? item.Quality : current.Quality;
                 var timestamp = item.Timestamp > 0 ? item.Timestamp : current.Timestamp;
-                inputs[item.TagId] = new ScriptInput(item.Value, quality == "Good", timestamp, quality);
+                inputs[item.TagId] = new ScriptInput(item.Value, quality == "Good", timestamp, quality, current.Text, current.Simulated);
             }
         }
         var names = await LookupNamesAsync(ids.Concat(writes), ct);
@@ -285,7 +285,7 @@ public sealed class CalcJobEngine(
         {
             var input = inputs[id];
             var label = names.Where(pair => pair.Value == id).Select(pair => pair.Key).OrderBy(name => name.Contains('/') ? 1 : 0).ThenBy(name => name.Length).FirstOrDefault() ?? $"#{id}";
-            return new ScriptPreviewSample(id, label, input.Value, input.Quality, input.Timestamp, input.Good);
+            return new ScriptPreviewSample(id, label, input.Value, input.Quality, input.Timestamp, input.Good, input.Simulated);
         }).ToArray();
         return new(reply, samples);
     }
@@ -325,7 +325,7 @@ public sealed class CalcJobEngine(
             var series = await history.QueryRawAsync(ids, now - job.HistoryWindowSec * 1000L, now, ct);
             foreach (var id in ids) points[id] = [];
             foreach (var item in series)
-                points[item.TagId] = item.Points.TakeLast(60).Select(point => new ScriptSample(point.Value, point.Quality.ToString(), point.Ts, point.Quality == TagQuality.Good && double.IsFinite(point.Value))).ToArray();
+                points[item.TagId] = item.Points.TakeLast(60).Select(point => new ScriptSample(point.Value, point.Quality.ToString(), point.Ts, point.Quality == TagQuality.Good && double.IsFinite(point.Value), point.Simulated)).ToArray();
         }
         if (!job.AlarmSnapshot) return (points, null);
         await using var db = await factory.CreateDbContextAsync(ct);
@@ -375,7 +375,7 @@ public sealed class CalcJobEngine(
         var good = value.Quality == TagQuality.Good && (value.Text is not null || double.IsFinite(value.Value));
         var fresh = good && now - value.Ts <= maxAge;
         var stale = good && !fresh;
-        return new(value.Value, fresh, value.Ts, stale ? "Stale" : value.Quality.ToString(), value.Text);
+        return new(value.Value, fresh, value.Ts, stale ? "Stale" : value.Quality.ToString(), value.Text, value.Simulated);
     }
 
     private async Task<Dictionary<string, int>> LookupNamesAsync(IEnumerable<int> ids, CancellationToken ct)
@@ -442,7 +442,7 @@ public sealed class CalcJobEngine(
     private JobSample? Sample(int? tagId)
     {
         if (tagId is not int id || cache.Get(id) is not { } value) return null;
-        return new JobSample(value.Value, value.Quality == TagQuality.Good, value.Ts);
+        return new JobSample(value.Value, value.Quality == TagQuality.Good, value.Ts, value.Simulated);
     }
 
     private async Task RunAsync(Running running, long now, CancellationToken ct)
@@ -459,6 +459,7 @@ public sealed class CalcJobEngine(
         try
         {
             var sample = Sample(job.InputTagId);
+            if (sample is { Simulated: true }) state.PeriodIncludesSimulation = true;
             switch (job.Kind)
             {
                 case CalcJobKind.Accumulator:
@@ -484,7 +485,7 @@ public sealed class CalcJobEngine(
         {
             running.Error = ex.Message; quality = TagQuality.Bad;
         }
-        PublishAll(running, now, quality);
+        PublishAll(running, now, quality, running.State.PeriodIncludesSimulation);
     }
 
     private async Task RunScriptAsync(Running running, long now, CancellationToken ct)
@@ -502,6 +503,7 @@ public sealed class CalcJobEngine(
         if (running.IdentityProblem is not null) throw new TagExpressionException("执行身份无效：" + running.IdentityProblem);
         var maxAge = Math.Max(1, job.MaxGapSec) * 1000L;
         var inputs = CalcScript.ParseIds(job.ReadTags).ToDictionary(id => id, id => Capture(cache.Get(id), now, maxAge));
+        if (inputs.Values.Any(input => input.Simulated)) running.State.PeriodIncludesSimulation = true;
         double Read(int id)
         {
             if (!inputs.TryGetValue(id, out var value) || !value.Good)
@@ -521,6 +523,7 @@ public sealed class CalcJobEngine(
         {
             if (csharp is null) throw new CSharpScriptException("disabled", "C# scripts are disabled.");
             var plant = await PlantContextAsync(job, now, ct);
+            if (plant.History.Values.Any(points => points.Any(point => point.Simulated))) running.State.PeriodIncludesSimulation = true;
             var argument = running.InvokeArgument;
             var result = await csharp.RunAsync(new("", "run", job.Script, inputs, writeTags, now, builtIns["dt"], running.TagNames, plant.History, plant.Alarms, argument, job.PublishedLibrarySource), ct);
             if (!result.Success) throw new TagExpressionException(result.Error ?? string.Join("; ", result.Diagnostics));
@@ -542,6 +545,14 @@ public sealed class CalcJobEngine(
             if (running.State.PendingWrites.ContainsKey(tagId)) { errors.Add($"写 #{tagId} 结果未知，已暂停自动重发，请核实现场后确认"); continue; }
             // 只在目标值变化时下发，避免周期任务每次都刷写现场。
             if (running.State.LastWrites.TryGetValue(tagId, out var previous) && Math.Abs(previous - value) <= 1e-9) continue;
+            if (running.State.PeriodIncludesSimulation)
+            {
+                Device? device = null;
+                if (configuration.TryGetTag(tagId, out var target) && target.DeviceId is int deviceId && configuration.TryGetDevice(deviceId, out var found))
+                    device = found;
+                if (ControlCommandService.SimulationWriteRefusal(device, ControlOrigin.Script, sourceSimulated: true) is string refusal)
+                { errors.Add(refusal); continue; }
+            }
             var commandId = Guid.NewGuid();
             if (job.Kind == CalcJobKind.CSharp)
             {
@@ -579,13 +590,13 @@ public sealed class CalcJobEngine(
         return true;
     }, ct);
 
-    private void PublishAll(Running running, long now, TagQuality quality)
+    private void PublishAll(Running running, long now, TagQuality quality, bool simulated = false)
     {
         foreach (var (name, tagId) in running.Outputs)
         {
             var hasValue = running.State.Values.TryGetValue(name, out var value);
             var q = hasValue ? quality : TagQuality.Uncertain;
-            var current = new TagValue(tagId, hasValue ? value : 0, q, now, null, quality == TagQuality.Good ? null : running.Error);
+            var current = new TagValue(tagId, hasValue ? value : 0, q, now, null, quality == TagQuality.Good ? null : running.Error, Simulated: simulated);
             var old = cache.Get(tagId); if (old is not null && old.Ts >= now) continue;
             cache.Set(current); bus.Publish(current);
         }

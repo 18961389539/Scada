@@ -46,18 +46,27 @@ export function createChartRenderer(source: () => ChartSource) {
   function trendExtent(node: ScreenNode): TrendExtent | undefined {
     const { history } = source()
     let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity
-    const track = (ts: number, sample: number) => {
-      if (!Number.isFinite(ts) || !Number.isFinite(sample)) return
+    const trackX = (ts: number) => {
+      if (!Number.isFinite(ts)) return
       xMin = Math.min(xMin, ts); xMax = Math.max(xMax, ts)
+    }
+    const trackY = (sample: number) => {
+      if (!Number.isFinite(sample)) return
       yMin = Math.min(yMin, sample); yMax = Math.max(yMax, sample)
     }
     if (node.type === 'chart-area') {
-      // 面积图按时间戳堆叠，量程取各时刻累计值。
+      // 面积图按时间戳堆叠，量程取各时刻正式累计值；仿真点只占横轴并形成缺口。
       const totals = new Map<number, number>()
-      for (const id of node.tags ?? []) for (const point of history[id] ?? []) totals.set(point.ts, (totals.get(point.ts) ?? 0) + point.value)
-      for (const [ts, sample] of totals) track(ts, sample)
+      for (const id of node.tags ?? []) for (const point of history[id] ?? []) {
+        trackX(point.ts)
+        if (!point.simulated) totals.set(point.ts, (totals.get(point.ts) ?? 0) + point.value)
+      }
+      for (const sample of totals.values()) trackY(sample)
     } else {
-      for (const id of node.tags ?? []) for (const point of history[id] ?? []) track(point.ts, point.value)
+      for (const id of node.tags ?? []) for (const point of history[id] ?? []) {
+        trackX(point.ts)
+        if (!point.simulated) trackY(point.value)
+      }
     }
     if (!Number.isFinite(xMin) || !Number.isFinite(yMin)) return undefined
     if (xMin === xMax) { xMin -= 1000; xMax += 1000 }
@@ -85,7 +94,7 @@ export function createChartRenderer(source: () => ChartSource) {
 
   function chartSigOf(id: number): string {
     const src = source(), points = src.history[id], sample = src.values[id], lastPoint = points?.[points.length - 1]
-    return `${points?.length}:${lastPoint?.ts}:${lastPoint?.value}|${sample?.value}:${sample?.quality}:${sample?.ts}:${src.tagGood(id)}`
+    return `${points?.length}:${lastPoint?.ts}:${lastPoint?.value}:${lastPoint?.simulated ? 1 : 0}|${sample?.value}:${sample?.quality}:${sample?.ts}:${sample?.simulated ? 1 : 0}:${src.tagGood(id)}`
   }
 
   function chartSig(node: ScreenNode): string {
@@ -140,7 +149,7 @@ export function createChartRenderer(source: () => ChartSource) {
         grid: { ...trendGrid },
         xAxis: { type: 'time', min: extent?.xMin, max: extent?.xMax, axisLabel: { color: '#9fb3c8', fontSize: 10 }, axisLine: { lineStyle: { color: '#243449' } }, splitLine: { show: false } },
         yAxis: { type: 'value', min: extent?.yMin, max: extent?.yMax, name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
-        series: ids.map((id, i) => ({ type: 'line', name: src.tagName(id), showSymbol: false, sampling: 'lttb', data: (src.history[id] ?? []).map(p => [p.ts, p.value]),
+        series: ids.map((id, i) => ({ type: 'line', name: src.tagName(id), showSymbol: false, sampling: 'lttb', data: (src.history[id] ?? []).map(p => [p.ts, p.simulated ? null : p.value]), connectNulls: false,
           label: { show: dataLabels(node), color: '#e5effa', fontSize: 9 }, markLine: i === 0 ? targetMarkLine(node, 'y') : undefined,
           lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] } })) }
     }
@@ -173,7 +182,7 @@ export function createChartRenderer(source: () => ChartSource) {
         yAxis: { type: 'value', min: extent?.yMin, max: extent?.yMax, name: axisName(node), nameTextStyle: { color: '#9fb3c8', fontSize: 9 }, axisLabel: { color: '#9fb3c8', fontSize: 10 }, splitLine: { show: showGrid(node), lineStyle: { color: '#243449' } } },
         series: ids.map((id, i) => ({ type: 'line', name: names[i], showSymbol: false, sampling: 'lttb', stack: 'area',
           label: { show: dataLabels(node), color: '#e5effa', fontSize: 9 }, markLine: i === 0 ? targetMarkLine(node, 'y') : undefined,
-          data: (src.history[id] ?? []).map(p => [p.ts, p.value]), lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] }, areaStyle: { color: colors[i], opacity: 0.35 } })) }
+          data: (src.history[id] ?? []).map(p => [p.ts, p.simulated ? null : p.value]), connectNulls: false, lineStyle: { color: colors[i] }, itemStyle: { color: colors[i] }, areaStyle: { color: colors[i], opacity: 0.35 } })) }
     }
     if (node.type === 'chart-radar') {
       return { backgroundColor: 'transparent', animation: false,

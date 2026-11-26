@@ -90,6 +90,23 @@ public class CalculationTests
     }
 
     [Fact]
+    public void SimulatedInputsMarkCalculatedOutputSimulatedWithoutChangingQuality()
+    {
+        var physical = new Tag { Id = 1, DeviceId = 7, Name = "input" };
+        var tag = Calc(2, "#1+1"); tag.InputMaxAgeMs = 5000;
+        var tags = new Dictionary<int, Tag> { [1] = physical, [2] = tag };
+        var devices = new Dictionary<int, Device> { [7] = new Device { Id = 7, Name = "plc", Enabled = true } };
+        var official = CalculationEvaluator.Evaluate(tag, TagExpression.Compile(tag.Expression), tags, devices, _ => new TagValue(1, 10, TagQuality.Good, 1900, 1800), 2000, 1000);
+        Assert.Equal(TagQuality.Good, official.Quality);
+        Assert.False(official.Simulated);
+        Assert.Equal(11, official.Value);
+        var simulated = CalculationEvaluator.Evaluate(tag, TagExpression.Compile(tag.Expression), tags, devices, _ => new TagValue(1, 10, TagQuality.Good, 1900, 1800, Simulated: true), 2000, 1000);
+        Assert.Equal(TagQuality.Good, simulated.Quality);
+        Assert.True(simulated.Simulated);
+        Assert.Equal(11, simulated.Value);
+    }
+
+    [Fact]
     public async Task RuntimePublishesUnchangedScansInDependencyOrderAndInvalidatesConfigurationEpoch()
     {
         var snapshot = new Snapshot { Tags = [Calc(3, "#2+1"), Calc(2, "#1+1"), new() { Id = 1, DeviceId = 7, Name = "input" }] };

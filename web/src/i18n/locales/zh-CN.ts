@@ -860,7 +860,9 @@ export default {
       code: '资产编号', name: '资产名称', category: '分类', model: '型号', manufacturer: '厂商',
       serialNumber: '序列号', location: '安装位置', area: '区域', device: '关联采集设备',
       status: '状态', commissioned: '投运时间', warranty: '质保截止', description: '描述',
-      enabled: '启用', empty: '暂无设备资产', addTitle: '新增设备资产', editTitle: '编辑设备资产'
+      enabled: '启用', empty: '暂无设备资产', addTitle: '新增设备资产', editTitle: '编辑设备资产',
+      retireReason: '报废原因', retireReasonRequired: '资产报废必须填写原因',
+      confirmRetire: '将资产改为已报废？请填写原因。'
     },
     status: { InService: '在用', Standby: '备用', Maintenance: '维护中', Retired: '已报废' },
     workOrderStatus: { Open: '待处理', InProgress: '进行中', OnHold: '已挂起', Completed: '已完成', Cancelled: '已取消' },
@@ -874,6 +876,9 @@ export default {
       start: '开始', hold: '挂起', resume: '恢复', complete: '完成', cancelOrder: '取消工单',
       cancelReason: '取消原因',
       cancelReasonRequired: '取消工单必须填写原因',
+      holdReason: '挂起原因',
+      holdReasonRequired: '挂起工单必须填写原因',
+      confirmHold: '确认挂起工单 {0}？请填写原因。',
       parts: '领用备件', confirmCancel: '确认取消工单 {0}？请填写原因，取消后不能再变更状态。',
       completeTitle: '完成工单 {0}', resolutionRequired: '完成工单必须填写处理结果',
       downtimeHint: '可按实际停机时长填写，0 表示未停机',

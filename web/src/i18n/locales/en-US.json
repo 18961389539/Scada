@@ -3140,7 +3140,10 @@
     "searchDownloads": "Search download IDs, recipes or operators",
     "searchRecipes": "Search recipe names, descriptions or parameters",
     "searchTemplates": "Search template names, areas or tags",
-    "viewDownloads": "View downloads"
+    "viewDownloads": "View downloads",
+    "uploadSimulated": "These parameters are currently simulated and cannot be uploaded as an official recipe: {0}",
+    "confirmUploadSimulated": "These parameters are currently simulated: {0}. Upload them as an official recipe anyway?",
+    "confirmUploadSimulatedTitle": "Upload simulated values"
   },
   "regionScreen": {
     "k25c408": "Home",
@@ -4348,7 +4351,7 @@
     "play": "Play",
     "playbackReset": "Back to start",
     "pointCount": "{0} points / {1} tags",
-    "qualityHint": "Qualities other than Good are excluded from statistics",
+    "qualityHint": "Qualities other than Good, and simulated holds, are excluded from official statistics",
     "qualityTruncated": "Too many quality intervals; showing the first part",
     "readyToQuery": "Click Search to load history for the selected tags",
     "resultContext": "Displayed result: {0} to {1} · {2} tags",
@@ -4378,7 +4381,8 @@
     "sourceColumn": "Source",
     "sourceSimulation": "Simulation",
     "sourceField": "Field",
-    "simulatedDuration": "Simulated duration"
+    "simulatedDuration": "Simulated duration",
+    "qualitySimulated": "Simulation"
   },
   "userAssignmentsDialog": {
     "k215093": "Select role",

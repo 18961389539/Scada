@@ -43,13 +43,13 @@ public static class HistoryAnalysis
             var duration = end - point.Ts;
             if (duration <= 0) continue;
 
-            if (intervals.Count > 0 && intervals[^1].Quality == point.Quality && intervals[^1].To == point.Ts)
+            if (intervals.Count > 0 && intervals[^1].Quality == point.Quality && intervals[^1].Simulated == point.Simulated && intervals[^1].To == point.Ts)
             {
                 intervals[^1] = intervals[^1] with { To = end };
             }
             else
             {
-                intervals.Add(new HistoryQualityInterval(point.Quality, point.Ts, end));
+                intervals.Add(new HistoryQualityInterval(point.Quality, point.Ts, end, point.Simulated));
             }
 
             if (point.Simulated)
@@ -82,5 +82,20 @@ public static class HistoryAnalysis
             intervals,
             truncated,
             simulatedMs);
+    }
+    // 官方越限时长：只统计非仿真 Good 保持段，口径与均值/可用时间一致。
+    public static (long BelowMs, long AboveMs) OfficialLimitDurations(IReadOnlyList<HistoryPoint> points, long to, double? lowerLimit, double? upperLimit)
+    {
+        long below = 0, above = 0;
+        for (var i = 0; i < points.Count; i++)
+        {
+            var point = points[i];
+            if (point.Quality != TagQuality.Good || point.Simulated) continue;
+            var end = i + 1 < points.Count ? points[i + 1].Ts : to;
+            var duration = Math.Max(0, end - point.Ts);
+            if (lowerLimit is double low && point.Value < low) below += duration;
+            if (upperLimit is double high && point.Value > high) above += duration;
+        }
+        return (below, above);
     }
 }

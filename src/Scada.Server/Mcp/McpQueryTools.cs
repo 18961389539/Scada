@@ -102,7 +102,7 @@ public sealed class McpQueryTools(
     }
 
     [McpServerTool(Name = "get_realtime", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Read cached values for 1 to 100 configured tags across all areas. Returns quality and Unix millisecond timestamps; missingTagIds have no cached value and must not be interpreted as zero. Never triggers device I/O.")]
+    [Description("Read cached values for 1 to 100 configured tags across all areas. Returns quality, a simulated flag, and Unix millisecond timestamps; simulated Good values are drill or forced values, not official field readings. missingTagIds have no cached value and must not be interpreted as zero. Never triggers device I/O.")]
     public async Task<McpRealtimeResult> GetRealtime(
         [Description("Explicit positive tag IDs, at most 100. All must exist.")] int[] tagIds,
         CancellationToken cancellationToken)
@@ -111,12 +111,12 @@ public sealed class McpQueryTools(
         await factory.RequireTagsAsync(ids, cancellationToken);
         var values = cache.GetMany(ids);
         var present = values.Select(x => x.TagId).ToHashSet();
-        return new(values.Select(x => new McpValue(x.TagId, x.Value, x.Quality.ToString(), x.Ts, x.SourceTs, x.Error, x.Text)).ToArray(),
+        return new(values.Select(x => new McpValue(x.TagId, x.Value, x.Quality.ToString(), x.Ts, x.SourceTs, x.Error, x.Text, x.Simulated)).ToArray(),
             ids.Where(id => !present.Contains(id)).ToArray(), ScadaTime.NowMs(), false);
     }
 
     [McpServerTool(Name = "query_history", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
-    [Description("Query history for 1 to 10 configured tags across all areas, up to 31 days. Returns bounded, possibly downsampled series. Timestamps are Unix milliseconds. Existing history concurrency, timeout and read budgets apply.")]
+    [Description("Query history for 1 to 10 configured tags across all areas, up to 31 days. Returns bounded, possibly downsampled series with quality and simulated flags. Simulated Good points are drill or forced values, not official field readings. Timestamps are Unix milliseconds. Existing history concurrency, timeout and read budgets apply.")]
     public async Task<McpHistoryResult> QueryHistory(
         [Description("Explicit positive tag IDs, at most 10. All must exist.")] int[] tagIds,
         [Description("Inclusive start time in Unix milliseconds (UTC), non-negative.")] long from,
@@ -134,7 +134,7 @@ public sealed class McpQueryTools(
             var result = await history.QueryAsync(ids, from, to, cancellationToken, maxPoints);
             return new(result.Resolution.ToString(), result.Downsampled, result.PointLimit,
                 result.Series.Select(s => new McpHistorySeries(s.TagId,
-                    s.Points.Select(p => new McpHistoryPoint(p.Ts, p.Value, p.Quality.ToString(), p.Text)).ToArray())).ToArray(),
+                    s.Points.Select(p => new McpHistoryPoint(p.Ts, p.Value, p.Quality.ToString(), p.Text, p.Simulated)).ToArray())).ToArray(),
                 ScadaTime.NowMs(), false);
         }
         catch (HistoryQueryException ex)
@@ -169,9 +169,9 @@ public sealed class McpQueryTools(
             rows.Count > limit && !capped ? offset + limit : null, capped, ScadaTime.NowMs());
     }
 
-    public sealed record McpValue(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error, string? Text = null);
+    public sealed record McpValue(int TagId, double Value, string Quality, long Ts, long? SourceTs, string? Error, string? Text = null, bool Simulated = false);
     public sealed record McpRealtimeResult(IReadOnlyList<McpValue> Values, int[] MissingTagIds, long DataAsOf, bool Truncated);
-    public sealed record McpHistoryPoint(long Ts, double Value, string Quality, string? Text = null);
+    public sealed record McpHistoryPoint(long Ts, double Value, string Quality, string? Text = null, bool Simulated = false);
     public sealed record McpHistorySeries(int TagId, IReadOnlyList<McpHistoryPoint> Points);
     public sealed record McpHistoryResult(string Resolution, bool Downsampled, int PointLimit, IReadOnlyList<McpHistorySeries> Series,
         long DataAsOf, bool Truncated);

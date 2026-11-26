@@ -12,7 +12,7 @@ namespace Scada.Server.Endpoints;
 public sealed record AssetRequest(
     string Code, string Name, string? Category, string? Model, string? Manufacturer, string? SerialNumber,
     string? Location, int? AreaId, int? DeviceId, AssetStatus Status, long? CommissionedTs, long? WarrantyUntilTs,
-    string? Description, bool Enabled = true);
+    string? Description, bool Enabled = true, string? StatusReason = null);
 
 public sealed record WorkOrderRequest(
     string Title, int? AssetId, int? DeviceId, int? AreaId, WorkOrderType Type, WorkOrderPriority Priority,
@@ -99,6 +99,9 @@ public static class AssetEndpoints
             var asset = await db.Assets.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (asset is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, asset.AreaId, Permission.Configure, $"修改设备资产 #{id}") is { } denied) return denied;
+            var retiring = request.Status == AssetStatus.Retired && asset.Status != AssetStatus.Retired;
+            var retireReason = request.StatusReason?.Trim();
+            if (retiring && string.IsNullOrEmpty(retireReason)) return EndpointHelpers.BadRequest("资产报废必须填写原因");
             var before = EndpointHelpers.JsonCopy(asset);
             var areaId = request.AreaId ?? asset.AreaId;
             if (areaId != asset.AreaId && await EndpointHelpers.RequireAreaAsync(http, areaId, Permission.Configure, $"移动设备资产 #{id}") is { } deniedArea) return deniedArea;
@@ -117,7 +120,13 @@ public static class AssetEndpoints
             var error = AssetValidation.Asset(asset);
             if (error is not null) return EndpointHelpers.BadRequest(error);
             if (await db.Assets.AnyAsync(x => x.Id != id && x.Code == asset.Code, ct)) return EndpointHelpers.BadRequest("资产编号已存在");
-            try { await db.SaveChangesAsync(ct); }
+            if (retiring)
+                runtime.OperationLogs.Add(Audit.Change(http, $"资产报废：{asset.Code}（{retireReason}）", "Asset", asset.Id, before, asset));
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                if (retiring) await runtime.SaveChangesAsync(ct);
+            }
             catch (DbUpdateException) { return EndpointHelpers.BadRequest("资产编号已存在"); }
             return Results.Ok(asset);
         }).RequireAuthorization(AccessPolicies.Configure);
@@ -236,6 +245,13 @@ public static class AssetEndpoints
                 if (string.IsNullOrEmpty(reason)) return EndpointHelpers.BadRequest("取消工单必须填写原因");
                 order.Resolution = reason;
                 order.CompletedTs = now;
+            }
+            else if (request.Status == WorkOrderStatus.OnHold)
+            {
+                var reason = request.Resolution?.Trim();
+                if (string.IsNullOrEmpty(reason)) reason = request.Note?.Trim();
+                if (string.IsNullOrEmpty(reason)) return EndpointHelpers.BadRequest("挂起工单必须填写原因");
+                order.Resolution = reason;
             }
             if (request.DowntimeMinutes is int downtime) order.DowntimeMinutes = downtime;
             order.Status = request.Status; order.UpdatedTs = now; order.UpdatedBy = http.User.GetUserName();

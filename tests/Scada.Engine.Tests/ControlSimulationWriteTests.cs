@@ -34,4 +34,17 @@ public class ControlSimulationWriteTests
         var device = new Device { Name = "PLC-1", SimulationEnabled = false };
         Assert.Null(ControlCommandService.SimulationWriteRefusal(device, ControlOrigin.External));
     }
+
+    [Fact]
+    public void SimulatedSourceWriteToLiveDevice_IsRefused_ButAllowedOnSimulatedDevice()
+    {
+        var live = new Device { Name = "PLC-2", SimulationEnabled = false };
+        var reason = ControlCommandService.SimulationWriteRefusal(live, ControlOrigin.Script, sourceSimulated: true);
+        Assert.NotNull(reason);
+        Assert.Contains("源自仿真", reason);
+        Assert.Contains("PLC-2", reason);
+        Assert.NotNull(ControlCommandService.SimulationWriteRefusal(null, ControlOrigin.Script, sourceSimulated: true));
+        var simulated = new Device { Name = "PLC-1", SimulationEnabled = true };
+        Assert.Null(ControlCommandService.SimulationWriteRefusal(simulated, ControlOrigin.Script, sourceSimulated: true));
+    }
 }

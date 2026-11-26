@@ -15,7 +15,7 @@ namespace Scada.Server.Endpoints;
 
 public sealed record RecipeTemplateRequest(string Name, int AreaId, string? Description, bool DualApproval, List<RecipeParameter> Parameters, long Revision = 0);
 public sealed record RecipeRequest(int TemplateId, string Name, string? Description, List<RecipeValue> Values, string? Note, int Version = 0);
-public sealed record RecipeUploadRequest(int TemplateId, int? RecipeId, string? Name, string? Note);
+public sealed record RecipeUploadRequest(int TemplateId, int? RecipeId, string? Name, string? Note, bool ConfirmSimulated = false);
 public sealed record RecipeDownloadRequest(int Version, bool Confirmed, string? Challenge = null);
 
 // 配方管理：模板（参数绑定测点）、配方与不可变版本、比较、上载、经现场控制闭环下发。按模板所在区域授权，写差分审计。
@@ -145,16 +145,24 @@ public static class RecipeEndpoints
             if (!access.Has(Permission.Configure, template.AreaId)) return await Audit.ForbidAsync(http, $"上载配方：{template.Name}", "无该区域的配置权限", "RecipeTemplate", template.Id);
             var missingView = RecipeService.Parameters(template).FirstOrDefault(p => !access.CanTag(Permission.View, p.TagId));
             if (missingView is not null) return await Audit.ForbidAsync(http, $"上载配方：{template.Name}", $"无参数 {missingView.Name} 测点的查看权限", "RecipeTemplate", template.Id);
-            var values = recipes.ReadLive(template, out var missing);
+            var values = recipes.ReadLive(template, out var missing, out var simulated);
             if (missing.Count > 0) return EndpointHelpers.BadRequest($"以下参数没有有效的实时值，无法上载：{string.Join("、", missing)}");
+            if (simulated.Count > 0 && !request.ConfirmSimulated)
+            {
+                var names = string.Join("、", simulated);
+                return Results.BadRequest(new { message = $"以下参数当前为仿真值，无法作为正式配方上载：{names}", code = "recipe.simulated", parameters = simulated });
+            }
+            var note = request.Note ?? "从现场上载";
+            if (simulated.Count > 0)
+                note = $"{note}（已确认含仿真参数：{string.Join("、", simulated)}）";
             var name = request.Name;
             if (request.RecipeId is int rid)
             {
                 var existing = await db.Recipes.AsNoTracking().SingleOrDefaultAsync(x => x.Id == rid && x.TemplateId == template.Id, ct);
                 if (existing is null) return Results.NotFound();
-                return await SaveRecipeAsync(rid, new RecipeRequest(template.Id, existing.Name, existing.Description, values, request.Note ?? "从现场上载", existing.CurrentVersion), "upload", http, factory, runtimeFactory, ct, skipRange: true);
+                return await SaveRecipeAsync(rid, new RecipeRequest(template.Id, existing.Name, existing.Description, values, note, existing.CurrentVersion), "upload", http, factory, runtimeFactory, ct, skipRange: true);
             }
-            return await SaveRecipeAsync(null, new RecipeRequest(template.Id, name ?? "", null, values, request.Note ?? "从现场上载"), "upload", http, factory, runtimeFactory, ct, skipRange: true);
+            return await SaveRecipeAsync(null, new RecipeRequest(template.Id, name ?? "", null, values, note), "upload", http, factory, runtimeFactory, ct, skipRange: true);
         });
 
         // ---- 下发 ----

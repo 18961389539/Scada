@@ -29,8 +29,25 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         Assert.True(r.IsSuccessStatusCode, $"{r.StatusCode}: {await r.Content.ReadAsStringAsync()}");
         return r.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.Accepted ? default : await r.Content.ReadFromJsonAsync<JsonElement>();
     }
-    private async Task<int> TagAsync(HttpClient admin, string name) =>
-        (await Ok(await admin.PostAsJsonAsync("/api/tags", _site.TagBody(_site.DeviceA, name + U())))).GetProperty("id").GetInt32();
+    private async Task<int> TagAsync(HttpClient admin, string name)
+    {
+        // 站点夹具里已有 address=0 的可写测点，这里避开地址重叠。
+        var payload = new
+        {
+            deviceId = _site.DeviceA,
+            name = name + U(),
+            area = "HoldingRegister",
+            address = Random.Shared.Next(2000, 30000) * 2,
+            dataType = "Float",
+            scale = 1.0,
+            offset = 0.0,
+            writable = true,
+            archiveMode = "None",
+            deadband = 0.0,
+            archivePeriodSec = 600
+        };
+        return (await Ok(await admin.PostAsJsonAsync("/api/tags", payload))).GetProperty("id").GetInt32();
+    }
 
     private async Task<(int Template, int Recipe, int[] Tags, string Name)> SetupAsync(HttpClient admin, bool dual = false, double[]? values = null)
     {
@@ -253,5 +270,25 @@ public sealed class RecipeTests : IClassFixture<ControlTests.ControlSite>
         Assert.Equal(RecipeDownloadStatus.PartiallyApplied, d!.Status);
         Assert.Contains("中断", d.Message); Assert.Contains("不会自动续发", d.Message);
         Assert.Contains("\"skipped\"", d.ResultsJson);
+    }
+
+
+    [Fact]
+    public async Task UploadRejectsSimulatedLiveValuesUnlessExplicitlyConfirmed()
+    {
+        var admin = await _site.ClientAsync("admin");
+        var cfg = await _site.ClientAsync("cfgA");
+        var (tid, rid, tags, _) = await SetupAsync(admin);
+        Set(tags[0], 130); Set(tags[1], 50); Set(tags[2], 300);
+        _site.Services.GetRequiredService<IRealtimeCache>().Set(new TagValue(tags[0], 130, TagQuality.Good, ScadaTime.NowMs(), Simulated: true));
+        var refused = await cfg.PostAsJsonAsync("/api/recipes/upload", new { templateId = tid, name = "仿真上载" + U() });
+        Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+        var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("recipe.simulated", body.GetProperty("code").GetString());
+        Assert.Contains("温度", body.GetProperty("message").GetString());
+        var confirmed = await Ok(await cfg.PostAsJsonAsync("/api/recipes/upload", new { templateId = tid, name = "仿真上载" + U(), confirmSimulated = true }));
+        Assert.Equal("upload", confirmed.GetProperty("recipe").GetProperty("source").GetString());
+        Assert.Contains("仿真", confirmed.GetProperty("recipe").GetProperty("note").GetString());
+        _ = rid;
     }
 }

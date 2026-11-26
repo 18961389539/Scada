@@ -29,7 +29,8 @@ public static class CalculationEvaluator
         {
             var value = expression.Evaluate(id => inputs[id].Value);
             var sourceTs = inputs.Count == 0 ? (long?)null : inputs.Values.Min(x => x.SourceTs ?? x.Ts);
-            return new(tag.Id, value, TagQuality.Good, now, sourceTs, null, tag.CalculationRevision);
+            var simulated = inputs.Values.Any(x => x.Simulated);
+            return new(tag.Id, value, TagQuality.Good, now, sourceTs, null, tag.CalculationRevision, Simulated: simulated);
         }
         catch (TagExpressionException ex) { return Failure(TagQuality.Bad, ex.Message); }
     }

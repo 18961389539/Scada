@@ -60,6 +60,7 @@
       <template v-if="rows.length">
         <div class="quality-legend-line">
           <span v-for="item in qualities" :key="item"><i class="quality-swatch" :class="`q-${item}`" />{{ qualityLabels[item] }}</span>
+          <span><i class="quality-swatch q-Simulated" />{{ $t('trendsView.qualitySimulated') }}</span>
           <span class="spacer" />
           <span>{{ $t('trendsView.qualityHint') }}</span>
         </div>
@@ -70,9 +71,9 @@
               v-for="(interval, index) in row.quality"
               :key="index"
               class="quality-seg"
-              :class="`q-${interval.quality}`"
+              :class="interval.simulated ? 'q-Simulated' : `q-${interval.quality}`"
               :style="{ left: percent(interval.from), width: qualityWidth(interval.from, interval.to) }"
-              :title="`${qualityLabels[interval.quality]} · ${formatTime(interval.from)} ~ ${formatTime(interval.to)}`"
+              :title="`${interval.simulated ? $t('trendsView.qualitySimulated') : qualityLabels[interval.quality]} · ${formatTime(interval.from)} ~ ${formatTime(interval.to)}`"
             />
           </div>
           <span v-if="row.qualityTruncated" class="tiny muted">{{ $t('trendsView.qualityTruncated') }}</span>
@@ -203,4 +204,5 @@ function qualityWidth(start: number, end: number): string {
 .q-Bad { background: #d4380d; }
 .q-CommFailure { background: #722ed1; }
 .q-Uncertain { background: #d48806; }
+.q-Simulated { background: #0ea5e9; }
 </style>

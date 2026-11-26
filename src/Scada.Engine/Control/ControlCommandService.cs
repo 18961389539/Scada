@@ -273,8 +273,12 @@ public sealed class ControlCommandService
         origin is ControlOrigin.Operator or ControlOrigin.Screen or ControlOrigin.Sequence
             or ControlOrigin.Recipe or ControlOrigin.Script or ControlOrigin.Annunciator;
 
-    public static string? SimulationWriteRefusal(Device? device, ControlOrigin origin)
+    public static string? SimulationWriteRefusal(Device? device, ControlOrigin origin, bool sourceSimulated = false)
     {
+        if (sourceSimulated && device is not { SimulationEnabled: true })
+            return device is null
+                ? "计算输出源自仿真，不能写入非仿真设备"
+                : $"计算输出源自仿真，不能写入非仿真设备 {device.Name}";
         if (device is not { SimulationEnabled: true }) return null;
         if (IsLocalSimulationWrite(origin)) return null;
         return $"设备 {device.Name} 处于仿真，外部或自动化写入不会下到现场，已拒绝";

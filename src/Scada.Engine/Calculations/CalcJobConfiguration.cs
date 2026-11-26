@@ -23,7 +23,7 @@ public sealed record CalcJobRequest(
     double? PreviewArgument = null, ScriptPreviewOverride[]? PreviewInputs = null);
 
 public sealed record ScriptPreviewOverride(int TagId, double Value, string Quality, long Timestamp);
-public sealed record ScriptPreviewSample(int TagId, string Name, double Value, string Quality, long Timestamp, bool Good);
+public sealed record ScriptPreviewSample(int TagId, string Name, double Value, string Quality, long Timestamp, bool Good, bool Simulated = false);
 public sealed record CSharpPreviewResult(CSharpScriptReply Reply, ScriptPreviewSample[] Inputs);
 
 public sealed record ScriptLibraryInput(string Name, string Source, long Revision);

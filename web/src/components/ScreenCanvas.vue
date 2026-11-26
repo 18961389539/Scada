@@ -505,11 +505,24 @@ function stamp(): string {
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
 }
+function historySourceLabel(id: number): string {
+  const points = props.history[id] ?? []
+  const hasOfficial = points.some(point => !point.simulated)
+  const hasSimulated = points.some(point => point.simulated)
+  if (hasOfficial && hasSimulated) return `${tr('trendsView.sourceField')}+${tr('trendsView.sourceSimulation')}`
+  if (hasSimulated) return tr('trendsView.sourceSimulation')
+  return tr('trendsView.sourceField')
+}
 function exportTable(node: ScreenNode): void {
   const columns = tableColumnLayout(node)
-  const rows = [csvLine(columns.map(column => column.label))]
+  const includeSource = node.type === 'history-table'
+  const header = columns.map(column => column.label)
+  if (includeSource) header.push(tr('trendsView.sourceField'))
+  const rows = [csvLine(header)]
   for (const id of node.tags ?? []) {
-    rows.push(csvLine(columns.map(column => column.key === 'value' && !tagGood(id) ? '' : tableCellText(node, id, column.key))))
+    const cells = columns.map(column => column.key === 'value' && !tagGood(id) ? '' : tableCellText(node, id, column.key))
+    if (includeSource) cells.push(historySourceLabel(id))
+    rows.push(csvLine(cells))
   }
   downloadText(`${nodeFileName(node)}-${stamp()}.csv`, `\uFEFF${rows.join('\r\n')}`, 'text/csv;charset=utf-8')
 }
@@ -522,8 +535,10 @@ function exportChartCsv(node: ScreenNode): void {
     rows.push(csvLine([tr('model.tag'), tr('model.value')]))
     rows.push(csvLine([tagName(node.tagId ?? 0), node.tagId == null ? '' : tagValue(node, node.tagId)]))
   } else if (node.type === 'chart-line' || node.type === 'chart-area') {
-    rows.push(csvLine([tr('model.time'), tr('model.tag'), tr('model.value')]))
-    for (const id of node.tags ?? []) for (const point of props.history[id] ?? []) rows.push(csvLine([new Date(point.ts).toISOString(), tagName(id), point.value]))
+    rows.push(csvLine([tr('model.time'), tr('model.tag'), tr('model.value'), tr('trendsView.sourceField')]))
+    for (const id of node.tags ?? []) for (const point of props.history[id] ?? []) {
+      rows.push(csvLine([new Date(point.ts).toISOString(), tagName(id), point.value, point.simulated ? tr('trendsView.sourceSimulation') : tr('trendsView.sourceField')]))
+    }
   } else {
     rows.push(csvLine([tr('model.tag'), tr('model.value'), tr('model.unit')]))
     for (const id of node.tags ?? []) rows.push(csvLine([tagName(id), tagValue(node, id), tagUnit(id)]))
@@ -544,7 +559,7 @@ function drillTableRow(node: ScreenNode, tagId: number): void {
   emit('trendTag', node, tagId)
 }
 function histStats(id: number): { last: number | null; min: number | null; max: number | null; avg: number | null } {
-  const points = props.historyUnavailable ? [] : props.history[id] ?? []
+  const points = (props.historyUnavailable ? [] : props.history[id] ?? []).filter(point => !point.simulated)
   if (!points.length) return { last: null, min: null, max: null, avg: null }
   let min = Infinity, max = -Infinity, sum = 0
   for (const p of points) { if (p.value < min) min = p.value; if (p.value > max) max = p.value; sum += p.value }

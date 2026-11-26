@@ -4,7 +4,7 @@ using Scada.Core.Entities;
 
 namespace Scada.Core.Calculations;
 
-public readonly record struct JobSample(double Value, bool Good, long Ts);
+public readonly record struct JobSample(double Value, bool Good, long Ts, bool Simulated = false);
 public sealed record TouPeriod(string Band, string Start, string End);
 public sealed record PendingScriptWrite(Guid CommandId, double Value);
 
@@ -28,6 +28,7 @@ public sealed class JobRuntimeState
     public bool ChangePending { get; set; }
     public long LastFireTs { get; set; }
     public long AlarmCursor { get; set; }
+    public bool PeriodIncludesSimulation { get; set; }
 
     public double Get(string key) => Values.GetValueOrDefault(key);
     public void Add(string key, double delta) => Values[key] = Values.GetValueOrDefault(key) + delta;
@@ -221,6 +222,7 @@ public static class CalcJobMath
     {
         var snapshot = new PeriodSnapshot(key, state.PeriodStartTs, new Dictionary<string, double>(state.Values));
         foreach (var name in state.Values.Keys.Where(IsPeriodKey).ToList()) state.Values[name] = 0;
+        state.PeriodIncludesSimulation = false;
         return snapshot;
     }
 }

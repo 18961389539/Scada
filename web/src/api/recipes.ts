@@ -26,8 +26,8 @@ export const recipeApi = {
   versions: async (id: number) => (await http.get<RecipeVersion[]>(`/recipes/${id}/versions`)).data,
   compare: async (left: number, leftVersion: number | null, right: string, rightVersion: number | null) =>
     (await http.get<RecipeCompare>('/recipes/compare', { params: { left, leftVersion: leftVersion ?? undefined, right, rightVersion: rightVersion ?? undefined } })).data,
-  upload: async (templateId: number, recipeId: number | null, name: string | null, note: string | null) =>
-    (await http.post<{ recipe: Recipe; warnings: string[] }>('/recipes/upload', { templateId, recipeId, name, note })).data,
+  upload: async (templateId: number, recipeId: number | null, name: string | null, note: string | null, confirmSimulated = false) =>
+    (await http.post<{ recipe: Recipe; warnings: string[] }>('/recipes/upload', { templateId, recipeId, name, note, confirmSimulated })).data,
   check: async (id: number, version: number) => (await http.post<RecipeCheck>(`/recipes/${id}/check`, { version })).data,
   download: async (id: number, version: number, challenge: string) => {
     if (!challenge) throw new Error('recipe confirmation challenge is required')

@@ -860,7 +860,9 @@ export default {
       code: 'Asset code', name: 'Asset name', category: 'Category', model: 'Model', manufacturer: 'Manufacturer',
       serialNumber: 'Serial number', location: 'Location', area: 'Area', device: 'Linked acquisition device',
       status: 'Status', commissioned: 'Commissioned', warranty: 'Warranty until', description: 'Description',
-      enabled: 'Enabled', empty: 'No device assets', addTitle: 'Add device asset', editTitle: 'Edit device asset'
+      enabled: 'Enabled', empty: 'No device assets', addTitle: 'Add device asset', editTitle: 'Edit device asset',
+      retireReason: 'Retirement reason', retireReasonRequired: 'A reason is required to retire an asset',
+      confirmRetire: 'Retire this asset? Enter a reason.'
     },
     status: { InService: 'In service', Standby: 'Standby', Maintenance: 'Maintenance', Retired: 'Retired' },
     workOrderStatus: { Open: 'Open', InProgress: 'In progress', OnHold: 'On hold', Completed: 'Completed', Cancelled: 'Cancelled' },
@@ -874,6 +876,9 @@ export default {
       start: 'Start', hold: 'Hold', resume: 'Resume', complete: 'Complete', cancelOrder: 'Cancel order',
       cancelReason: 'Cancellation reason',
       cancelReasonRequired: 'A reason is required to cancel a work order',
+      holdReason: 'Hold reason',
+      holdReasonRequired: 'A reason is required to put a work order on hold',
+      confirmHold: 'Put work order {0} on hold? Enter a reason.',
       parts: 'Parts used', confirmCancel: 'Cancel work order {0}? Enter a reason. Its status cannot change afterwards.',
       completeTitle: 'Complete work order {0}', resolutionRequired: 'A resolution is required to complete a work order',
       downtimeHint: 'Enter the actual downtime in minutes; 0 means no downtime',

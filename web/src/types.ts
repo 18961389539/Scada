@@ -489,6 +489,7 @@ export interface HistoryQualityInterval {
   quality: TagQuality
   from: number
   to: number
+  simulated?: boolean
 }
 
 export interface HistoryTagAnalysis {
@@ -709,7 +710,7 @@ export interface Asset {
   updatedBy: string
 }
 
-export type AssetInput = Omit<Asset, 'id' | 'createdTs' | 'updatedTs' | 'updatedBy'>
+export type AssetInput = Omit<Asset, 'id' | 'createdTs' | 'updatedTs' | 'updatedBy'> & { statusReason?: string }
 
 export interface MaintenanceWorkOrder {
   id: number
