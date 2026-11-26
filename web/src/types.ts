@@ -893,6 +893,21 @@ export interface QualityInspection {
   createdTs: number
   updatedTs: number
   updatedBy: string
+  amendmentReason?: string
+  deletedTs?: number | null
+  deletedBy?: string | null
+  deleteReason?: string | null
+}
+
+export interface QualityRevision {
+  id: number
+  inspectionId: number
+  ts: number
+  user: string
+  reason: string
+  action: string
+  beforeJson?: string | null
+  afterJson?: string | null
 }
 
 export interface QualityInspectionInput {
@@ -907,6 +922,7 @@ export interface QualityInspectionInput {
   inspector: string
   ts: number | null
   note: string
+  amendmentReason?: string
 }
 
 export interface QualityInspectionPage {

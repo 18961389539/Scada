@@ -61,6 +61,7 @@
           </el-descriptions>
           <el-alert v-if="selectedScanJob?.status.error" :title="selectedScanJob.status.error" type="warning" :closable="false" show-icon />
           <el-alert v-if="isScanner(selectedScanJob?.snSource) && selectedScanJob?.scannerStatus?.error" :title="selectedScanJob.scannerStatus.error" type="warning" :closable="false" show-icon data-test="trace-scanner-error" />
+          <el-alert v-if="selectedScanJob?.warning" :title="selectedScanJob.warning" type="warning" :closable="false" show-icon data-test="trace-job-warning" />
           <el-button v-if="pendingSn" :icon="Delete" :disabled="scanning" @click="clearScan">{{ $t('traceability.clearScan') }}</el-button>
           <el-empty v-if="!scanJobs.length && !metaError" :description="$t('traceability.noScanJobs')" />
         </div>
@@ -74,12 +75,14 @@
           <el-table-column :label="$t('traceability.enabled')" width="100" show-overflow-tooltip><template #default="{ row }">{{ $t(row.enabled ? 'traceability.yes' : 'traceability.no') }}</template></el-table-column>
           <el-table-column :label="$t('traceability.state')" min-width="160" show-overflow-tooltip><template #default="{ row }"><el-tooltip :content="row.status.error || stateLabel(row.status.state)"><span>{{ stateLabel(row.status.state) }}</span></el-tooltip></template></el-table-column>
           <el-table-column :label="$t('traceability.connection')" min-width="140" show-overflow-tooltip><template #default="{ row }"><el-tooltip v-if="isScanner(row.snSource)" :content="row.scannerStatus?.error || scannerStateLabel(row.scannerStatus?.state)"><span>{{ scannerStateLabel(row.scannerStatus?.state) }}</span></el-tooltip><span v-else>-</span></template></el-table-column>
+          <el-table-column :label="$t('traceability.warning')" min-width="200" show-overflow-tooltip><template #default="{ row }"><span v-if="row.warning" data-test="trace-job-warning">{{ row.warning }}</span><span v-else>-</span></template></el-table-column>
           <el-table-column width="70"><template #default="{ row }"><el-tooltip :content="$t('traceability.edit')"><el-button v-if="row.canConfigure" :icon="Edit" :aria-label="$t('traceability.edit')" data-test="trace-edit" @click="edit(row)" /></el-tooltip></template></el-table-column>
         </el-table>
       </el-tab-pane>
     </el-tabs>
     <el-dialog v-model="dialog" :title="$t(editId ? 'traceability.edit' : 'traceability.add')" width="min(680px, calc(100vw - 24px))" :before-close="editGuard.beforeClose" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @keydown="editGuard.onKey">
       <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon data-test="trace-form-error" />
+      <el-alert v-if="listenOpenWarning" :title="$t('traceability.listenOpenWarning')" type="warning" :closable="false" show-icon data-test="trace-listen-open" />
       <el-form label-position="top" @submit.prevent="save">
         <div class="trace-form-grid">
           <el-form-item :label="$t('traceability.job')" required><el-input v-model="form.name" maxlength="100" data-test="trace-name" /></el-form-item>
@@ -88,7 +91,10 @@
           <el-form-item :label="$t('traceability.trigger')" required><el-select v-model="form.triggerTagId" filterable data-test="trace-trigger"><el-option v-for="tag in triggerTags" :key="tag.id" :label="tag.name" :value="tag.id" /></el-select></el-form-item>
           <el-form-item :label="$t('traceability.duplicateCheck')"><el-switch v-model="form.duplicateCheckEnabled" data-test="trace-duplicate-check" /></el-form-item>
         </div>
-        <p v-if="form.duplicateCheckEnabled" class="tiny muted">{{ $t('traceability.duplicateCheckHint') }}</p>
+        <template v-if="form.duplicateCheckEnabled">
+          <el-form-item :label="$t('traceability.duplicateCheckWindow')"><el-input-number v-model="form.duplicateCheckWindowDays" :min="1" :max="3650" :step="1" data-test="trace-duplicate-window" /></el-form-item>
+          <p class="tiny muted">{{ $t('traceability.duplicateCheckHint') }}</p>
+        </template>
         <el-form-item :label="$t('traceability.snSource')" required>
           <el-radio-group v-model="form.snSource" class="trace-source-options" data-test="trace-source" @change="sourceChanged"><el-radio-button v-for="source in snSources" :key="source" :value="source">{{ sourceLabel(source) }}</el-radio-button></el-radio-group>
         </el-form-item>
@@ -106,6 +112,10 @@
             <template v-if="form.snSource === 'Tcp'">
               <el-form-item :label="$t(form.scanner.tcpMode === 'Client' ? 'traceability.tcpHost' : 'traceability.listenHost')" required><el-input v-model="form.scanner.host" maxlength="253" data-test="trace-tcp-host" /></el-form-item>
               <el-form-item :label="$t('traceability.port')" required><el-input-number v-model="form.scanner.port" :min="1" :max="65535" data-test="trace-tcp-port" /></el-form-item>
+              <el-form-item v-if="form.scanner.tcpMode === 'Server'" :label="$t('traceability.allowedSources')" class="trace-allow-span">
+                <el-input v-model="allowedSourcesText" type="textarea" :rows="3" :placeholder="$t('traceability.allowedSourcesHint')" data-test="trace-allowed-sources" />
+                <p class="tiny muted">{{ $t('traceability.allowedSourcesHint') }}</p>
+              </el-form-item>
             </template>
             <template v-else>
               <el-form-item :label="$t('traceability.serialPort')" required><el-input v-model="form.scanner.serialPort" maxlength="128" data-test="trace-serial-port" /></el-form-item>
@@ -207,9 +217,17 @@ function traceLabel(device: { id: number; name: string; protocol: string; gatewa
 }
 const dialog = ref(false), editId = ref<number>(), formDeviceId = ref<number>()
 const snSources: SnSource[] = ['Plc', 'WebScan', 'Tcp', 'Serial']
-const scannerDefaults = (): TraceabilityScannerOptions => ({ tcpMode: 'Client', host: '127.0.0.1', port: 9004, serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', terminator: 'CrLf', encoding: 'Utf8' })
-const blank = (): TraceabilityJobInput => ({ name: '', enabled: false, triggerTagId: 0, snSource: 'Plc', snFormat: 'Numeric', snTagIds: [], fields: [{ name: '', tagId: 0 }], scanExpirySeconds: 300, revision: 0, scanner: scannerDefaults(), duplicateCheckEnabled: false })
+const scannerDefaults = (): TraceabilityScannerOptions => ({ tcpMode: 'Client', host: '127.0.0.1', port: 9004, serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', terminator: 'CrLf', encoding: 'Utf8', allowedSources: [] })
+const blank = (): TraceabilityJobInput => ({ name: '', enabled: false, triggerTagId: 0, snSource: 'Plc', snFormat: 'Numeric', snTagIds: [], fields: [{ name: '', tagId: 0 }], scanExpirySeconds: 300, revision: 0, scanner: scannerDefaults(), duplicateCheckEnabled: false, duplicateCheckWindowDays: 10 })
 const form = reactive<TraceabilityJobInput>(blank())
+
+const allowedSourcesText = computed({
+  get: () => (form.scanner.allowedSources ?? []).join('\n'),
+  set: (value: string) => { form.scanner.allowedSources = value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean) }
+})
+const isLoopbackHost = (host: string) => ['127.0.0.1', '::1', '0:0:0:0:0:0:0:1', 'localhost'].includes((host || '').trim().toLowerCase())
+const listenOpenWarning = computed(() => form.snSource === 'Tcp' && form.scanner.tcpMode === 'Server' && !isLoopbackHost(form.scanner.host) && !(form.scanner.allowedSources ?? []).length)
+
 const physicalTags = computed(() => tags.value.filter(tag => tag.deviceId === formDeviceId.value && (!tag.kind || tag.kind === 'Physical')))
 const triggerTags = computed(() => physicalTags.value.filter(tag => tag.writable && tag.dataType !== 'Bool' && tag.scale === 1 && tag.offset === 0))
 const dataTags = computed(() => physicalTags.value.filter(tag => tag.id !== form.triggerTagId))
@@ -290,7 +308,7 @@ async function clearScan() {
 }
 function edit(job?: TraceabilityJob) {
   formError.value = ''; editId.value = job?.id
-  Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision, scanner: { ...scannerDefaults(), ...job.scanner }, duplicateCheckEnabled: job.duplicateCheckEnabled } : blank())
+  Object.assign(form, job ? { name: job.name, enabled: job.enabled, triggerTagId: job.triggerTagId, snSource: job.snSource, snFormat: job.snFormat, snTagIds: [...job.snTagIds], fields: job.fields.map(field => ({ ...field })), scanExpirySeconds: job.scanExpirySeconds, revision: job.revision, scanner: { ...scannerDefaults(), ...job.scanner, allowedSources: [...(job.scanner?.allowedSources ?? [])] }, duplicateCheckEnabled: job.duplicateCheckEnabled, duplicateCheckWindowDays: job.duplicateCheckWindowDays || 10 } : blank())
   const mappedIndex = form.fields.findIndex(field => field.outcomeMapping)
   outcomeFieldIndex.value = mappedIndex < 0 ? undefined : mappedIndex
   outcomePassValue.value = form.fields[mappedIndex]?.outcomeMapping?.passValue ?? 1

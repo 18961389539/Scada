@@ -32,6 +32,7 @@ import type {
   QualityInspection,
   QualityInspectionInput,
   QualityInspectionPage,
+  QualityRevision,
   QualityResult,
   QualitySummary,
   SimulationView,
@@ -418,13 +419,16 @@ export const qualityApi = {
   inspections: async (params: {
     search?: string; sn?: string; batchNo?: string; product?: string; result?: QualityResult
     defectCodeId?: number; areaId?: number; deviceId?: number; from?: number; to?: number
-    page?: number; pageSize?: number
+    page?: number; pageSize?: number; includeDeleted?: boolean
   }) => (await http.get<QualityInspectionPage>('/quality/inspections', { params })).data,
   createInspection: async (input: QualityInspectionInput) =>
     (await http.post<QualityInspection>('/quality/inspections', input)).data,
   updateInspection: async (id: number, input: QualityInspectionInput) =>
     (await http.put<QualityInspection>(`/quality/inspections/${id}`, input)).data,
-  removeInspection: async (id: number) => http.delete(`/quality/inspections/${id}`),
+  removeInspection: async (id: number, reason: string) =>
+    http.post(`/quality/inspections/${id}/delete`, { reason }),
+  revisions: async (id: number) =>
+    (await http.get<QualityRevision[]>(`/quality/inspections/${id}/revisions`)).data,
   summary: async (params: { from?: number; to?: number; areaId?: number; deviceId?: number; product?: string; batchNo?: string }) =>
     (await http.get<QualitySummary>('/quality/summary', { params })).data,
   exportUrl: (params: Record<string, unknown>) => {

@@ -5,6 +5,8 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.Infrastructure;
+using Scada.Core.Protocols;
 using Scada.Server.Auth;
 using Scada.Server.Services;
 using Scada.Core.Configuration;
@@ -62,10 +64,14 @@ public static class ChannelEndpoints
             .ToListAsync(ct)).Where(Scada.Core.Protocols.SoftElementByteOrder.OccupiesSerialPort)
             .Select(x => new { x.Name, x.SerialPort, x.ChannelId });
         var busy = devices.FirstOrDefault(x => SamePort(x.SerialPort, channel.SerialPort));
-        if (busy is null) return null;
-        return busy.ChannelId is null
-            ? $"串口 {channel.SerialPort.Trim()} 已被启用设备「{busy.Name}」独占，请先把该设备绑定到本通道（或其它通道），或改用其它串口"
-            : $"串口 {channel.SerialPort.Trim()} 已被另一条通道上的设备「{busy.Name}」占用，请改用其它串口";
+        if (busy is not null)
+        {
+            return busy.ChannelId is null
+                ? $"串口 {channel.SerialPort.Trim()} 已被启用设备「{busy.Name}」独占，请先把该设备绑定到本通道（或其它通道），或改用其它串口"
+                : $"串口 {channel.SerialPort.Trim()} 已被另一条通道上的设备「{busy.Name}」占用，请改用其它串口";
+        }
+        var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured: null, ct, exceptChannelId: channel.Id);
+        return SerialPortOccupancy.Conflict(owners, channel.SerialPort, ignore: owner => owner.Kind == SerialPortOccupancy.Device);
     }
 
     public static void MapChannelEndpoints(this IEndpointRouteBuilder app)

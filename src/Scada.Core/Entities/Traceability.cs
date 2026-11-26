@@ -22,6 +22,8 @@ public sealed record TraceabilityScannerOptions
     public SerialStopBits StopBits { get; init; } = SerialStopBits.One;
     public TraceabilityScanTerminator Terminator { get; init; }
     public TraceabilityScanEncoding Encoding { get; init; }
+    // TCP Server 模式的来源 IP 允许名单（地址或 CIDR）。空表示不限制。
+    public IReadOnlyList<string> AllowedSources { get; init; } = [];
 }
 
 public sealed class TraceabilityJob : IAuditedEntity
@@ -36,8 +38,9 @@ public sealed class TraceabilityJob : IAuditedEntity
     public string ScannerOptionsJson { get; set; } = "{}";
     public string FieldsJson { get; set; } = "[]";
     public int ScanExpirySeconds { get; set; } = 300;
-    // 启用后，同一任务近 10 天内已采集过的 SN 视为重码：拒绝采集并应答 PLC 3。
+    // 启用后，同一任务在 DuplicateCheckWindowDays 内已采集过的 SN 视为重码：拒绝采集并应答 PLC 3。
     public bool DuplicateCheckEnabled { get; set; }
+    public int DuplicateCheckWindowDays { get; set; } = 10;
     public long Revision { get; set; } = 1;
 
     [JsonIgnore] public string AuditTargetType => "TraceabilityJob";
@@ -80,4 +83,12 @@ public sealed class TraceabilityAttempt
     public int Reply { get; set; }
     public bool Acknowledged { get; set; }
     public string? Error { get; set; }
+}
+// 待用 SN：扫码后到 PLC 触发前的绑定。写入运行库，进程重启后可恢复，避免只存在内存里丢失。
+public sealed class TraceabilityPendingScan
+{
+    public int JobId { get; set; }
+    public string Sn { get; set; } = "";
+    public long ExpiresTs { get; set; }
+    public long Revision { get; set; }
 }

@@ -107,6 +107,43 @@ public sealed class AggregationService : BackgroundService
         finally { _runLock.Release(); }
     }
 
+    /// <summary>
+    /// 按当前口径（排除仿真点的均/最小/最大）可选重建已有聚合分片。不改写原始历史，也不在启动时自动执行。
+    /// </summary>
+    public async Task<(int FiveMinuteWindows, int HourWindows)> RebuildAsync(long from, long to, CancellationToken cancellationToken)
+    {
+        await _runLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (!_role.IsActive) return (0, 0);
+            if (to <= from) throw new ArgumentOutOfRangeException(nameof(to), "时间范围无效");
+            if (to - from > 366L * 24 * 3600_000) throw new ArgumentOutOfRangeException(nameof(to), "重建跨度不能超过 366 天");
+            var generation = _role.Generation;
+            var five = 0;
+            var start = from - ((from % PendingAggregation.FiveMinuteMs) + PendingAggregation.FiveMinuteMs) % PendingAggregation.FiveMinuteMs;
+            for (var ts = start; ts < to; ts += PendingAggregation.FiveMinuteMs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentRole(generation)) break;
+                var values = await _store.QueryRawAggregatesAsync(ts, ts + PendingAggregation.FiveMinuteMs, cancellationToken);
+                await _store.WriteAggregate5MinAsync(values, cancellationToken);
+                five++;
+            }
+            var hour = 0;
+            var hourStart = from - ((from % PendingAggregation.HourMs) + PendingAggregation.HourMs) % PendingAggregation.HourMs;
+            for (var ts = hourStart; ts < to; ts += PendingAggregation.HourMs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!IsCurrentRole(generation)) break;
+                var values = await _store.Query5MinAggregatesAsync(ts, ts + PendingAggregation.HourMs, cancellationToken);
+                await _store.WriteAggregateHourAsync(values.Select(x => x with { Ts = ts }).ToList(), cancellationToken);
+                hour++;
+            }
+            return (five, hour);
+        }
+        finally { _runLock.Release(); }
+    }
+
     private bool IsCurrentRole(long generation) => _role.IsActive && _role.Generation == generation;
 
     private async Task<bool> AggregateAsync(HistoryPendingWindow window, long generation, CancellationToken cancellationToken)

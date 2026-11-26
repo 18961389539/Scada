@@ -19,11 +19,14 @@ public sealed class TraceabilityService(
     ICollectorControl collector, INodeRole role, ILogger<TraceabilityService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    // 重码检测窗口：同一任务近 10 天内已出现过的 SN。
-    public const long DuplicateCheckWindowMs = 10L * 24 * 60 * 60 * 1000;
+    // 重码检测窗口默认：同一任务近 10 天内已出现过的 SN。任务可另行配置天数。
+    public const int DefaultDuplicateCheckWindowDays = 10;
+    public const int MinDuplicateCheckWindowDays = 1;
+    public const int MaxDuplicateCheckWindowDays = 3650;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<int, (string Sn, long ExpiresTs, long Revision)> _scans = new();
     private readonly ConcurrentDictionary<int, TraceabilityStatus> _statuses = new();
+    private bool _pendingLoaded;
 
     public static List<int> SnTags(TraceabilityJob job) => JsonSerializer.Deserialize<List<int>>(job.SnTagIdsJson, Json) ?? [];
     public static TraceabilityScannerOptions ScannerOptions(TraceabilityJob job) => JsonSerializer.Deserialize<TraceabilityScannerOptions>(job.ScannerOptionsJson, Json) ?? new();
@@ -39,7 +42,15 @@ public sealed class TraceabilityService(
     public async Task<T> ExclusiveAsync<T>(Func<Task<T>> action, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
-        try { return await action(); }
+        try
+        {
+            if (!_pendingLoaded)
+            {
+                await LoadPendingAsync(ct);
+                _pendingLoaded = true;
+            }
+            return await action();
+        }
         finally { _gate.Release(); }
     }
 
@@ -69,15 +80,17 @@ public sealed class TraceabilityService(
         var value = TraceabilityCapture.ValidateSn(sn);
         var expires = ScadaTime.NowMs() + job.ScanExpirySeconds * 1000L;
         _scans[jobId] = (value, expires, job.Revision);
+        await PersistPendingAsync(jobId, value, expires, job.Revision, ct);
         var status = new TraceabilityStatus(jobId, "ready", value, expires, null, null);
         _statuses[jobId] = status;
         return status;
     }, ct);
 
-    public Task<bool> ClearScanAsync(int id, CancellationToken ct) => ExclusiveAsync(() =>
+    public Task<bool> ClearScanAsync(int id, CancellationToken ct) => ExclusiveAsync(async () =>
     {
         ResetScan(id);
-        return Task.FromResult(true);
+        await DeletePendingAsync(id, ct);
+        return true;
     }, ct);
 
     public void ResetScan(int id)
@@ -87,12 +100,74 @@ public sealed class TraceabilityService(
         _statuses[id] = status with { PendingSn = null, ScanExpiresTs = null, State = status.State == "ready" ? "idle" : status.State };
     }
 
+
+    public static int WindowDays(TraceabilityJob job) =>
+        job.DuplicateCheckWindowDays is < MinDuplicateCheckWindowDays or > MaxDuplicateCheckWindowDays
+            ? DefaultDuplicateCheckWindowDays
+            : job.DuplicateCheckWindowDays;
+
+    public static long WindowMs(TraceabilityJob job) => WindowDays(job) * 24L * 60 * 60 * 1000;
+
+    public static string? ListenWarning(TraceabilityJob job)
+    {
+        if (job.SnSource != TraceabilitySnSource.Tcp) return null;
+        var options = ScannerOptions(job);
+        if (options.TcpMode != TraceabilityTcpMode.Server) return null;
+        if (TraceabilityScannerConnection.IsLoopbackListen(options.Host)) return null;
+        if (options.AllowedSources is { Count: > 0 }) return null;
+        return $"TCP 扫码器正在监听 {options.Host}:{options.Port}（非环回），未配置来源 IP 允许名单，任何能连上的客户端都可以注入 SN。";
+    }
+
+    private async Task LoadPendingAsync(CancellationToken ct)
+    {
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var now = ScadaTime.NowMs();
+        var rows = await runtime.TraceabilityPendingScans.AsNoTracking().Where(row => row.ExpiresTs > now).ToListAsync(ct);
+        foreach (var row in rows)
+        {
+            _scans[row.JobId] = (row.Sn, row.ExpiresTs, row.Revision);
+            _statuses[row.JobId] = new TraceabilityStatus(row.JobId, "ready", row.Sn, row.ExpiresTs, null, null);
+        }
+        var expired = await runtime.TraceabilityPendingScans.Where(row => row.ExpiresTs <= now).ToListAsync(ct);
+        if (expired.Count > 0)
+        {
+            runtime.TraceabilityPendingScans.RemoveRange(expired);
+            await runtime.SaveChangesAsync(ct);
+        }
+    }
+
+    private async Task PersistPendingAsync(int jobId, string sn, long expiresTs, long revision, CancellationToken ct)
+    {
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var row = await runtime.TraceabilityPendingScans.FindAsync([jobId], ct);
+        if (row is null)
+        {
+            runtime.TraceabilityPendingScans.Add(new TraceabilityPendingScan { JobId = jobId, Sn = sn, ExpiresTs = expiresTs, Revision = revision });
+        }
+        else
+        {
+            row.Sn = sn; row.ExpiresTs = expiresTs; row.Revision = revision;
+        }
+        await runtime.SaveChangesAsync(ct);
+    }
+
+    private async Task DeletePendingAsync(int jobId, CancellationToken ct)
+    {
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        var row = await runtime.TraceabilityPendingScans.FindAsync([jobId], ct);
+        if (row is null) return;
+        runtime.TraceabilityPendingScans.Remove(row);
+        await runtime.SaveChangesAsync(ct);
+    }
+
     public List<string> Validate(TraceabilityJob job)
     {
         var errors = new List<string>();
         if (string.IsNullOrWhiteSpace(job.Name) || job.Name.Length > 100) errors.Add($"任务名称须为 1～100 个字符，当前 {job.Name?.Length ?? 0} 个。");
         if (!Enum.IsDefined(job.SnSource) || !Enum.IsDefined(job.SnFormat)) errors.Add($"SN 来源（{job.SnSource}）或格式（{job.SnFormat}）无效。");
         if (job.ScanExpirySeconds is < 5 or > 3600) errors.Add($"扫码有效期须为 5～3600 秒，当前为 {job.ScanExpirySeconds} 秒。");
+        if (job.DuplicateCheckWindowDays is < MinDuplicateCheckWindowDays or > MaxDuplicateCheckWindowDays)
+            errors.Add($"重码检测窗口须为 {MinDuplicateCheckWindowDays}～{MaxDuplicateCheckWindowDays} 天，当前为 {job.DuplicateCheckWindowDays} 天。");
         if (job.SnSource is TraceabilitySnSource.Tcp or TraceabilitySnSource.Serial)
         {
             TraceabilityScannerOptions options;
@@ -106,6 +181,8 @@ public sealed class TraceabilityService(
                     errors.Add($"TCP 扫码器须配置 1～253 个字符且不含空白的主机名（当前“{options.Host}”）和 1～65535 的端口（当前 {options.Port}）。");
                 if (options.TcpMode == TraceabilityTcpMode.Server && !System.Net.IPAddress.TryParse(options.Host, out _))
                     errors.Add($"TCP 监听地址“{options.Host}”不是本机 IP 地址。");
+                if (TraceabilityScannerConnection.InvalidAllowedSources(options.AllowedSources) is { } allowError)
+                    errors.Add(allowError);
             }
             else if (string.IsNullOrWhiteSpace(options.SerialPort) || options.SerialPort.Length > 128 || options.BaudRate is < 300 or > 921600 || options.DataBits is < 5 or > 8 || !Enum.IsDefined(options.Parity) || !Enum.IsDefined(options.StopBits))
                 errors.Add($"串口扫码器设置无效：端口“{options.SerialPort}”，波特率 {options.BaudRate}，数据位 {options.DataBits}，校验 {options.Parity}，停止位 {options.StopBits}。");
@@ -158,6 +235,17 @@ public sealed class TraceabilityService(
         if (!role.IsActive) return;
         await ExclusiveAsync(async () =>
         {
+            if (!_pendingLoaded)
+            {
+                await LoadPendingAsync(ct);
+                _pendingLoaded = true;
+            }
+            var nowExpire = ScadaTime.NowMs();
+            foreach (var stale in _scans.Where(pair => pair.Value.ExpiresTs <= nowExpire).Select(pair => pair.Key).ToList())
+            {
+                _scans.Remove(stale);
+                await DeletePendingAsync(stale, ct);
+            }
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var jobs = await db.TraceabilityJobs.AsNoTracking().ToListAsync(ct);
@@ -209,6 +297,7 @@ public sealed class TraceabilityService(
         var validation = Validate(job);
         if (validation.Count > 0) throw new InvalidOperationException(string.Join(" ", validation));
         var scan = _scans.Remove(job.Id, out var scanned) && scanned.ExpiresTs > now && scanned.Revision == job.Revision ? scanned.Sn : null;
+            if (scan is not null) await DeletePendingAsync(job.Id, ct);
         var attempt = new TraceabilityAttempt { Id = Guid.NewGuid(), JobId = job.Id, StartedTs = now };
         runtime.TraceabilityAttempts.Add(attempt);
         try { await runtime.SaveChangesAsync(ct); }
@@ -235,8 +324,8 @@ public sealed class TraceabilityService(
                 ? TraceabilityCapture.ReadSn(snIds.Select(id => values[id]).ToArray(), job.SnFormat)
                 : TraceabilityCapture.ValidateSn(scan);
             if (job.DuplicateCheckEnabled && await runtime.TraceabilityRecords.AnyAsync(record =>
-                record.JobId == job.Id && record.Sn == sn && record.Ts >= now - DuplicateCheckWindowMs, token))
-                throw new IOException($"SN {sn} 在本任务近 10 天内已采集过（重码），本次采集被拒绝并应答 3。");
+                record.JobId == job.Id && record.Sn == sn && record.Ts >= now - WindowMs(job), token))
+                throw new IOException($"SN {sn} 在本任务近 {WindowDays(job)} 天内已采集过（重码），本次采集被拒绝并应答 3。");
             var payload = fields.Select(field => new TraceabilityValue(field.Name, field.TagId, values[field.TagId].Value,
                 config.TryGetTag(field.TagId, out var tag) ? tag.Unit : null, field.OutcomeMapping?.Evaluate(values[field.TagId].Value))).ToArray();
             return new TraceabilityRecord { CycleId = attempt.Id, JobId = job.Id, JobName = job.Name, AreaId = device.AreaId,

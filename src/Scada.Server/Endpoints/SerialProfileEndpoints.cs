@@ -7,6 +7,7 @@ using Scada.Core.Enums;
 using Scada.Core.Protocols;
 using Scada.Core.Scripting;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Engine.Calculations;
 using Scada.Server.Auth;
 
@@ -185,30 +186,8 @@ public static class SerialProfileEndpoints
         var busy = rows.FirstOrDefault(row => row.Enabled && row.Id != id && SerialProfileRules.SamePort(row.Port, profile.Port));
         if (busy is not null) return $"串口 {profile.Port} 已被串口配置「{busy.Name}」占用";
 
-        var channels = await db.Channels.AsNoTracking().Where(row => row.Enabled).ToListAsync(ct);
-        var channel = channels.FirstOrDefault(row => ChannelProtocols.UsesSerial(row.Protocol) && SerialProfileRules.SamePort(row.SerialPort, profile.Port));
-        if (channel is not null) return $"串口 {profile.Port} 已被采集通道「{channel.Name}」占用";
-
-        var serial = ChannelProtocols.SerialCandidates;
-        var devices = (await db.Devices.AsNoTracking()
-            .Where(row => row.Enabled && row.ChannelId == null && serial.Contains(row.Protocol))
-            .ToListAsync(ct)).Where(SoftElementByteOrder.OccupiesSerialPort)
-            .Select(row => new { row.Name, row.SerialPort });
-        var device = devices.FirstOrDefault(row => SerialProfileRules.SamePort(row.SerialPort, profile.Port));
-        if (device is not null) return $"串口 {profile.Port} 已被设备「{device.Name}」独占";
-
-        var jobs = await db.TraceabilityJobs.AsNoTracking()
-            .Where(row => row.Enabled && row.SnSource == TraceabilitySnSource.Serial)
-            .Select(row => new { row.Name, row.ScannerOptionsJson }).ToListAsync(ct);
-        foreach (var job in jobs)
-        {
-            TraceabilityScannerOptions? scanner = null;
-            try { scanner = JsonSerializer.Deserialize<TraceabilityScannerOptions>(job.ScannerOptionsJson, Json); }
-            catch (JsonException) { }
-            if (scanner is not null && SerialProfileRules.SamePort(scanner.SerialPort, profile.Port))
-                return $"串口 {profile.Port} 已被追溯扫码任务「{job.Name}」占用";
-        }
-        return null;
+        var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured, ct, exceptProfileId: id, exceptConfigName: name);
+        return SerialPortOccupancy.Conflict(owners, profile.Port);
     }
 
     private static void Apply(SerialProfileConfig entity, SerialProfileRequest request)

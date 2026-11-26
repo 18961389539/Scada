@@ -5,7 +5,7 @@ export type SnFormat = 'Numeric' | 'AsciiLowByteFirst' | 'AsciiHighByteFirst'
 export interface TraceabilityScannerOptions {
   tcpMode: 'Client' | 'Server'; host: string; port: number; serialPort: string; baudRate: number
   dataBits: number; parity: 'None' | 'Odd' | 'Even'; stopBits: 'One' | 'Two'
-  terminator: 'CrLf' | 'Lf' | 'Cr'; encoding: 'Utf8' | 'Ascii'
+  terminator: 'CrLf' | 'Lf' | 'Cr'; encoding: 'Utf8' | 'Ascii'; allowedSources?: string[]
 }
 export type TraceabilityOutcome = 'NotEvaluated' | 'Passed' | 'Failed' | 'Unknown'
 export interface TraceabilityField { name: string; tagId: number; outcomeMapping?: { passValue: number; failValue: number } | null }
@@ -15,10 +15,10 @@ export interface TraceabilityStatus {
 export interface TraceabilityJobInput {
   name: string; enabled: boolean; triggerTagId: number; snSource: SnSource; snFormat: SnFormat
   snTagIds: number[]; fields: TraceabilityField[]; scanExpirySeconds: number; revision: number; scanner: TraceabilityScannerOptions
-  duplicateCheckEnabled: boolean
+  duplicateCheckEnabled: boolean; duplicateCheckWindowDays: number
 }
 export interface TraceabilityJob extends TraceabilityJobInput {
-  id: number; canConfigure: boolean; canScan: boolean; status: TraceabilityStatus; scannerStatus: { state: string; error: string | null }
+  id: number; canConfigure: boolean; canScan: boolean; status: TraceabilityStatus; scannerStatus: { state: string; error: string | null }; warning?: string | null
 }
 export interface TraceabilityRecord {
   id: number; jobId: number; jobName: string; sn: string; capturedAt: string; acknowledged: boolean

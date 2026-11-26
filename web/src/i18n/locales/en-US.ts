@@ -59,6 +59,9 @@ export default {
     returnedHint: 'Open returned alarms awaiting acknowledgment',
     reviewSuppressed: 'Review suppressed',
     reviewShelved: 'Review shelved',
+    reviewOutOfService: 'Review out-of-service rules',
+    outOfServiceReasons: 'Out of service:',
+    outOfServiceMore: '{0} more',
     openAlarm: 'Open alarm',
     moreActions: 'More actions',
     openConsole: 'Open the control room layout',
@@ -405,7 +408,7 @@ export default {
   },
   overviewStatus: {
     updated: 'Last complete update: {0}', unknown: 'Awaiting data', stale: 'Data is stale', loadedOnly: 'Loaded subset only',
-    activeUnack: 'Active, unacknowledged', returned: 'Returned, awaiting acknowledgment', protection: 'Suppressed / Shelved', review: 'Review', flood: 'Alarm flood',
+    activeUnack: 'Active, unacknowledged', returned: 'Returned, awaiting acknowledgment', protection: 'Suppressed / Shelved / Out of service', review: 'Review', flood: 'Alarm flood',
     alarmScope: 'Active unacknowledged excludes returned, shelved and suppressed alarms. Flood detection uses the recent arrival rate, not the current active count.',
     listed: 'Showing {0} / {1}, unacknowledged first', triggerValue: 'Trigger value', state: 'State', acked: 'Active, acknowledged',
     locate: 'Locate', trend: 'Trend', abnormalOnly: 'Abnormal only', noDeviceIssues: 'No communication issues detected',
@@ -463,7 +466,7 @@ export default {
     parityNone: 'None', parityOdd: 'Odd', parityEven: 'Even', terminator: 'Frame terminator', encoding: 'Character encoding',
     scannerStates: { stopped: 'Stopped', connecting: 'Connecting', listening: 'Awaiting scanner connection', connected: 'Connected', disconnected: 'Disconnected, retrying', error: 'Invalid configuration' },
     plc: 'PLC registers', webScan: 'Web scan', enabled: 'Enabled', yes: 'Yes', no: 'No', device: 'PLC device',
-    duplicateCheck: 'Duplicate SN check', duplicateCheckHint: 'When enabled, the same SN captured by this job within the last 10 days is rejected with PLC reply 3.',
+    duplicateCheck: 'Duplicate SN check', duplicateCheckHint: 'When enabled, the same SN captured by this job within the configured window is rejected with PLC reply 3.', duplicateCheckWindow: 'Duplicate-check window (days)', allowedSources: 'Allowed source IPs', allowedSourcesHint: 'One IP or CIDR per line, for example 192.168.1.10 or 10.0.0.0/24. Leave empty to allow any source.', listenOpenWarning: 'Listening on a non-loopback address without a source IP allowlist. Any client that can connect can inject serial numbers.', warning: 'Warning',
     viaGateway: ', via gateway #{0}',
     traceable: 'Traceable',
     collectible: 'Collectible',
@@ -945,7 +948,20 @@ export default {
     exportPdf: 'Export PDF',
     createdBy: 'Created by',
     updated: 'Updated',
-    revised: 'Revised'
+    revised: 'Revised',
+    includeDeleted: 'Show deleted',
+    deletedTag: 'Deleted',
+    amendmentReason: 'Amendment reason',
+    deleteReason: 'Deletion reason',
+    reasonRequired: 'Enter an amendment or deletion reason',
+    confirmKeyChange: 'This will change the serial number, result, inspection time, or area. Those fields affect summaries and traceability. Continue?',
+    history: 'Revision history',
+    historyTitle: 'Inspection revision history',
+    historyAction: 'Action',
+    actionCreate: 'Created',
+    actionUpdate: 'Amended',
+    actionDelete: 'Deleted',
+    noRevisions: 'No revision history'
   },
   screenHandoff: {
     controlsPaused: 'A newer screen version was published. Controls are paused until you refresh.',
@@ -1060,6 +1076,9 @@ export default {
     rtnUnack: 'Returned unacknowledged',
     shelved: 'Shelved',
     suppressed: 'Suppressed',
+    outOfService: 'Out-of-service rules',
+    noOutOfService: 'No alarm rules are currently out of service',
+    outOfServiceMore: '{0} more out-of-service rules',
     pendingReview: 'Pending approval',
     noPending: 'No pending control requests',
     runningSequences: 'Running sequences',
@@ -1147,6 +1166,17 @@ export default {
     standby: 'This node is standby',
     primary: 'Primary {0}',
     healthIssue: 'Service issue'
-  }
+  },
 
+  historyAggregates: {
+    title: 'Rebuild history aggregates',
+    hint: 'Optionally rebuild existing 5-minute and hourly aggregates with the current rules (simulated samples stay out of average, min, and max). Raw history is not rewritten, and rebuilds never run automatically. One run can cover at most 366 days.',
+    from: 'From',
+    to: 'To',
+    run: 'Rebuild',
+    confirm: 'Existing aggregate shards in the selected range will be overwritten with the current rules. Raw history will not be changed. Continue?',
+    done: 'Rebuilt {0} 5-minute windows and {1} hourly windows',
+    failed: 'Failed to rebuild history aggregates',
+    range: 'Choose a valid time range'
+  },
 }

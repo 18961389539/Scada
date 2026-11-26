@@ -71,14 +71,26 @@ public sealed class QualityApiTests : IClassFixture<AuthorizationTests.Site>
 
         Assert.Equal(HttpStatusCode.Forbidden, (await opA.PutAsJsonAsync($"/api/quality/inspections/{failedId}",
             new { sn = "X", batchNo = "B1", product = "P1", areaId = _site.AreaA, deviceId = (int?)null, tagId = (int?)null,
-                result = "Failed", defectCodeId = codeId, inspector = "opA", ts = now, note = "" })).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await cfgA.PutAsJsonAsync($"/api/quality/inspections/{failedId}",
+                result = "Failed", defectCodeId = codeId, inspector = "opA", ts = now, note = "", amendmentReason = "复核" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await cfgA.PutAsJsonAsync($"/api/quality/inspections/{failedId}",
             new { sn = "X", batchNo = "B1", product = "P1", areaId = _site.AreaA, deviceId = (int?)null, tagId = (int?)null,
                 result = "Failed", defectCodeId = codeId, inspector = "cfgA", ts = now, note = "复核" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await cfgA.PutAsJsonAsync($"/api/quality/inspections/{failedId}",
+            new { sn = "X", batchNo = "B1", product = "P1", areaId = _site.AreaA, deviceId = (int?)null, tagId = (int?)null,
+                result = "Failed", defectCodeId = codeId, inspector = "cfgA", ts = now, note = "复核", amendmentReason = "复核结果" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await cfgA.DeleteAsync($"/api/quality/defect-codes/{codeId}")).StatusCode);
 
-        Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/quality/inspections/{failedId}")).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/quality/inspections/{passedId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await cfgA.DeleteAsync($"/api/quality/inspections/{failedId}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await cfgA.PostAsJsonAsync($"/api/quality/inspections/{failedId}/delete", new { reason = "误录，删除" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await cfgA.PostAsJsonAsync($"/api/quality/inspections/{passedId}/delete", new { reason = "误录，删除" })).StatusCode);
+        var hidden = await Json(await opA.GetAsync($"/api/quality/inspections?page=1&pageSize=50&from={now - 3600_000}&to={now + 3600_000}"));
+        Assert.Equal(0, hidden.GetProperty("total").GetInt32());
+        var included = await Json(await opA.GetAsync($"/api/quality/inspections?page=1&pageSize=50&includeDeleted=true&from={now - 3600_000}&to={now + 3600_000}"));
+        var includedItems = included.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Contains(includedItems, item => item.GetProperty("id").GetInt32() == failedId && item.GetProperty("deletedTs").GetInt64() > 0);
+        Assert.Contains(includedItems, item => item.GetProperty("id").GetInt32() == passedId && item.GetProperty("deletedTs").GetInt64() > 0);
+        var revisions = await Json(await cfgA.GetAsync($"/api/quality/inspections/{failedId}/revisions"));
+        Assert.True(revisions.GetArrayLength() >= 2);
         Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/quality/defect-codes/{codeId}")).StatusCode);
     }
 
@@ -179,8 +191,9 @@ public sealed class QualityApiTests : IClassFixture<AuthorizationTests.Site>
         await Task.Delay(20);
         var updated = await Json(await cfgA.PutAsJsonAsync($"/api/quality/inspections/{id}",
             new { sn = created.GetProperty("sn").GetString(), batchNo = "RB", product, areaId = _site.AreaA, deviceId = (int?)null, tagId = (int?)null,
-                result = "Failed", defectCodeId = codeId, inspector = "cfgA", ts = created.GetProperty("ts").GetInt64(), note = "已复核" }));
+                result = "Failed", defectCodeId = codeId, inspector = "cfgA", ts = created.GetProperty("ts").GetInt64(), note = "已复核", amendmentReason = "批次号更正" }));
         Assert.Equal("cfgA", updated.GetProperty("updatedBy").GetString());
+        Assert.Equal("批次号更正", updated.GetProperty("amendmentReason").GetString());
         Assert.True(updated.GetProperty("updatedTs").GetInt64() > updated.GetProperty("createdTs").GetInt64());
 
         var now = ScadaTime.NowMs();
@@ -192,7 +205,7 @@ public sealed class QualityApiTests : IClassFixture<AuthorizationTests.Site>
         Assert.Equal(0x50, bytes[0]); // 'P' of PK zip/xlsx
         Assert.Equal(0x4B, bytes[1]);
 
-        Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/quality/inspections/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await cfgA.PostAsJsonAsync($"/api/quality/inspections/{id}/delete", new { reason = "测试结束，删除记录" })).StatusCode);
         Assert.Equal(HttpStatusCode.NoContent, (await cfgA.DeleteAsync($"/api/quality/defect-codes/{codeId}")).StatusCode);
     }
 }

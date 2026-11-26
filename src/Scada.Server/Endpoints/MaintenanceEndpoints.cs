@@ -2,6 +2,7 @@ using Scada.Server.Auth;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Scada.Core.Options;
+using Scada.Engine.Aggregation;
 using Scada.Engine.Maintenance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Http.Timeouts;
@@ -22,6 +23,20 @@ public static class MaintenanceEndpoints
         {
             var bundle = await diagnostics.CreateAsync(cancellationToken);
             return Results.File(bundle.Path, "application/zip", bundle.FileName);
+        }).WithMetadata(new RequestTimeoutAttribute(WriteTimeoutPolicy));
+
+        maintenance.MapPost("/aggregates/rebuild", async (AggregateRebuildRequest request, AggregationService aggregation, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var (five, hour) = await aggregation.RebuildAsync(request.From, request.To, cancellationToken);
+                await LogAsync(factory, runtimeFactory, http, "重建历史聚合", $"{request.From}-{request.To}", $"5分钟 {five} 窗，小时 {hour} 窗");
+                return Results.Ok(new { fiveMinuteWindows = five, hourWindows = hour });
+            }
+            catch (ArgumentOutOfRangeException ex)
+            {
+                return EndpointHelpers.BadRequest(ex.Message);
+            }
         }).WithMetadata(new RequestTimeoutAttribute(WriteTimeoutPolicy));
 
         group.MapGet("", (BackupService backups) => Results.Ok(backups.List()));
@@ -113,3 +128,5 @@ public static class MaintenanceEndpoints
         await runtime.SaveChangesAsync();
     }
 }
+
+public sealed record AggregateRebuildRequest(long From, long To);

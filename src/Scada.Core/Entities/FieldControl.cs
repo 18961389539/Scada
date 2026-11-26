@@ -67,6 +67,8 @@ public class ControlRequest
     public string Kind { get; set; } = "command"; // command | sequence | recipe
     public int? TagId { get; set; }
     public double? Value { get; set; }
+    // 字符串测点双人复核时保存待下发文本；数值命令为 null。
+    public string? Text { get; set; }
     public int? SequenceId { get; set; }
     // 配方下发（Kind = recipe）：对应的下发记录。
     public int? RecipeDownloadId { get; set; }

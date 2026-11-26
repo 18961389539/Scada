@@ -10,6 +10,7 @@ using Scada.Core.Protocols;
 using Scada.Core.Options;
 using Scada.Core.Simulation;
 using Scada.Data;
+using Scada.Data.Infrastructure;
 using Scada.Data.RuntimeCleanup;
 
 namespace Scada.Server.Services;
@@ -267,16 +268,24 @@ public sealed class DeviceCommandService(
             .ToListAsync(ct)).Where(SoftElementByteOrder.OccupiesSerialPort);
         var conflict = others.FirstOrDefault(x => string.Equals(x.SerialPort.Trim(), port, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
             && !SharesChannel(device, x));
-        if (conflict is null) return null;
-        var owner = conflict.Name;
-        var message = conflict.Protocol != device.Protocol
-            ? $"串口 {port} 已被启用设备「{owner}」占用。不同协议不能共用同一条串口，请改用其它串口。"
-            : device.ChannelId is null
-                ? $"串口 {port} 已被启用设备「{owner}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。"
-                : conflict.ChannelId is null
-                    ? $"串口 {port} 已被启用设备「{owner}」独占。请把该设备也绑定到同一通道，或改用其它串口。"
-                    : $"串口 {port} 已被另一条通道上的设备「{owner}」占用。同一串口只能由一个通道独占，请改用其它串口。";
-        return new ValidationIssue("device.serial.portConflict", nameof(Device.SerialPort), message);
+        if (conflict is not null)
+        {
+            var owner = conflict.Name;
+            var message = conflict.Protocol != device.Protocol
+                ? $"串口 {port} 已被启用设备「{owner}」占用。不同协议不能共用同一条串口，请改用其它串口。"
+                : device.ChannelId is null
+                    ? $"串口 {port} 已被启用设备「{owner}」占用。要让同一 RS-485 总线上的多台从站共享串口，请创建「通道」并把两台设备绑定到同一通道；否则请改用其它串口，或改用 Modbus RTU over TCP。"
+                    : conflict.ChannelId is null
+                        ? $"串口 {port} 已被启用设备「{owner}」独占。请把该设备也绑定到同一通道，或改用其它串口。"
+                        : $"串口 {port} 已被另一条通道上的设备「{owner}」占用。同一串口只能由一个通道独占，请改用其它串口。";
+            return new ValidationIssue("device.serial.portConflict", nameof(Device.SerialPort), message);
+        }
+
+        var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured: null, ct, exceptDeviceId: device.Id);
+        var occupancy = SerialPortOccupancy.Conflict(owners, port, ignore: owner =>
+            owner.Kind == SerialPortOccupancy.Device
+            || (owner.Kind == SerialPortOccupancy.Channel && device.ChannelId is int bound && owner.Id == bound));
+        return occupancy is null ? null : new ValidationIssue("device.serial.portConflict", nameof(Device.SerialPort), occupancy);
     }
 
     // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。

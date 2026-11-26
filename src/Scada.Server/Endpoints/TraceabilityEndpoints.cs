@@ -5,6 +5,8 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Security;
 using Scada.Data;
+using Scada.Data.Infrastructure;
+using Scada.Core.Protocols;
 using Scada.Engine.Traceability;
 using Scada.Server.Auth;
 
@@ -12,11 +14,11 @@ namespace Scada.Server.Endpoints;
 
 public sealed record TraceabilityJobRequest(string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, List<int>? SnTagIds, List<TraceabilityField>? Fields, int ScanExpirySeconds = 300, long Revision = 0,
-    TraceabilityScannerOptions? Scanner = null, bool DuplicateCheckEnabled = false);
+    TraceabilityScannerOptions? Scanner = null, bool DuplicateCheckEnabled = false, int DuplicateCheckWindowDays = 10);
 public sealed record TraceabilityScanRequest(string Sn);
 public sealed record TraceabilityJobResponse(int Id, string Name, bool Enabled, int TriggerTagId, TraceabilitySnSource SnSource,
     TraceabilitySnFormat SnFormat, IReadOnlyList<int> SnTagIds, IReadOnlyList<TraceabilityField> Fields, int ScanExpirySeconds,
-    bool DuplicateCheckEnabled, long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus);
+    bool DuplicateCheckEnabled, long Revision, bool CanConfigure, bool CanScan, TraceabilityStatus Status, TraceabilityScannerOptions Scanner, TraceabilityScannerStatus ScannerStatus, int DuplicateCheckWindowDays, string? Warning);
 /// <summary>A persisted capture with its original inspection outcome and independent PLC acknowledgement.</summary>
 public sealed record TraceabilityRecordResponse(long Id, int JobId, string JobName, string Sn, DateTimeOffset CapturedAt,
     bool Acknowledged, TraceabilityOutcome Outcome, IReadOnlyList<TraceabilityValue> Values);
@@ -112,6 +114,7 @@ public static class TraceabilityEndpoints
             job.Name = request.Name?.Trim() ?? ""; job.Enabled = request.Enabled; job.TriggerTagId = request.TriggerTagId;
             job.SnSource = request.SnSource; job.SnFormat = request.SnFormat; job.ScanExpirySeconds = request.ScanExpirySeconds;
             job.DuplicateCheckEnabled = request.DuplicateCheckEnabled;
+            job.DuplicateCheckWindowDays = request.DuplicateCheckWindowDays > 0 ? request.DuplicateCheckWindowDays : 10;
             job.SnTagIdsJson = JsonSerializer.Serialize(request.SnTagIds, TraceabilityService.Json);
             job.FieldsJson = JsonSerializer.Serialize(request.Fields, TraceabilityService.Json);
             job.ScannerOptionsJson = JsonSerializer.Serialize(request.Scanner ?? new(), TraceabilityService.Json);
@@ -134,9 +137,12 @@ public static class TraceabilityEndpoints
                             (options.TcpMode == TraceabilityTcpMode.Server || string.Equals(options.Host, existing.Host, StringComparison.OrdinalIgnoreCase));
                     if (conflict) return TypedResults.Conflict(new { message = "The scanner connection is already assigned to another enabled job." });
                 }
-                if (job.SnSource == TraceabilitySnSource.Serial && await db.Devices.AnyAsync(device => device.Enabled &&
-                    (device.Protocol == ProtocolType.ModbusRtu || device.Protocol == ProtocolType.ModbusAscii) && device.SerialPort.ToUpper() == options.SerialPort.ToUpper(), ct))
-                    return TypedResults.Conflict(new { message = "The serial port is already used by an enabled PLC device." });
+                if (job.SnSource == TraceabilitySnSource.Serial)
+                {
+                    var owners = await SerialPortOccupancyQuery.LoadAsync(db, configured: null, ct, exceptJobId: job.Id);
+                    if (SerialPortOccupancy.Conflict(owners, options.SerialPort) is { } occupied)
+                        return TypedResults.Conflict(new { message = occupied });
+                }
             }
             job.Revision = id.HasValue ? job.Revision + 1 : 1;
             if (!id.HasValue) db.TraceabilityJobs.Add(job);
@@ -152,7 +158,7 @@ public static class TraceabilityEndpoints
         job.Id, job.Name, job.Enabled, job.TriggerTagId, job.SnSource, job.SnFormat, TraceabilityService.SnTags(job), TraceabilityService.Fields(job),
         job.ScanExpirySeconds, job.DuplicateCheckEnabled, job.Revision,
         access.CanTag(Permission.Configure, job.TriggerTagId) && access.CanTag(Permission.Control, job.TriggerTagId),
-        access.CanTag(Permission.Control, job.TriggerTagId), service.Status(job.Id), TraceabilityService.ScannerOptions(job), scanners.Status(job.Id));
+        access.CanTag(Permission.Control, job.TriggerTagId), service.Status(job.Id), TraceabilityService.ScannerOptions(job), scanners.Status(job.Id), TraceabilityService.WindowDays(job), TraceabilityService.ListenWarning(job));
 
     private static TraceabilityRecordResponse RecordView(TraceabilityRecord record) => new(record.Id, record.JobId, record.JobName, record.Sn,
         DateTimeOffset.FromUnixTimeMilliseconds(record.Ts), record.Acknowledged, record.Outcome, TraceabilityService.Values(record));

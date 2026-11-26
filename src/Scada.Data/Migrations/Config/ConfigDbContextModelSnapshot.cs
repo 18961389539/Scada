@@ -2600,7 +2600,7 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasKey("Id");
 
-                    b.ToTable("SiteOperationsSettings", t =>
+                    b.ToTable("SiteOperationsSettings", null, t =>
                         {
                             t.HasCheckConstraint("CK_SiteOperationsSettings_Singleton", "Id = 1");
                         });
@@ -3009,6 +3009,11 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(false);
+
+                    b.Property<int>("DuplicateCheckWindowDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(10);
 
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");

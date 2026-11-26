@@ -53,5 +53,6 @@ export const opsApi = {
   targets: async () => (await http.get<{ name: string; kind: string; keepLatest: number }[]>('/maintenance/backups/targets')).data,
   run: async () => (await http.post<BackupRun>('/maintenance/backups/run', null, { timeout: 600000 })).data,
   drill: async (fileName: string) => (await http.post<BackupDrill>(`/maintenance/backups/${encodeURIComponent(fileName)}/drill`, null, { timeout: 600000 })).data,
+  rebuildAggregates: async (from: number, to: number) => (await http.post<{ fiveMinuteWindows: number; hourWindows: number }>('/maintenance/aggregates/rebuild', { from, to }, { timeout: 600000 })).data,
   desktopClients: async () => (await http.get<DesktopClientList>('/desktop/clients')).data
 }

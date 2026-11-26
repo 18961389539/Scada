@@ -60,8 +60,8 @@
         v-bind="clickableAttrs('/alarms')"
         data-test="stat-protection"
         :label="$t('overviewStatus.protection')"
-        :value="`${alarmSummary?.suppressed ?? '--'} / ${alarmSummary?.shelved ?? '--'}`"
-        :tone="floodActive || (alarmSummary?.suppressed ?? 0) > 0 || (alarmSummary?.shelved ?? 0) > 0 ? 'warn' : undefined"
+        :value="protectionValue"
+        :tone="floodActive || (alarmSummary?.suppressed ?? 0) > 0 || (alarmSummary?.shelved ?? 0) > 0 || (alarmSummary?.outOfServiceRules ?? 0) > 0 ? 'warn' : undefined"
         :series="series.protection"
         @click="openSuppressed"
         @keydown.enter="openSuppressed"
@@ -69,10 +69,16 @@
         <div v-if="canGo('/alarms')" class="card-links" @click.stop @keydown.stop>
           <el-button link :type="floodActive ? undefined : 'primary'" data-test="overview-review-suppressed" @click="openSuppressed">{{ $t('overviewUx.reviewSuppressed') }}</el-button>
           <el-button link data-test="overview-review-shelved" @click="openShelved">{{ $t('overviewUx.reviewShelved') }}</el-button>
+          <el-button link data-test="overview-review-oos" @click="openOutOfService">{{ $t('overviewUx.reviewOutOfService') }}</el-button>
           <el-button v-if="floodActive" link type="primary" data-test="overview-flood-review" @click="go('/alarms')">{{ $t('overviewStatus.flood') }}</el-button>
         </div>
       </KpiCard>
     </div>
+    <p v-if="outOfServiceRules.length" class="tiny muted overview-oos" data-test="overview-oos-reasons">
+      {{ $t('overviewUx.outOfServiceReasons') }}
+      <router-link v-for="rule in outOfServiceRules" :key="rule.id" class="overview-oos-item" :to="{ path: '/config/rules', query: { state: 'outOfService' } }">{{ rule.message || ('#' + rule.id) }}<template v-if="rule.outOfServiceReason"> — {{ rule.outOfServiceReason }}</template></router-link>
+      <router-link v-if="(alarmSummary?.outOfServiceRules ?? 0) > outOfServiceRules.length" :to="{ path: '/config/rules', query: { state: 'outOfService' } }">{{ $t('overviewUx.outOfServiceMore', [(alarmSummary?.outOfServiceRules ?? 0) - outOfServiceRules.length]) }}</router-link>
+    </p>
     <section class="overview-section" data-test="overview-alarm-section">
       <div class="toolbar">
         <strong>{{ $t('overviewUx.attentionList') }}</strong>
@@ -276,11 +282,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, InfoFilled, Refresh, Search, Star, StarFilled } from '@element-plus/icons-vue'
-import { alarmApi, deviceApi, healthApi, tagApi } from '../api'
+import { alarmApi, deviceApi, healthApi, ruleApi, tagApi } from '../api'
 import { hmiLayoutApi } from '../api/hmiLayouts'
 import { errorMessage } from '../api/http'
 import { screenApi } from '../api/screens'
-import type { AlarmEvent, AlarmListState, AlarmSummary, Health, Tag } from '../types'
+import type { AlarmEvent, AlarmListState, AlarmRule, AlarmSummary, Health, Tag } from '../types'
 import { collectScreenTags } from '../screens/screenTags'
 import { alarmMessage, alarmTrendQuery, canAckAlarmEvent, formatBytes, formatTime, formatValue, levelLabel, levelType } from '../utils'
 import { tr } from '../i18n'
@@ -373,6 +379,23 @@ function openSuppressed(): void {
 }
 function openShelved(): void {
   if (canGo('/alarms')) void router.push({ path: '/alarms', query: { state: 'shelved' } })
+}
+function openOutOfService(): void {
+  if (canGo('/config/rules')) void router.push({ path: '/config/rules', query: { state: 'outOfService' } })
+}
+const outOfServiceRules = ref<AlarmRule[]>([])
+const protectionValue = computed(() => {
+  const summary = alarmSummary.value
+  if (!summary) return '--'
+  return `${summary.suppressed ?? 0} / ${summary.shelved ?? 0} / ${summary.outOfServiceRules ?? 0}`
+})
+async function loadOutOfServiceRules(): Promise<void> {
+  try {
+    const page = await ruleApi.page({ state: 'outOfService', take: 8 })
+    outOfServiceRules.value = page.items
+  } catch {
+    outOfServiceRules.value = []
+  }
 }
 function onSetupStatus(complete: boolean): void {
   if (complete) setupComplete.value = true
@@ -693,10 +716,12 @@ async function load(): Promise<void> {
           summaryError.value = ''
           pushSample('unack', value.unack)
           pushSample('returned', value.rtnUnack)
-          pushSample('protection', (value.suppressed ?? 0) + (value.shelved ?? 0))
+          pushSample('protection', (value.suppressed ?? 0) + (value.shelved ?? 0) + (value.outOfServiceRules ?? 0))
+          void loadOutOfServiceRules()
         },
         error => {
           alarmSummary.value = null
+          outOfServiceRules.value = []
           summaryError.value = errorMessage(error, tr('overviewView.summaryFailed'))
         }
       )

@@ -17,5 +17,6 @@ public sealed class ControlRequestConfiguration : IEntityTypeConfiguration<Contr
         entity.Property(x => x.Kind).HasMaxLength(16); entity.Property(x => x.Source).HasMaxLength(200);
         entity.Property(x => x.RequestedBy).HasMaxLength(100); entity.Property(x => x.DecidedBy).HasMaxLength(100);
         entity.Property(x => x.Comment).HasMaxLength(200); entity.Property(x => x.ResultMessage).HasMaxLength(500);
+        entity.Property(x => x.Text).HasMaxLength(2000);
     }
 }

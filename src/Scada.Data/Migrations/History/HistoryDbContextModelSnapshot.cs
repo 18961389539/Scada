@@ -39,6 +39,9 @@ namespace Scada.Data.Migrations.History
                     b.Property<double>("Min")
                         .HasColumnType("REAL");
 
+                    b.Property<int>("SimulatedCount")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("TagId", "Ts");
 
                     b.HasIndex("Ts");
@@ -68,6 +71,9 @@ namespace Scada.Data.Migrations.History
 
                     b.Property<double>("Min")
                         .HasColumnType("REAL");
+
+                    b.Property<int>("SimulatedCount")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("TagId", "Ts");
 

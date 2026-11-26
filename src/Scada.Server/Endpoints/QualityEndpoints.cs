@@ -15,14 +15,16 @@ namespace Scada.Server.Endpoints;
 public sealed record QualityDefectCodeRequest(string Code, string Name, string? Category, string? Description, bool Enabled = true);
 public sealed record QualityInspectionRequest(
     string? Sn, string? BatchNo, string? Product, int AreaId, int? DeviceId, int? TagId,
-    QualityResult Result, int? DefectCodeId, string? Inspector, long? Ts, string? Note);
+    QualityResult Result, int? DefectCodeId, string? Inspector, long? Ts, string? Note, string? AmendmentReason = null);
+public sealed record QualityDeleteRequest(string? Reason);
+public sealed record QualityRevisionView(long Id, int InspectionId, long Ts, string User, string Reason, string Action, string? BeforeJson, string? AfterJson);
 
 public sealed record QualityDefectCodeView(int Id, string Code, string Name, string Category, bool Enabled, string Description);
 public sealed record QualityInspectionView(
     int Id, string Sn, string BatchNo, string Product, int AreaId, int? DeviceId, int? TagId,
     QualityResult Result, int? DefectCodeId, string? DefectCode, string? DefectName, string? DefectCategory,
     string Inspector, long Ts, string Note, string CreatedBy, string? DeviceName, string? TagName,
-    long CreatedTs, long UpdatedTs, string UpdatedBy);
+    long CreatedTs, long UpdatedTs, string UpdatedBy, string AmendmentReason, long? DeletedTs, string? DeletedBy, string? DeleteReason);
 public sealed record QualityDayPoint(string Date, int Total, int Passed, int Failed, int Rework, int Scrap, double? Yield);
 public sealed record QualityDefectPoint(int? DefectCodeId, string Code, string Name, string Category, int Count);
 public sealed record QualityAreaPoint(int AreaId, string AreaName, int Total, int Passed, int Failed, double? Yield);
@@ -115,7 +117,7 @@ public static class QualityEndpoints
 
         group.MapGet("", async (
             string? search, string? sn, string? batchNo, string? product, QualityResult? result, int? defectCodeId,
-            int? areaId, int? deviceId, long? from, long? to, int? page, int? pageSize,
+            int? areaId, int? deviceId, long? from, long? to, int? page, int? pageSize, bool? includeDeleted,
             HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
@@ -126,7 +128,8 @@ public static class QualityEndpoints
             var end = to ?? now;
             if (start >= end) return EndpointHelpers.BadRequest("时间范围无效");
             if (end - start > 365L * 24 * 3600_000) return EndpointHelpers.BadRequest("时间范围不能超过 365 天");
-            var query = runtime.QualityInspections.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
+            var source = includeDeleted == true ? runtime.QualityInspections.IgnoreQueryFilters() : runtime.QualityInspections;
+            var query = source.AsNoTracking().Where(x => x.Ts >= start && x.Ts <= end);
             if (access.AreasWith(Permission.View) is { } visible)
             {
                 var visibleAreas = visible.ToArray();
@@ -370,6 +373,7 @@ public static class QualityEndpoints
             if (validation is not null) return EndpointHelpers.BadRequest(validation);
             runtime.QualityInspections.Add(inspection);
             await runtime.SaveChangesAsync(ct);
+            AddRevision(runtime, inspection.Id, http.User.GetUserName(), "", "create", null, inspection);
             runtime.OperationLogs.Add(Audit.Change(http, $"录入质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, null, inspection));
             await runtime.SaveChangesAsync(ct);
             return Results.Created($"/api/quality/inspections/{inspection.Id}",
@@ -381,42 +385,107 @@ public static class QualityEndpoints
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var inspection = await runtime.QualityInspections.FirstOrDefaultAsync(x => x.Id == id, ct);
+            var inspection = await runtime.QualityInspections.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == id, ct);
             if (inspection is null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, inspection.AreaId, Permission.Configure, $"修改质量检验 #{id}") is { } denied)
                 return denied;
             if (request.AreaId != inspection.AreaId &&
                 await EndpointHelpers.RequireAreaAsync(http, request.AreaId, Permission.Configure, $"移动质量检验 #{id}") is { } deniedMove)
                 return deniedMove;
+            if (inspection.DeletedTs is not null) return Results.NotFound();
+            if (RequireReason(request.AmendmentReason) is { } reasonError) return EndpointHelpers.BadRequest(reasonError);
             if (await ValidateReferencesAsync(db, http, request, ct) is { } error) return error;
             var before = EndpointHelpers.JsonCopy(inspection);
             Apply(inspection, request);
             inspection.AreaId = request.AreaId; inspection.DeviceId = request.DeviceId; inspection.TagId = request.TagId;
             inspection.Result = request.Result; inspection.DefectCodeId = request.DefectCodeId;
             inspection.Ts = request.Ts ?? inspection.Ts; inspection.UpdatedTs = ScadaTime.NowMs(); inspection.UpdatedBy = http.User.GetUserName();
+            inspection.AmendmentReason = request.AmendmentReason!.Trim();
             var validation = QualityValidation.Inspection(inspection);
             if (validation is not null) return EndpointHelpers.BadRequest(validation);
+            AddRevision(runtime, inspection.Id, inspection.UpdatedBy, inspection.AmendmentReason, "update", before, inspection);
             runtime.OperationLogs.Add(Audit.Change(http, $"修改质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, before, inspection));
             await db.SaveChangesAsync(ct);
             await runtime.SaveChangesAsync(ct);
             return Results.Ok((await ViewManyAsync(db, [inspection], ct))[0]);
         }).RequireAuthorization(AccessPolicies.Configure);
 
-        group.MapDelete("/{id:int}", async (int id, HttpContext http,
+        group.MapGet("/{id:int}/revisions", async (int id, HttpContext http,
             IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var inspection = await runtime.QualityInspections.IgnoreQueryFilters().AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (inspection is null) return Results.NotFound();
+            if (await EndpointHelpers.RequireAreaAsync(http, inspection.AreaId, Permission.View, $"查看质量检验修订 #{id}") is { } denied)
+                return denied;
+            var rows = await runtime.QualityInspectionRevisions.AsNoTracking()
+                .Where(x => x.InspectionId == id).OrderByDescending(x => x.Ts).ThenByDescending(x => x.Id).ToListAsync(ct);
+            return Results.Ok(rows.Select(x => new QualityRevisionView(x.Id, x.InspectionId, x.Ts, x.User, x.Reason, x.Action, x.BeforeJson, x.AfterJson)).ToList());
+        });
+
+        group.MapPost("/{id:int}/delete", async (int id, QualityDeleteRequest request, HttpContext http,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        {
+            if (RequireReason(request.Reason) is { } reasonError) return EndpointHelpers.BadRequest(reasonError);
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            var inspection = await runtime.QualityInspections.FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (inspection is null) return Results.NotFound();
+            var inspection = await runtime.QualityInspections.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (inspection is null || inspection.DeletedTs is not null) return Results.NotFound();
             if (await EndpointHelpers.RequireAreaAsync(http, inspection.AreaId, Permission.Configure, $"删除质量检验 #{id}") is { } denied)
                 return denied;
-            runtime.QualityInspections.Remove(inspection);
-            runtime.OperationLogs.Add(Audit.Change(http, $"删除质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, inspection, null));
-            await db.SaveChangesAsync(ct);
+            var before = EndpointHelpers.JsonCopy(inspection);
+            inspection.DeletedTs = ScadaTime.NowMs();
+            inspection.DeletedBy = http.User.GetUserName();
+            inspection.DeleteReason = request.Reason!.Trim();
+            inspection.UpdatedTs = inspection.DeletedTs.Value;
+            inspection.UpdatedBy = inspection.DeletedBy;
+            AddRevision(runtime, inspection.Id, inspection.DeletedBy, inspection.DeleteReason, "delete", before, inspection);
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, before, inspection));
             await runtime.SaveChangesAsync(ct);
             return Results.NoContent();
         }).RequireAuthorization(AccessPolicies.Configure);
+
+        group.MapDelete("/{id:int}", async (int id, string? reason, HttpContext http,
+            IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        {
+            if (RequireReason(reason) is { } reasonError) return EndpointHelpers.BadRequest(reasonError);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+            var inspection = await runtime.QualityInspections.IgnoreQueryFilters().FirstOrDefaultAsync(x => x.Id == id, ct);
+            if (inspection is null || inspection.DeletedTs is not null) return Results.NotFound();
+            if (await EndpointHelpers.RequireAreaAsync(http, inspection.AreaId, Permission.Configure, $"删除质量检验 #{id}") is { } denied)
+                return denied;
+            var before = EndpointHelpers.JsonCopy(inspection);
+            inspection.DeletedTs = ScadaTime.NowMs();
+            inspection.DeletedBy = http.User.GetUserName();
+            inspection.DeleteReason = reason!.Trim();
+            inspection.UpdatedTs = inspection.DeletedTs.Value;
+            inspection.UpdatedBy = inspection.DeletedBy;
+            AddRevision(runtime, inspection.Id, inspection.DeletedBy, inspection.DeleteReason, "delete", before, inspection);
+            runtime.OperationLogs.Add(Audit.Change(http, $"删除质量检验：{inspection.Sn}", "QualityInspection", inspection.Id, before, inspection));
+            await runtime.SaveChangesAsync(ct);
+            return Results.NoContent();
+        }).RequireAuthorization(AccessPolicies.Configure);
+    }
+
+    private static string? RequireReason(string? reason)
+    {
+        var text = reason?.Trim() ?? "";
+        if (text.Length == 0) return "必须填写修订或删除原因";
+        return text.Length > 500 ? "修订或删除原因不能超过 500 字" : null;
+    }
+
+    private static void AddRevision(RuntimeDbContext runtime, int inspectionId, string user, string reason, string action, object? before, object? after)
+    {
+        runtime.QualityInspectionRevisions.Add(new QualityInspectionRevision
+        {
+            InspectionId = inspectionId,
+            Ts = ScadaTime.NowMs(),
+            User = user,
+            Reason = reason,
+            Action = action,
+            BeforeJson = before is null ? null : System.Text.Json.JsonSerializer.Serialize(before),
+            AfterJson = after is null ? null : System.Text.Json.JsonSerializer.Serialize(after)
+        });
     }
 
     private static async Task<IResult?> ValidateReferencesAsync(
@@ -473,7 +542,7 @@ public static class QualityEndpoints
                 x.Result, x.DefectCodeId, code?.Code, code?.Name, code?.Category, x.Inspector, x.Ts, x.Note,
                 x.CreatedBy, x.DeviceId is int device ? devices.GetValueOrDefault(device) : null,
                 x.TagId is int tag ? tags.GetValueOrDefault(tag) : null,
-                x.CreatedTs, x.UpdatedTs, x.UpdatedBy);
+                x.CreatedTs, x.UpdatedTs, x.UpdatedBy, x.AmendmentReason, x.DeletedTs, x.DeletedBy, x.DeleteReason);
         }).ToList();
     }
 

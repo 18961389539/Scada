@@ -82,9 +82,9 @@ public partial class SqliteHistoryBackend : IHistoryBackend
             await using var db = _factory.CreateAggregate(year);
             var rows = resolution == HistoryResolution.FiveMinute
                 ? db.Agg5Min.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good))
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, null, x.SimulatedCount > 0))
                 : db.AggHour.AsNoTracking().Where(x => tagIds.Contains(x.TagId) && x.Ts >= from && x.Ts <= to)
-                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
+                    .OrderBy(x => x.TagId).ThenBy(x => x.Ts).Select(x => new HistoryValue(x.TagId, x.Ts, x.Avg, x.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, null, x.SimulatedCount > 0));
             await foreach (var row in rows.AsAsyncEnumerable().WithCancellation(cancellationToken)) yield return row;
         }
     }
@@ -264,7 +264,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
             foreach (var row in rows)
             {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
+                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, Simulated: row.SimulatedCount > 0));
             }
         }
 
@@ -290,7 +290,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
             foreach (var row in rows)
             {
-                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good));
+                AddPoint(result, row.TagId, new HistoryPoint(row.Ts, row.Avg, row.BadCount > 0 ? TagQuality.Uncertain : TagQuality.Good, Simulated: row.SimulatedCount > 0));
             }
         }
 
@@ -314,16 +314,20 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                 .Select(g => new
                 {
                     TagId = g.Key,
-                    Avg = g.Where(x => x.Quality == (int)TagQuality.Good).Average(x => (double?)x.Value),
-                    Min = g.Where(x => x.Quality == (int)TagQuality.Good).Min(x => (double?)x.Value),
-                    Max = g.Where(x => x.Quality == (int)TagQuality.Good).Max(x => (double?)x.Value),
-                    Count = g.Count(x => x.Quality == (int)TagQuality.Good),
-                    BadCount = g.Count(x => x.Quality != (int)TagQuality.Good)
+                    Avg = g.Where(x => x.Quality == (int)TagQuality.Good && !x.Simulated).Average(x => (double?)x.Value),
+                    Min = g.Where(x => x.Quality == (int)TagQuality.Good && !x.Simulated).Min(x => (double?)x.Value),
+                    Max = g.Where(x => x.Quality == (int)TagQuality.Good && !x.Simulated).Max(x => (double?)x.Value),
+                    Count = g.Count(x => x.Quality == (int)TagQuality.Good && !x.Simulated),
+                    BadCount = g.Count(x => x.Quality != (int)TagQuality.Good),
+                    SimulatedCount = g.Count(x => x.Simulated)
                 })
                 .ToListAsync(cancellationToken);
 
-            partials.AddRange(rows.Where(x => x.Count > 0 && x.Avg is not null && x.Min is not null && x.Max is not null)
-                .Select(x => new AggregateValue(x.TagId, to, x.Avg!.Value, x.Min!.Value, x.Max!.Value, x.Count, x.BadCount)));
+            partials.AddRange(rows.Where(x => x.Count > 0 || x.SimulatedCount > 0)
+                .Select(x => new AggregateValue(
+                    x.TagId, to,
+                    x.Avg ?? 0, x.Min ?? 0, x.Max ?? 0,
+                    x.Count, x.BadCount, x.SimulatedCount)));
         }
 
         return Combine(partials, AlignTo5Min(from));
@@ -342,10 +346,10 @@ public partial class SqliteHistoryBackend : IHistoryBackend
             await using var db = _factory.CreateAggregate(year);
             var rows = await db.Agg5Min.AsNoTracking()
                 .Where(x => x.Ts >= from && x.Ts < to)
-                .Select(x => new { x.TagId, x.Avg, x.Min, x.Max, x.Count, x.BadCount })
+                .Select(x => new { x.TagId, x.Avg, x.Min, x.Max, x.Count, x.BadCount, x.SimulatedCount })
                 .ToListAsync(cancellationToken);
 
-            partials.AddRange(rows.Select(x => new AggregateValue(x.TagId, from, x.Avg, x.Min, x.Max, x.Count, x.BadCount)));
+            partials.AddRange(rows.Select(x => new AggregateValue(x.TagId, from, x.Avg, x.Min, x.Max, x.Count, x.BadCount, x.SimulatedCount)));
         }
 
         return Combine(partials, AlignToHour(from));
@@ -420,6 +424,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
                     AddParameter(command, "$max" + index, value.Max);
                     AddParameter(command, "$count" + index, value.Count);
                     AddParameter(command, "$bad" + index, value.BadCount);
+                    AddParameter(command, "$sim" + index, value.SimulatedCount);
                 }
                 await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -429,13 +434,13 @@ public partial class SqliteHistoryBackend : IHistoryBackend
 
     private static string BuildAggregateInsert(string table, int rows)
     {
-        var sql = new StringBuilder($"INSERT OR REPLACE INTO {table} (TagId, Ts, Avg, Min, Max, Count, BadCount) VALUES ");
+        var sql = new StringBuilder($"INSERT OR REPLACE INTO {table} (TagId, Ts, Avg, Min, Max, Count, BadCount, SimulatedCount) VALUES ");
         for (var index = 0; index < rows; index++)
         {
             if (index > 0) sql.Append(',');
             sql.Append("($tagId").Append(index).Append(",$ts").Append(index).Append(",$avg").Append(index)
                .Append(",$min").Append(index).Append(",$max").Append(index).Append(",$count").Append(index)
-               .Append(",$bad").Append(index).Append(')');
+               .Append(",$bad").Append(index).Append(",$sim").Append(index).Append(')');
         }
         return sql.ToString();
     }
@@ -458,8 +463,11 @@ public partial class SqliteHistoryBackend : IHistoryBackend
             .Select(g =>
             {
                 var totalCount = g.Sum(x => x.Count);
-                var avg = totalCount == 0 ? 0 : g.Sum(x => x.Avg * x.Count) / totalCount;
-                return new AggregateValue(g.Key, ts, avg, g.Min(x => x.Min), g.Max(x => x.Max), totalCount, g.Sum(x => x.BadCount));
+                var valued = g.Where(x => x.Count > 0).ToList();
+                var avg = totalCount == 0 ? 0 : valued.Sum(x => x.Avg * x.Count) / totalCount;
+                var min = valued.Count == 0 ? 0 : valued.Min(x => x.Min);
+                var max = valued.Count == 0 ? 0 : valued.Max(x => x.Max);
+                return new AggregateValue(g.Key, ts, avg, min, max, totalCount, g.Sum(x => x.BadCount), g.Sum(x => x.SimulatedCount));
             })
             .ToList();
     }

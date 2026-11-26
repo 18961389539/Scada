@@ -251,7 +251,7 @@ public sealed class ControlCommandService
         }
         if (point is not null && !string.IsNullOrWhiteSpace(point.PermitExpression) && Evaluate(point.PermitExpression) is var (ok, why) && !ok)
             refusals.Add(string.IsNullOrWhiteSpace(point.PermitMessage) ? $"许可条件不满足：{why}" : $"{point.PermitMessage}（{why}）");
-        return new ControlCheck(tag.Id, tag.Name, null, refusals, point?.RequireConfirm ?? _confirmByDefault, false,
+        return new ControlCheck(tag.Id, tag.Name, null, refusals, point?.RequireConfirm ?? _confirmByDefault, point?.DualApproval ?? false,
             null, null, null, point?.FeedbackExpression, mode, lockoutTexts, currentQuality, qualityReason);
     }
 
@@ -314,11 +314,29 @@ public sealed class ControlCommandService
             else refusals.Add("该测点要求操作确认，请先调用检查接口后再下发");
         }
         s = s with { ConfirmationGrantTs = grantTs };
+        if (refusals.Count == 0 && check.DualApproval && !s.PreApproved && !interactive) refusals.Add("该测点要求双人复核，不能由自动化或未复核的顺控直接写入");
         if (refusals.Count > 0)
         {
             var message = string.Join("；", refusals);
             await AuditAsync(tag, s, "控制被拒绝", "拒绝：" + message, null, ct);
             return new(false, message, Outcome: GatewayCommandOutcome.NotSent, Refusals: refusals);
+        }
+        if (check.DualApproval && !s.PreApproved)
+        {
+            if (s.Actor.UserId is not int requester) return new(false, "双人复核需要登录用户发起", Outcome: GatewayCommandOutcome.NotSent);
+            await using var db = await _contextFactory.CreateDbContextAsync(ct);
+            await using var runtime = await _runtimeFactory.CreateDbContextAsync(ct);
+            var timeout = (await db.ControlPoints.AsNoTracking().SingleAsync(x => x.TagId == tag.Id, ct)).ApprovalTimeoutSec;
+            var request = new ControlRequest
+            {
+                Id = s.RequestId ?? Guid.NewGuid(), Kind = "command", TagId = tag.Id, Text = s.Text, Source = s.Source, RequestedByUserId = requester, RequestedBy = s.Actor.UserName,
+                RequestedTs = ScadaTime.NowMs(), ExpiresTs = ScadaTime.NowMs() + Math.Clamp(timeout, 30, 3600) * 1000L, Status = ControlRequestStatus.Pending
+            };
+            if (await runtime.ControlRequests.AnyAsync(x => x.Id == request.Id, ct)) return new(false, "该命令编号已提交复核", Outcome: GatewayCommandOutcome.NotSent, Pending: true, ApprovalId: request.Id);
+            runtime.ControlRequests.Add(request);
+            runtime.OperationLogs.Add(Log(tag, s, "发起控制（待双人复核）", $"待复核，编号 {request.Id}", null, null, s.Text));
+            await runtime.SaveChangesAsync(ct);
+            return new(false, "已提交，等待另一位有权限的用户复核", Outcome: GatewayCommandOutcome.NotSent, Pending: true, ApprovalId: request.Id);
         }
         var deviceId = tag.DeviceId!.Value;
         if (!_config.TryGetDevice(deviceId, out var device)) return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);

@@ -25,12 +25,21 @@
       </section>
 
       <section>
-        <h2>{{ $t('dutyHandover.shelved') }} / {{ $t('dutyHandover.suppressed') }}</h2>
+        <h2>{{ $t('dutyHandover.shelved') }} / {{ $t('dutyHandover.suppressed') }} / {{ $t('dutyHandover.outOfService') }}</h2>
         <p>
           <router-link data-test="handover-shelved-link" to="/alarms?state=shelved">{{ $t('dutyHandover.shelved') }}：{{ shelved }}</router-link>
           ·
           <router-link data-test="handover-suppressed-link" to="/alarms?state=suppressed">{{ $t('dutyHandover.suppressed') }}：{{ suppressed }}</router-link>
+          ·
+          <router-link data-test="handover-oos-link" to="/config/rules?state=outOfService">{{ $t('dutyHandover.outOfService') }}：{{ outOfService }}</router-link>
         </p>
+        <p v-if="outOfService === 0" data-test="handover-oos-empty" class="tiny muted">{{ $t('dutyHandover.noOutOfService') }}</p>
+        <ul v-else data-test="handover-oos-reasons">
+          <li v-for="rule in outOfServiceRules" :key="rule.id">
+            <router-link :to="{ path: '/config/rules', query: { state: 'outOfService' } }">{{ rule.message || ('#' + rule.id) }}<template v-if="rule.outOfServiceReason"> — {{ rule.outOfServiceReason }}</template></router-link>
+          </li>
+        </ul>
+        <p v-if="outOfService > outOfServiceRules.length" class="tiny muted">{{ $t('dutyHandover.outOfServiceMore', [outOfService - outOfServiceRules.length]) }}</p>
       </section>
 
       <section>
@@ -128,7 +137,7 @@ import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../api/http'
 import { formatTime, levelLabel } from '../utils'
 import { tr } from '../i18n'
-import type { AlarmEvent, AlarmLevel, MaintenanceWorkOrder } from '../types'
+import type { AlarmEvent, AlarmLevel, AlarmRule, MaintenanceWorkOrder } from '../types'
 
 const auth = useAuthStore()
 const { soundEnabled } = useAlarmSound()
@@ -141,6 +150,8 @@ const unackedByLevel = ref<{ level: string; label: string; count: number }[]>([]
 const rtnUnack = ref(0)
 const shelved = ref(0)
 const suppressed = ref(0)
+const outOfService = ref(0)
+const outOfServiceRules = ref<AlarmRule[]>([])
 const pending = ref<ControlRequestRow[]>([])
 const runningSequences = ref<ControlRun[]>([])
 const openWorkOrders = ref<MaintenanceWorkOrder[]>([])
@@ -227,10 +238,11 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [events, summary, shelves, requests, runs, downloads, lockoutPage, modes, , orderRows, writeRows] = await Promise.all([
+    const [events, summary, shelves, oosPage, requests, runs, downloads, lockoutPage, modes, , orderRows, writeRows] = await Promise.all([
       alarmApi.query({ live: true, unackedOnly: true, includeShelved: true, priorityFirst: true, limit: 2000 }),
       alarmApi.summary().catch(() => null),
       ruleApi.shelves().catch(() => []),
+      ruleApi.page({ state: 'outOfService', take: 20 }).catch(() => ({ items: [] as AlarmRule[], total: 0 })),
       controlApi.requests().catch(() => []),
       controlApi.runs().catch(() => ({ items: [] as ControlRun[] })),
       recipeApi.downloads().catch(() => ({ items: [] as RecipeDownload[] })),
@@ -254,6 +266,8 @@ async function load(): Promise<void> {
     rtnUnack.value = summary?.rtnUnack ?? (events as AlarmEvent[]).filter(alarm => alarm.endTs && !alarm.ackTs).length
     shelved.value = summary?.shelved ?? shelves.length
     suppressed.value = summary?.suppressed ?? 0
+    outOfService.value = summary?.outOfServiceRules ?? oosPage.total
+    outOfServiceRules.value = oosPage.items
     pending.value = pendingControlRequests(requests)
     const runItems = Array.isArray(runs) ? runs : (runs as { items?: ControlRun[] }).items ?? []
     const downloadItems = Array.isArray(downloads) ? downloads : (downloads as { items?: RecipeDownload[] }).items ?? []

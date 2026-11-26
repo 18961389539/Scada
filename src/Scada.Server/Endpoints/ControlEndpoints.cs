@@ -62,8 +62,6 @@ public static class ControlEndpoints
             if (tag.Kind != TagKind.Physical || !tag.Writable) return EndpointHelpers.BadRequest("只有可写的采集测点可以配置控制策略");
             if (tag.DataType == TagDataType.String && (request.LimitMin is not null || request.LimitMax is not null || request.MaxStep is not null))
                 return EndpointHelpers.BadRequest("字符串测点不支持数值限幅与变化率");
-            if (tag.DataType == TagDataType.String && request.DualApproval)
-                return EndpointHelpers.BadRequest("字符串测点暂不支持双人复核");
             if (request.LimitMin is double a && request.LimitMax is double b && a > b) return EndpointHelpers.BadRequest("限幅下限不能大于上限");
             if (request.MaxStep is double step && (!double.IsFinite(step) || step <= 0)) return EndpointHelpers.BadRequest("单次变化限制须为正数");
             if (request.ApprovalTimeoutSec is < 30 or > 3600) return EndpointHelpers.BadRequest("复核有效期须为 30～3600 秒");

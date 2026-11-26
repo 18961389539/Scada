@@ -41,4 +41,20 @@ public sealed class QualityInspection
     public long UpdatedTs { get; set; }
     public string CreatedBy { get; set; } = "";
     public string UpdatedBy { get; set; } = "";
+    public string AmendmentReason { get; set; } = "";
+    public long? DeletedTs { get; set; }
+    public string? DeletedBy { get; set; }
+    public string? DeleteReason { get; set; }
+}
+
+public sealed class QualityInspectionRevision
+{
+    public long Id { get; set; }
+    public int InspectionId { get; set; }
+    public long Ts { get; set; }
+    public string User { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public string Action { get; set; } = "";
+    public string? BeforeJson { get; set; }
+    public string? AfterJson { get; set; }
 }

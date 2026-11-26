@@ -39,6 +39,7 @@ public class RuntimeDbContext : DbContext
     public DbSet<SpcViolation> SpcViolations => Set<SpcViolation>();
     public DbSet<TraceabilityRecord> TraceabilityRecords => Set<TraceabilityRecord>();
     public DbSet<TraceabilityAttempt> TraceabilityAttempts => Set<TraceabilityAttempt>();
+    public DbSet<TraceabilityPendingScan> TraceabilityPendingScans => Set<TraceabilityPendingScan>();
     public DbSet<RecipeDownload> RecipeDownloads => Set<RecipeDownload>();
     public DbSet<ReportRun> ReportRuns => Set<ReportRun>();
     public DbSet<ReportApproval> ReportApprovals => Set<ReportApproval>();
@@ -46,6 +47,7 @@ public class RuntimeDbContext : DbContext
     public DbSet<CalcJobSnapshot> CalcJobSnapshots => Set<CalcJobSnapshot>();
     public DbSet<OperationLog> OperationLogs => Set<OperationLog>();
     public DbSet<QualityInspection> QualityInspections => Set<QualityInspection>();
+    public DbSet<QualityInspectionRevision> QualityInspectionRevisions => Set<QualityInspectionRevision>();
     public DbSet<DowntimeEvent> DowntimeEvents => Set<DowntimeEvent>();
     public DbSet<ProductionCountCorrection> ProductionCountCorrections => Set<ProductionCountCorrection>();
     public DbSet<ControlSequenceRun> ControlSequenceRuns => Set<ControlSequenceRun>();

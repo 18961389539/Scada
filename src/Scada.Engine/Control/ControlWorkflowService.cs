@@ -185,8 +185,8 @@ public sealed class ControlWorkflowService(IDbContextFactory<ConfigDbContext> fa
             await FinishAsync(runtime, request);
             return (request, null, run);
         }
-        var result = await commands.SubmitAsync(new ControlSubmission(request.TagId!.Value, request.Value!.Value, new(request.RequestedByUserId, request.RequestedBy), ControlOrigin.Operator,
-            request.Source, Confirmed: true, RequestId: request.Id, PreApproved: true, ApprovedBy: approver.UserName), ct);
+        var result = await commands.SubmitAsync(new ControlSubmission(request.TagId!.Value, request.Value ?? 0, new(request.RequestedByUserId, request.RequestedBy), ControlOrigin.Operator,
+            request.Source, Confirmed: true, RequestId: request.Id, PreApproved: true, ApprovedBy: approver.UserName, Text: request.Text), ct);
         request.Status = result.Success ? ControlRequestStatus.Executed : ControlRequestStatus.Failed; request.ResultMessage = Trim(result.Message);
         await FinishAsync(runtime, request);
         return (request, result, null);

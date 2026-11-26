@@ -419,7 +419,7 @@ public sealed class TraceabilityTests
         await using (var db = fixture.Factory.CreateDbContext())
         {
             var record = await runtime.TraceabilityRecords.SingleAsync();
-            record.Ts = ScadaTime.NowMs() - TraceabilityService.DuplicateCheckWindowMs - 1000;
+            record.Ts = ScadaTime.NowMs() - TraceabilityService.DefaultDuplicateCheckWindowDays * 24L * 60 * 60 * 1000 - 1000;
             await runtime.SaveChangesAsync();
             Assert.Single(await runtime.TraceabilityRecords.ToListAsync());
         }

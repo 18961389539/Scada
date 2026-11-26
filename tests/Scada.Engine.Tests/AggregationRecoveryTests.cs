@@ -25,6 +25,27 @@ public sealed class AggregationRecoveryTests
         new(tag, Ts(time), value, quality);
 
     [Fact]
+    public async Task SimulatedGoodSamplesAreExcludedFromAverageMinAndMaxButCountedSeparately()
+    {
+        using var site = new Site();
+        await site.Store.WriteRawAsync([
+            Value(Start.AddSeconds(1), 10),
+            Value(Start.AddSeconds(2), 30),
+            new HistoryValue(1, Ts(Start.AddSeconds(3)), 999, TagQuality.Good, Simulated: true),
+            new HistoryValue(1, Ts(Start.AddSeconds(4)), 0, TagQuality.Bad)
+        ], default);
+
+        using var service = site.Service();
+        await service.RunOnceAsync(Start.AddHours(2), default);
+
+        await using var db = site.Factory.CreateAggregate(Start.Year);
+        var five = Assert.Single(await db.Agg5Min.ToListAsync());
+        Assert.Equal((20d, 10d, 30d, 2, 1, 1), (five.Avg, five.Min, five.Max, five.Count, five.BadCount, five.SimulatedCount));
+        var hour = Assert.Single(await db.AggHour.ToListAsync());
+        Assert.Equal((20d, 10d, 30d, 2, 1, 1), (hour.Avg, hour.Min, hour.Max, hour.Count, hour.BadCount, hour.SimulatedCount));
+    }
+
+    [Fact]
     public async Task RestartBackfillsEveryRetainedWindowAcrossMonthsAndYearsAtAnArbitraryMinute()
     {
         using var site = new Site();

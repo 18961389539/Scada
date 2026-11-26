@@ -59,6 +59,9 @@ export default {
     returnedHint: '整张卡片进入已恢复待确认',
     reviewSuppressed: '查看抑制',
     reviewShelved: '查看暂挂',
+    reviewOutOfService: '查看停用规则',
+    outOfServiceReasons: '停用中：',
+    outOfServiceMore: '另有 {0} 条',
     openAlarm: '打开报警',
     moreActions: '其他操作',
     openConsole: '打开控制室布局',
@@ -405,7 +408,7 @@ export default {
   },
   overviewStatus: {
     updated: '最后完整更新：{0}', unknown: '等待数据', stale: '数据已过期', loadedOnly: '仅已加载部分',
-    activeUnack: '活动未确认', returned: '已恢复待确认', protection: '抑制 / 暂挂', review: '查看处理', flood: '报警泛滥',
+    activeUnack: '活动未确认', returned: '已恢复待确认', protection: '抑制 / 暂挂 / 停用', review: '查看处理', flood: '报警泛滥',
     alarmScope: '活动未确认不含已恢复待确认、暂挂和抑制的报警；报警泛滥按近期触发频率判断，与当前活动数不同。',
     listed: '显示 {0} / {1} 条，未确认优先', triggerValue: '触发值', state: '状态', acked: '活动已确认',
     locate: '定位', trend: '趋势', abnormalOnly: '仅异常', noDeviceIssues: '未发现通信异常',
@@ -463,7 +466,7 @@ export default {
     parityNone: '无校验', parityOdd: '奇校验', parityEven: '偶校验', terminator: '报文结束符', encoding: '字符编码',
     scannerStates: { stopped: '已停止', connecting: '连接中', listening: '等待扫码枪连接', connected: '已连接', disconnected: '已断开，重连中', error: '配置异常' },
     plc: 'PLC 寄存器', webScan: '网页扫码', enabled: '启用', yes: '是', no: '否', device: 'PLC 设备',
-    duplicateCheck: '重码检测', duplicateCheckHint: '开启后，同一任务近 10 天内出现相同 SN 视为重码，拒绝采集并应答 PLC 3。',
+    duplicateCheck: '重码检测', duplicateCheckHint: '开启后，同一任务在设定天数内出现相同 SN 视为重码，拒绝采集并应答 PLC 3。', duplicateCheckWindow: '重码检测窗口（天）', allowedSources: '来源 IP 允许名单', allowedSourcesHint: '每行一个 IP 或 CIDR，例如 192.168.1.10 或 10.0.0.0/24。留空表示不限制来源。', listenOpenWarning: '正在监听非环回地址且未配置来源 IP 允许名单，任何能连上的客户端都可以注入 SN。', warning: '提醒',
     viaGateway: '，经网关 #{0}',
     traceable: '可追溯',
     collectible: '可采集',
@@ -945,7 +948,20 @@ export default {
     exportPdf: '导出 PDF',
     createdBy: '创建人',
     updated: '更新',
-    revised: '已修订'
+    revised: '已修订',
+    includeDeleted: '显示已删除',
+    deletedTag: '已删除',
+    amendmentReason: '修订原因',
+    deleteReason: '删除原因',
+    reasonRequired: '请填写修订或删除原因',
+    confirmKeyChange: '即将修改 SN、检验结果、检验时间或区域，这些字段会影响统计和追溯。确认继续？',
+    history: '修订历史',
+    historyTitle: '检验修订历史',
+    historyAction: '操作',
+    actionCreate: '创建',
+    actionUpdate: '修订',
+    actionDelete: '删除',
+    noRevisions: '暂无修订记录'
   },
   screenHandoff: {
     controlsPaused: '画面已发布新版本，控制已暂停，刷新后继续操作。',
@@ -1060,6 +1076,9 @@ export default {
     rtnUnack: '已恢复未确认',
     shelved: '暂挂',
     suppressed: '抑制',
+    outOfService: '停用中的规则',
+    noOutOfService: '当前没有停用中的报警规则',
+    outOfServiceMore: '另有 {0} 条停用规则',
     pendingReview: '待复核',
     noPending: '没有待复核的控制请求',
     runningSequences: '进行中的顺控',
@@ -1147,6 +1166,17 @@ export default {
     standby: '当前为备机',
     primary: '主机 {0}',
     healthIssue: '服务状态异常'
-  }
+  },
 
+  historyAggregates: {
+    title: '重建历史聚合',
+    hint: '按当前口径（仿真点不进入均、最小、最大）可选重建已有 5 分钟和小时聚合。不改写原始历史，也不会自动执行。单次跨度不超过 366 天。',
+    from: '开始时间',
+    to: '结束时间',
+    run: '开始重建',
+    confirm: '将按当前口径覆盖所选时间范围内的已有聚合分片。原始历史不会改写。确认继续？',
+    done: '已重建 {0} 个 5 分钟窗口、{1} 个小时窗口',
+    failed: '重建历史聚合失败',
+    range: '请选择有效的时间范围'
+  },
 }

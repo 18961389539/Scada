@@ -23,6 +23,7 @@
               <el-option v-for="area in areas" :key="area.id" :label="area.name" :value="area.id" />
             </el-select>
             <el-date-picker v-model="recordRange" type="datetimerange" :start-placeholder="$t('quality.from')" :end-placeholder="$t('quality.to')" :aria-label="$t('common.timeRange')" style="width: 340px" @change="queryRecords" />
+            <el-checkbox v-model="includeDeleted" data-test="quality-include-deleted" @change="queryRecords">{{ $t('quality.includeDeleted') }}</el-checkbox>
             <span class="spacer" />
             <el-button :loading="exporting === 'records'" data-test="quality-export-records" @click="exportCurrent('records', 'xlsx')">{{ $t('quality.exportExcel') }}</el-button>
             <el-button :loading="exporting === 'records-pdf'" data-test="quality-export-records-pdf" @click="exportCurrent('records', 'pdf')">{{ $t('quality.exportPdf') }}</el-button>
@@ -59,15 +60,16 @@
                 <span>{{ row.updatedTs ? formatTime(row.updatedTs) : '—' }}</span>
                 <span v-if="row.updatedBy" class="muted"> {{ row.updatedBy }}</span>
                 <el-tag v-if="isRevised(row)" type="warning" size="small" class="revised" data-test="quality-revised">{{ $t('quality.revised') }}</el-tag>
+                <el-tag v-if="row.deletedTs" type="info" size="small" data-test="quality-deleted">{{ $t('quality.deletedTag') }}</el-tag>
+                <div v-if="row.amendmentReason || row.deleteReason" class="tiny muted">{{ row.deleteReason || row.amendmentReason }}</div>
               </template>
             </el-table-column>
-            <el-table-column :label="$t('quality.actions')" width="230" fixed="right">
+            <el-table-column :label="$t('quality.actions')" width="280" fixed="right">
               <template #default="{ row }">
                 <el-button v-if="row.tagId" link type="primary" data-test="quality-trend" @click="openTrend(row)">{{ $t('quality.viewTrend') }}</el-button>
-                <el-button v-if="canConfigureArea(row.areaId)" link data-test="quality-edit" @click="openInspection(row)">{{ $t('quality.edit') }}</el-button>
-                <el-popconfirm v-if="canConfigureArea(row.areaId)" :title="$t('quality.confirmDeleteInspection', [row.sn || row.id])" @confirm="removeInspection(row)">
-                  <template #reference><el-button link type="danger">{{ $t('quality.delete') }}</el-button></template>
-                </el-popconfirm>
+                <el-button link data-test="quality-history" @click="openRevisions(row)">{{ $t('quality.history') }}</el-button>
+                <el-button v-if="canConfigureArea(row.areaId) && !row.deletedTs" link data-test="quality-edit" @click="openInspection(row)">{{ $t('quality.edit') }}</el-button>
+                <el-button v-if="canConfigureArea(row.areaId) && !row.deletedTs" link type="danger" data-test="quality-delete" @click="removeInspection(row)">{{ $t('quality.delete') }}</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -194,6 +196,11 @@
           </el-col>
           <el-col :span="12"><el-form-item :label="$t('quality.inspector')"><el-input v-model="inspectionForm.inspector" /></el-form-item></el-col>
           <el-col :span="24"><el-form-item :label="$t('quality.note')"><el-input v-model="inspectionForm.note" type="textarea" :rows="2" /></el-form-item></el-col>
+          <el-col v-if="inspectionForm.id" :span="24">
+            <el-form-item :label="$t('quality.amendmentReason')" required>
+              <el-input v-model="inspectionForm.amendmentReason" type="textarea" :rows="2" maxlength="500" show-word-limit data-test="quality-amendment-reason" />
+            </el-form-item>
+          </el-col>
           <el-col v-if="inspectionAudit" :span="24">
             <p class="tiny muted" data-test="quality-audit">
               {{ $t('quality.createdBy') }}：{{ inspectionAudit.createdBy || '—' }} · {{ formatTime(inspectionAudit.createdTs) }}
@@ -211,6 +218,15 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="revisionDialog" :title="$t('quality.historyTitle')" width="720px" destroy-on-close>
+      <el-alert v-if="revisionError" :title="revisionError" type="error" :closable="false" show-icon />
+      <el-table :data="revisions" size="small" v-loading="revisionLoading" :empty-text="$t('quality.noRevisions')" data-test="quality-revisions">
+        <el-table-column :label="$t('quality.time')" width="160"><template #default="{ row }">{{ formatTime(row.ts) }}</template></el-table-column>
+        <el-table-column :label="$t('quality.historyAction')" width="90"><template #default="{ row }">{{ actionLabel(row.action) }}</template></el-table-column>
+        <el-table-column prop="user" :label="$t('quality.inspector')" width="110" show-overflow-tooltip />
+        <el-table-column prop="reason" :label="$t('quality.amendmentReason')" min-width="180" show-overflow-tooltip />
+      </el-table>
+    </el-dialog>
     <el-dialog v-model="defectDialog" :title="defectForm.id ? $t('quality.editDefectCode') : $t('quality.addDefectCode')" width="560px" destroy-on-close>
       <el-alert v-if="dialogError" :title="dialogError" type="error" :closable="false" show-icon data-test="quality-defect-save-error" />
       <el-form label-width="100px" size="small">
@@ -232,7 +248,7 @@
 import ShiftTimeZoneBar from '../components/ShiftTimeZoneBar.vue'
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from '../charts'
 import { areaApi, deviceApi, qualityApi, tagApi } from '../api'
 import { errorMessage } from '../api/http'
@@ -243,7 +259,7 @@ import { useAuthStore } from '../stores/auth'
 import { downloadBlob, formatTime } from '../utils'
 import type {
   Area, Device, QualityDefectCode, QualityDefectCodeInput, QualityInspection, QualityInspectionInput,
-  QualityResult, QualitySummary, Tag
+  QualityResult, QualityRevision, QualitySummary, Tag
 } from '../types'
 
 const auth = useAuthStore()
@@ -280,7 +296,11 @@ const canControlAny = computed(() => can(auth.user, 'Control'))
 const controlAreas = computed(() => areas.value.filter(area => can(auth.user, 'Control', area.id)))
 const canConfigureArea = (areaId: number) => can(auth.user, 'Configure', areaId)
 
-const inspectionDialog = ref(false), defectDialog = ref(false)
+const inspectionDialog = ref(false), defectDialog = ref(false), revisionDialog = ref(false)
+const revisions = ref<QualityRevision[]>([])
+const revisionLoading = ref(false), revisionError = ref('')
+const includeDeleted = ref(false)
+const originalKey = ref<{ sn: string; result: QualityResult; ts: number; areaId: number } | null>(null)
 const trendChartRef = ref<HTMLDivElement>(), paretoChartRef = ref<HTMLDivElement>()
 let trendChart: echarts.ECharts | null = null
 let paretoChart: echarts.ECharts | null = null
@@ -288,7 +308,7 @@ let paretoChart: echarts.ECharts | null = null
 const inspectionForm = reactive({
   id: 0, sn: '', batchNo: '', product: '', tsDate: new Date() as Date | null,
   areaId: null as number | null, deviceId: null as number | null, tagId: null as number | null,
-  result: 'Passed' as QualityResult, defectCodeId: null as number | null, inspector: '', note: ''
+  result: 'Passed' as QualityResult, defectCodeId: null as number | null, inspector: '', note: '', amendmentReason: ''
 })
 const defectForm = reactive({ id: 0, code: '', name: '', category: '', description: '', enabled: true })
 const inspectionAreaOptions = computed(() => areas.value.filter(area =>
@@ -347,7 +367,8 @@ async function loadRecords() {
       result: recordResult.value || undefined,
       defectCodeId: recordDefectCodeId.value ?? undefined,
       areaId: recordAreaId.value ?? undefined,
-      from, to, page: recordPage.value, pageSize: recordPageSize
+      from, to, page: recordPage.value, pageSize: recordPageSize,
+      includeDeleted: includeDeleted.value || undefined
     })
     if (seq !== recordsSeq) return
     records.value = page.items
@@ -365,7 +386,26 @@ function queryRecords() {
   void loadRecords()
 }
 function isRevised(row: QualityInspection): boolean {
-  return !!row.updatedTs && row.updatedTs > (row.createdTs || 0)
+  return !!row.amendmentReason || (!!row.updatedTs && row.updatedTs > (row.createdTs || 0) && !row.deletedTs)
+}
+function actionLabel(action: string): string {
+  if (action === 'create') return tr('quality.actionCreate')
+  if (action === 'update') return tr('quality.actionUpdate')
+  if (action === 'delete') return tr('quality.actionDelete')
+  return action
+}
+async function openRevisions(row: QualityInspection) {
+  revisionDialog.value = true
+  revisionLoading.value = true
+  revisionError.value = ''
+  try {
+    revisions.value = await qualityApi.revisions(row.id)
+  } catch (e) {
+    revisions.value = []
+    revisionError.value = errorMessage(e, tr('quality.loadFailed'))
+  } finally {
+    revisionLoading.value = false
+  }
 }
 async function exportCurrent(scope: 'records' | 'dashboard', format: 'xlsx' | 'pdf') {
   const key = format === 'pdf' ? `${scope}-pdf` : scope
@@ -501,6 +541,8 @@ function openInspection(row?: QualityInspection) {
   inspectionForm.defectCodeId = row?.defectCodeId ?? null
   inspectionForm.inspector = row?.inspector ?? ''
   inspectionForm.note = row?.note ?? ''
+  inspectionForm.amendmentReason = ''
+  originalKey.value = row ? { sn: row.sn, result: row.result, ts: row.ts, areaId: row.areaId } : null
   inspectionAudit.value = row ? { createdBy: row.createdBy, createdTs: row.createdTs, updatedBy: row.updatedBy, updatedTs: row.updatedTs } : null
   dialogError.value = ''
   inspectionDialog.value = true
@@ -519,6 +561,24 @@ async function saveInspection() {
     dialogError.value = tr('quality.noAreas')
     return
   }
+  if (inspectionForm.id && !inspectionForm.amendmentReason.trim()) {
+    dialogError.value = tr('quality.reasonRequired')
+    return
+  }
+  const nextTs = inspectionForm.tsDate?.getTime() ?? null
+  const keyChanged = !!(inspectionForm.id && originalKey.value && (
+    inspectionForm.sn.trim() !== originalKey.value.sn
+    || inspectionForm.result !== originalKey.value.result
+    || inspectionForm.areaId !== originalKey.value.areaId
+    || nextTs !== originalKey.value.ts
+  ))
+  if (keyChanged) {
+    try {
+      await ElMessageBox.confirm(tr('quality.confirmKeyChange'), tr('quality.editInspection'), { type: 'warning' })
+    } catch {
+      return
+    }
+  }
   saving.value = true
   dialogError.value = ''
   try {
@@ -526,8 +586,9 @@ async function saveInspection() {
       sn: inspectionForm.sn.trim(), batchNo: inspectionForm.batchNo.trim(), product: inspectionForm.product.trim(),
       areaId: inspectionForm.areaId, deviceId: inspectionForm.deviceId, tagId: inspectionForm.tagId,
       result: inspectionForm.result, defectCodeId: inspectionForm.defectCodeId,
-      inspector: inspectionForm.inspector.trim(), ts: inspectionForm.tsDate?.getTime() ?? null,
-      note: inspectionForm.note.trim()
+      inspector: inspectionForm.inspector.trim(), ts: nextTs,
+      note: inspectionForm.note.trim(),
+      amendmentReason: inspectionForm.id ? inspectionForm.amendmentReason.trim() : undefined
     }
     if (inspectionForm.id) await qualityApi.updateInspection(inspectionForm.id, input)
     else await qualityApi.createInspection(input)
@@ -543,10 +604,16 @@ async function saveInspection() {
 async function removeInspection(row: QualityInspection) {
   recordError.value = ''
   try {
-    await qualityApi.removeInspection(row.id)
+    const { value } = await ElMessageBox.prompt(
+      tr('quality.confirmDeleteInspection', [row.sn || row.id]),
+      tr('quality.delete'),
+      { inputPlaceholder: tr('quality.deleteReason'), inputValidator: (text: string) => !!text?.trim() || tr('quality.reasonRequired'), type: 'warning' }
+    )
+    await qualityApi.removeInspection(row.id, String(value).trim())
     await Promise.all([loadRecords(), loadSummary()])
     ElMessage.success(tr('quality.deleted'))
   } catch (e) {
+    if (e === 'cancel' || e === 'close') return
     recordError.value = errorMessage(e, tr('quality.deleteFailed'))
   }
 }

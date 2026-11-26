@@ -8,6 +8,61 @@ namespace Scada.Engine.Traceability;
 
 public static class TraceabilityScannerConnection
 {
+
+    public static bool IsLoopbackListen(string host) =>
+        IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip);
+
+    public static string? InvalidAllowedSources(IReadOnlyList<string>? sources)
+    {
+        if (sources is null) return null;
+        foreach (var raw in sources)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (TryParseCidr(raw.Trim(), out _, out _)) continue;
+            return $"来源 IP 允许名单“{raw}”不是有效的 IP 地址或 CIDR。";
+        }
+        return null;
+    }
+
+    public static bool IsAllowedSource(IPAddress address, IReadOnlyList<string>? sources)
+    {
+        if (sources is null || sources.Count == 0) return true;
+        address = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        foreach (var raw in sources)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (!TryParseCidr(raw.Trim(), out var network, out var prefix)) continue;
+            if (network.AddressFamily != address.AddressFamily) continue;
+            if (MatchesPrefix(address, network, prefix)) return true;
+        }
+        return false;
+    }
+
+    private static bool TryParseCidr(string value, out IPAddress network, out int prefix)
+    {
+        network = IPAddress.None;
+        prefix = 0;
+        var slash = value.IndexOf('/');
+        var host = slash < 0 ? value : value[..slash];
+        if (!IPAddress.TryParse(host, out network!)) return false;
+        var bits = network.AddressFamily == AddressFamily.InterNetwork ? 32 : 128;
+        if (slash < 0) { prefix = bits; return true; }
+        return int.TryParse(value[(slash + 1)..], out prefix) && prefix is >= 0 && prefix <= bits;
+    }
+
+    private static bool MatchesPrefix(IPAddress address, IPAddress network, int prefix)
+    {
+        var left = address.GetAddressBytes();
+        var right = network.GetAddressBytes();
+        if (left.Length != right.Length) return false;
+        var full = prefix / 8;
+        for (var i = 0; i < full; i++) if (left[i] != right[i]) return false;
+        var rem = prefix % 8;
+        if (rem == 0) return true;
+        var mask = (byte)(0xFF << (8 - rem));
+        return (left[full] & mask) == (right[full] & mask);
+    }
+
     public static async Task ReceiveTcpAsync(TraceabilityScannerOptions options, Action<string> state,
         Func<string, Task> receive, CancellationToken ct)
     {
@@ -23,11 +78,24 @@ public static class TraceabilityScannerConnection
             return;
         }
         using var listener = new TcpListener(IPAddress.Parse(options.Host), options.Port);
-        listener.Start(1);
+        listener.Start();
         state("listening");
-        using var accepted = await listener.AcceptTcpClientAsync(ct);
-        state("connected");
-        await ReadFramesAsync(accepted.GetStream(), options, receive, ct);
+        if (!IsLoopbackListen(options.Host) && (options.AllowedSources is null || options.AllowedSources.Count == 0))
+            state("listening-open");
+        while (!ct.IsCancellationRequested)
+        {
+            var accepted = await listener.AcceptTcpClientAsync(ct);
+            var remote = (accepted.Client.RemoteEndPoint as IPEndPoint)?.Address;
+            if (remote is not null && !IsAllowedSource(remote, options.AllowedSources))
+            {
+                accepted.Dispose();
+                continue;
+            }
+            state("connected");
+            using (accepted)
+                await ReadFramesAsync(accepted.GetStream(), options, receive, ct);
+            return;
+        }
     }
 
     public static Task ReceiveSerialAsync(TraceabilityScannerOptions options, Action<string> state,

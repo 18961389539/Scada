@@ -208,6 +208,17 @@
                   <p v-if="health.spaceReclaim.lastRuns.length" class="muted">{{ $t('systemView.spaceReclaimLast', [health.spaceReclaim.lastRuns[0].action, health.spaceReclaim.lastRuns[0].ok ? $t('systemView.spaceReclaimOk') : (health.spaceReclaim.lastRuns[0].reason || $t('systemView.spaceReclaimFail')), health.spaceReclaim.lastRuns[0].ts]) }}</p>
                 </div>
 
+                <div v-if="canSystem" class="subpanel" data-test="aggregate-rebuild">
+                  <h4>{{ $t('historyAggregates.title') }}</h4>
+                  <p class="muted">{{ $t('historyAggregates.hint') }}</p>
+                  <div class="toolbar">
+                    <el-date-picker v-model="rebuildRange" type="datetimerange" :start-placeholder="$t('historyAggregates.from')" :end-placeholder="$t('historyAggregates.to')" :aria-label="$t('common.timeRange')" />
+                    <el-button type="primary" :loading="rebuilding" data-test="aggregate-rebuild-run" @click="rebuildAggregates">{{ $t('historyAggregates.run') }}</el-button>
+                  </div>
+                  <p v-if="rebuildResult" class="muted" data-test="aggregate-rebuild-result">{{ rebuildResult }}</p>
+                  <el-alert v-if="rebuildError" :title="rebuildError" type="error" :closable="false" show-icon />
+                </div>
+
                 <div v-if="health.historyLoss" class="subpanel" data-test="history-loss">
                   <h4>{{ $t('systemView.historyLoss') }}</h4>
                   <p class="muted">{{ $t('systemView.historyLossHint') }}</p>
@@ -313,6 +324,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search } from '@element-plus/icons-vue'
 import { healthApi, logApi, userApi } from '../api'
+import { opsApi } from '../api/ops'
 import AccessManagement from '../components/AccessManagement.vue'
 import UserAssignmentsDialog from '../components/UserAssignmentsDialog.vue'
 import { errorMessage } from '../api/http'
@@ -346,6 +358,35 @@ function takeoverKindLabel(kind: string): string {
 const auth = useAuthStore()
 const canUsers = computed(() => canGlobal(auth.user, 'ManageUsers'))
 const canSystem = computed(() => canGlobal(auth.user, 'System'))
+const rebuildRange = ref<[Date, Date]>([new Date(Date.now() - 30 * 24 * 3600_000), new Date()])
+const rebuilding = ref(false)
+const rebuildResult = ref('')
+const rebuildError = ref('')
+async function rebuildAggregates(): Promise<void> {
+  const from = rebuildRange.value?.[0]?.getTime()
+  const to = rebuildRange.value?.[1]?.getTime()
+  if (!from || !to) {
+    rebuildError.value = tr('historyAggregates.range')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(tr('historyAggregates.confirm'), tr('historyAggregates.title'), { type: 'warning' })
+  } catch {
+    return
+  }
+  rebuilding.value = true
+  rebuildError.value = ''
+  rebuildResult.value = ''
+  try {
+    const result = await opsApi.rebuildAggregates(from, to)
+    rebuildResult.value = tr('historyAggregates.done', [result.fiveMinuteWindows, result.hourWindows])
+    ElMessage.success(rebuildResult.value)
+  } catch (e) {
+    rebuildError.value = errorMessage(e, tr('historyAggregates.failed'))
+  } finally {
+    rebuilding.value = false
+  }
+}
 const canAccess = computed(() => canGlobal(auth.user, 'ManageUsers') || canGlobal(auth.user, 'Configure'))
 const activeTab = ref(canUsers.value ? 'users' : canAccess.value ? 'access' : 'logs')
 const assignDialog = ref(false)

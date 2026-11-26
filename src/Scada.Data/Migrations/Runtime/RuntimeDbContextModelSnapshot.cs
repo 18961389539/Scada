@@ -488,6 +488,10 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<int?>("TagId")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Text")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
                     b.Property<double?>("Value")
                         .HasColumnType("REAL");
 
@@ -1323,6 +1327,13 @@ namespace Scada.Data.Migrations.Runtime
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AmendmentReason")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("");
+
                     b.Property<int>("AreaId")
                         .HasColumnType("INTEGER");
 
@@ -1344,6 +1355,17 @@ namespace Scada.Data.Migrations.Runtime
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("DefectCodeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("DeleteReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeletedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("DeletedTs")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("DeviceId")
@@ -1413,6 +1435,46 @@ namespace Scada.Data.Migrations.Runtime
                     b.HasIndex("Sn", "Ts");
 
                     b.ToTable("QualityInspection", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.QualityInspectionRevision", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("InspectionId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Ts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("User")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InspectionId", "Ts");
+
+                    b.ToTable("QualityInspectionRevision", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.RecipeDownload", b =>
@@ -1794,6 +1856,28 @@ namespace Scada.Data.Migrations.Runtime
                         .HasFilter("\"ClosedTs\" IS NULL");
 
                     b.ToTable("TraceabilityAttempt", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.TraceabilityPendingScan", b =>
+                {
+                    b.Property<int>("JobId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Sn")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("JobId");
+
+                    b.ToTable("TraceabilityPendingScan", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.TraceabilityRecord", b =>
