@@ -297,6 +297,36 @@ public class AlarmEngineFloodTests
     }
 
     [Fact]
+    public async Task OfficialFirstUp_IgnoresActiveSimulatedAlarmOnSameDevice()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+
+        using var bus = new RealtimeBus();
+        var cache = new RealtimeCache();
+        var notifier = new Recorder();
+        using var engine = new AlarmEngine(bus, new Snapshot(), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance);
+        await engine.StartAsync(CancellationToken.None);
+
+        var ts = ScadaTime.NowMs();
+        Publish(bus, cache, 1, 15, ts, simulated: true);
+        await notifier.WaitForAsync(x => x.Count(y => y.Action == "raise") == 1);
+        Publish(bus, cache, 3, 15, ts + 1);
+        await notifier.WaitForAsync(x => x.Count(y => y.Action == "raise") == 2);
+        await engine.StopAsync(CancellationToken.None);
+
+        await using var check = runtime.CreateDbContext();
+        var alarms = await check.AlarmEvents.OrderBy(x => x.Id).ToListAsync();
+        var simulated = Assert.Single(alarms, x => x.Simulated);
+        var official = Assert.Single(alarms, x => !x.Simulated);
+        Assert.True(simulated.FirstUp);
+        Assert.True(official.FirstUp);
+    }
+
+    [Fact]
     public async Task FloodInOneArea_DoesNotSuppressAlarmsOfAnotherArea()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

@@ -243,4 +243,46 @@ public class AlarmEvaluatorTests
         Assert.Equal(AlarmTransitionKind.Recover, Assert.Single(transitions).Kind);
         Assert.False(evaluator.IsActive(rule.Id));
     }
+
+    [Fact]
+    public void SimulatedSample_DoesNotRecoverOfficialActiveAlarm_ButCanRaiseDrill()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = Rule(AlarmRuleType.High, 100);
+        Assert.Single(evaluator.Evaluate(SampleTag, Value(110, 1_000), [rule], 1_000));
+        Assert.True(evaluator.IsActive(rule.Id));
+
+        var simulatedRecover = new TagValue(1, 50, TagQuality.Good, 2_000, Simulated: true);
+        Assert.Empty(evaluator.Evaluate(SampleTag, simulatedRecover, [rule], 2_000, officialActive: _ => true));
+        Assert.True(evaluator.IsActive(rule.Id));
+
+        var officialRecover = evaluator.Evaluate(SampleTag, Value(50, 3_000), [rule], 3_000, officialActive: _ => true);
+        Assert.Equal(AlarmTransitionKind.Recover, Assert.Single(officialRecover).Kind);
+
+        var drill = evaluator.Evaluate(SampleTag, simulatedRecover with { Ts = 4_000, Value = 120 }, [rule], 4_000,
+            officialActive: _ => false, targetDeviceSimulated: true);
+        Assert.Equal(AlarmTransitionKind.Raise, Assert.Single(drill).Kind);
+    }
+
+    [Fact]
+    public void Expression_HoldsWhenSimulatedInputUnlessTargetDeviceIsSimulated()
+    {
+        var evaluator = new AlarmEvaluator();
+        var rule = new AlarmRule
+        {
+            Id = 20, TagId = 1, Type = AlarmRuleType.Expression, Expression = "#2 > 10",
+            Level = AlarmLevel.Warning, Enabled = true, Message = "test"
+        };
+        TagValue? Lookup(int id) => id == 2 ? new TagValue(2, 20, TagQuality.Good, 1_000, Simulated: true) : null;
+
+        Assert.Empty(evaluator.Evaluate(SampleTag, Value(0, 1_000), [rule], 1_000, Lookup));
+        Assert.False(evaluator.IsActive(rule.Id));
+
+        var raised = evaluator.Evaluate(SampleTag, Value(0, 2_000), [rule], 2_000, Lookup, targetDeviceSimulated: true);
+        Assert.Equal(AlarmTransitionKind.Raise, Assert.Single(raised).Kind);
+
+        TagValue? RecoverLookup(int id) => id == 2 ? new TagValue(2, 0, TagQuality.Good, 3_000, Simulated: true) : null;
+        Assert.Empty(evaluator.Evaluate(SampleTag, Value(0, 3_000), [rule], 3_000, RecoverLookup, officialActive: _ => true, targetDeviceSimulated: true));
+        Assert.True(evaluator.IsActive(rule.Id));
+    }
 }

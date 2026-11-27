@@ -37,6 +37,12 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/calc-jobs/8/reset")]
     [InlineData("/api/calc-jobs/8/maintenance-done")]
     [InlineData("/api/devices/12/diagnostics/reconnect")]
+    [InlineData("/api/alarms/9/ack")]
+    [InlineData("/api/alarms/9/notes")]
+    [InlineData("/api/oee/downtimes")]
+    [InlineData("/api/oee/downtimes/4")]
+    [InlineData("/api/oee/downtimes/4/confirm")]
+    [InlineData("/api/oee/corrections")]
     public void ControlPath_Includes_Field_Changing_Routes(string path)
     {
         Assert.Matches(ClientControlPolicy.ControlPath(), path);
@@ -56,6 +62,9 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/simulation/4")]
     [InlineData("/api/calc-jobs/8/publish")]
     [InlineData("/api/control/requests/11111111-1111-1111-1111-111111111111")]
+    [InlineData("/api/alarms/9")]
+    [InlineData("/api/oee/downtimes/import-alarms")]
+    [InlineData("/api/oee/analytics")]
     public void ControlPath_Ignores_Configuration_Or_Read_Routes(string path)
     {
         Assert.DoesNotMatch(ClientControlPolicy.ControlPath(), path);
@@ -94,6 +103,12 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/maintenance-done"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/acknowledge-writes"),
             ("Endpoints/CollectorDiagnosticEndpoints.cs", "/api/devices/1/diagnostics/reconnect"),
+            ("Endpoints/AlarmEndpoints.cs", "/api/alarms/1/ack"),
+            ("Endpoints/AlarmEndpoints.cs", "/api/alarms/1/notes"),
+            ("Endpoints/OeeEndpoints.cs", "/api/oee/downtimes"),
+            ("Endpoints/OeeEndpoints.cs", "/api/oee/downtimes/1"),
+            ("Endpoints/OeeEndpoints.cs", "/api/oee/downtimes/1/confirm"),
+            ("Endpoints/OeeEndpoints.cs", "/api/oee/corrections"),
         };
         var missing = new List<string>();
         foreach (var (file, sample) in required)
@@ -124,6 +139,16 @@ public sealed class ClientControlPolicyTests
     [InlineData("GET", "/api/devices/12/diagnostics/reconnect", false)]
     [InlineData("POST", "/api/devices/12/test", false)]
     [InlineData("POST", "/api/devices/test-draft", false)]
+    [InlineData("POST", "/api/alarms/9/ack", true)]
+    [InlineData("POST", "/api/alarms/9/notes", true)]
+    [InlineData("GET", "/api/alarms/9/ack", false)]
+    [InlineData("POST", "/api/oee/downtimes", true)]
+    [InlineData("PUT", "/api/oee/downtimes/4", true)]
+    [InlineData("DELETE", "/api/oee/downtimes/4", true)]
+    [InlineData("POST", "/api/oee/downtimes/4/confirm", true)]
+    [InlineData("POST", "/api/oee/corrections", true)]
+    [InlineData("GET", "/api/oee/downtimes", false)]
+    [InlineData("POST", "/api/oee/downtimes/import-alarms", false)]
     public void IsControlRequest_IncludesDeleteFaultAndCalcReset(string method, string path, bool expected)
     {
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();

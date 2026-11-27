@@ -25,12 +25,21 @@ public sealed class AlarmEvaluator
         TagValue value,
         IReadOnlyList<AlarmRule> rules,
         long nowMs,
-        Func<int, TagValue?>? lookup = null)
+        Func<int, TagValue?>? lookup = null,
+        bool targetDeviceSimulated = false,
+        Func<int, bool>? officialActive = null,
+        Func<int, bool>? inputSimulated = null)
     {
         var transitions = new List<AlarmTransition>();
+        var sampleSimulated = value.Simulated || targetDeviceSimulated;
         foreach (var rule in rules)
         {
             var state = GetState(rule.Id);
+            var official = officialActive?.Invoke(rule.Id) == true;
+            // 仿真样本不得恢复或改写正式未结束报警；无正式活动时仍可用仿真样本升演练报警。
+            var holdForOfficial = sampleSimulated && official;
+            // 复合条件仅在目标设备本身也在仿真、且不会改写正式报警时，才允许用仿真输入继续演练。
+            var allowSimulatedExpression = targetDeviceSimulated && !official;
 
             if (!rule.Enabled || rule.OutOfService)
             {
@@ -48,14 +57,20 @@ public sealed class AlarmEvaluator
             // 质量坏报警：质量不是 Good 即条件成立；质量恢复 Good 后按恢复延时结束。
             if (rule.Type == AlarmRuleType.BadQuality)
             {
+                if (holdForOfficial)
+                {
+                    state.PendingSince = null;
+                    state.RecoverPendingSince = null;
+                    continue;
+                }
                 TrackLevel(rule, state, value, nowMs, value.Quality != TagQuality.Good, value.Quality == TagQuality.Good, transitions);
                 continue;
             }
 
-            // 复合条件：任一引用测点缺失或质量不好时保持现有状态，避免坏数据制造误报或误恢复。
+            // 复合条件：任一引用测点缺失、质量不好或（非演练时）仿真时保持现有状态，避免坏数据或演练制造误报或误恢复。
             if (rule.Type == AlarmRuleType.Expression)
             {
-                var result = EvaluateExpression(rule, lookup);
+                var result = EvaluateExpression(rule, lookup, allowSimulatedExpression, inputSimulated);
                 if (result is null)
                 {
                     state.PendingSince = null;
@@ -70,6 +85,13 @@ public sealed class AlarmEvaluator
             if (value.Quality != TagQuality.Good)
             {
                 state.PendingSince = null;
+                continue;
+            }
+
+            if (holdForOfficial)
+            {
+                state.PendingSince = null;
+                state.RecoverPendingSince = null;
                 continue;
             }
 
@@ -173,8 +195,8 @@ public sealed class AlarmEvaluator
         }
     }
 
-    // null 表示无法判定（表达式编译失败或引用测点缺失/质量不好），调用方保持现有状态。
-    private bool? EvaluateExpression(AlarmRule rule, Func<int, TagValue?>? lookup)
+    // null 表示无法判定（表达式编译失败、引用测点缺失/质量不好，或非演练时遇到仿真输入），调用方保持现有状态。
+    private bool? EvaluateExpression(AlarmRule rule, Func<int, TagValue?>? lookup, bool allowSimulated, Func<int, bool>? inputSimulated)
     {
         if (lookup is null || string.IsNullOrWhiteSpace(rule.Expression)) return null;
         if (!_expressions.TryGetValue(rule.Id, out var cached) || !string.Equals(cached.Text, rule.Expression, StringComparison.Ordinal))
@@ -192,6 +214,7 @@ public sealed class AlarmEvaluator
         {
             var input = lookup(id);
             if (input is null || input.Quality != TagQuality.Good) return null;
+            if ((input.Simulated || inputSimulated?.Invoke(id) == true) && !allowSimulated) return null;
             values[id] = input.Value;
         }
 

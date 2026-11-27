@@ -94,15 +94,15 @@ public static class AlarmAnalyticsEndpoints
             return Results.Ok(new { granularity, points });
         });
 
-        group.MapGet("/events", async (string? from, string? to, int? areaId, string? levels, string? rules, string? categories, string? source, string? kind, string? ids, int? limit,
+        group.MapGet("/events", async (string? from, string? to, int? areaId, string? levels, string? rules, string? categories, string? source, string? kind, string? ids, int? limit, bool? includeSimulated,
             HttpContext http, AlarmAnalyticsService analytics, CancellationToken ct) =>
         {
             var f = await FilterAsync(http, from, to, areaId, levels, rules, categories);
             if (f.Error is not null) return f.Error;
             var idSet = Set(ids);
             if (idSet is { Count: > 2000 }) return EndpointHelpers.BadRequest("一次最多查询 2000 条报警");
-            var page = await analytics.EventsAsync(f.From, f.To, f.Include, source, kind, idSet, limit ?? 500, ct);
-            return Results.Ok(new { total = page.Total, items = page.Items.Select(x => new { x.Id, x.RuleId, x.TagId, x.DeviceId, x.GatewayId, x.Level, x.Category, x.StartTs, x.EndTs, x.AckTs, x.AckUser, x.Shelved, x.Suppressed, x.Chattering, x.Message, x.Source }) });
+            var page = await analytics.EventsAsync(f.From, f.To, f.Include, source, kind, idSet, limit ?? 500, ct, includeSimulated == true);
+            return Results.Ok(new { total = page.Total, items = page.Items.Select(x => new { x.Id, x.RuleId, x.TagId, x.DeviceId, x.GatewayId, x.Level, x.Category, x.StartTs, x.EndTs, x.AckTs, x.AckUser, x.Shelved, x.Suppressed, x.Chattering, x.Message, x.Source, x.Simulated }) });
         });
 
         group.MapGet("/export", async (string? format, string? from, string? to, int? areaId, string? levels, string? rules, string? categories, int? top,

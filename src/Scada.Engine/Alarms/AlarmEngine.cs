@@ -8,6 +8,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Data;
+using Scada.Engine.Control;
 
 namespace Scada.Engine.Alarms;
 
@@ -39,6 +40,7 @@ public sealed class AlarmEngine : BackgroundService
 
     private readonly AlarmEvaluator _evaluator = new();
     private readonly Dictionary<int, int> _activeEventIds = new();
+    private readonly Dictionary<int, bool> _activeSimulated = new();
     private Dictionary<int, Tag> _tags = new();
     private Dictionary<int, List<AlarmRule>> _rulesByTag = new();
     private Dictionary<int, AlarmRule> _rules = new();
@@ -147,7 +149,8 @@ public sealed class AlarmEngine : BackgroundService
         // 设备退出仿真或主测点收到正式样本时，先结束仍活动的演练报警，再按现条件决定是否升正式报警。
         await CloseSimulatedOnOfficialAsync(tag, value, now, cancellationToken);
 
-        foreach (var transition in _evaluator.Evaluate(tag, value, rules, now, Lookup))
+        foreach (var transition in _evaluator.Evaluate(tag, value, rules, now, Lookup,
+                     DeviceOf(tag) is { SimulationEnabled: true }, IsOfficialActive, IsInputSimulated))
             await ApplyTransitionAsync(tag, transition with { Value = transition.Value with { Ts = now } }, cancellationToken);
     }
 
@@ -184,6 +187,7 @@ public sealed class AlarmEngine : BackgroundService
                 db.AlarmActivities.Add(Activity(alarm, "recover", SimulationEndedReason));
                 await db.SaveChangesAsync(cancellationToken);
                 _activeEventIds.Remove(rule.Id);
+                _activeSimulated.Remove(rule.Id);
                 _evaluator.ClearActive(rule.Id);
                 await NotifyAsync(alarm, "recover", cancellationToken);
             }
@@ -217,6 +221,7 @@ public sealed class AlarmEngine : BackgroundService
                 {
                     _evaluator.RestoreActive(rule.Id);
                     _activeEventIds[rule.Id] = existing.Id;
+                    _activeSimulated[rule.Id] = existing.Simulated;
                     _suppressed[rule.Id] = existing.Suppressed;
                     latched = true;
                     return;
@@ -232,8 +237,9 @@ public sealed class AlarmEngine : BackgroundService
                     alarm.SuppressReason = FloodReason(areaId, decision.Count);
                 }
 
-                // 设备级首出：同一设备当前没有其他活动报警时，本条就是本次报警片段的根因候选。
-                if (tag.DeviceId is int deviceId && !await db.AlarmEvents.AnyAsync(x => x.DeviceId == deviceId && x.EndTs == null, cancellationToken))
+                // 设备级首出：同一设备当前没有其他同类（正式或演练）活动报警时，本条就是本次报警片段的根因候选。
+                // 演练默认不参与正式首出判定，避免把演练当成现场根因。
+                if (tag.DeviceId is int deviceId && !await db.AlarmEvents.AnyAsync(x => x.DeviceId == deviceId && x.EndTs == null && x.Simulated == alarm.Simulated, cancellationToken))
                 {
                     alarm.FirstUp = true;
                 }
@@ -241,6 +247,7 @@ public sealed class AlarmEngine : BackgroundService
                 db.AlarmEvents.Add(alarm);
                 await db.SaveChangesAsync(cancellationToken);
                 _activeEventIds[rule.Id] = alarm.Id;
+                _activeSimulated[rule.Id] = alarm.Simulated;
                 latched = true;
                 db.AlarmActivities.Add(Activity(alarm, "raise", RaiseNote(alarm)));
                 await db.SaveChangesAsync(cancellationToken);
@@ -263,6 +270,15 @@ public sealed class AlarmEngine : BackgroundService
                 if (alarm is null || alarm.EndTs is not null)
                 {
                     _activeEventIds.Remove(rule.Id);
+                    _activeSimulated.Remove(rule.Id);
+                    latched = true;
+                    return;
+                }
+
+                // 仿真样本不得结束正式未结束报警；评估器通常已拦截，这里再守一道。
+                if (!alarm.Simulated && (transition.Value.Simulated || DeviceOf(tag) is { SimulationEnabled: true }))
+                {
+                    _evaluator.RestoreActive(rule.Id);
                     latched = true;
                     return;
                 }
@@ -284,6 +300,7 @@ public sealed class AlarmEngine : BackgroundService
                 db.AlarmActivities.Add(Activity(alarm, "recover", alarm.EndReason));
                 await db.SaveChangesAsync(cancellationToken);
                 _activeEventIds.Remove(rule.Id);
+                _activeSimulated.Remove(rule.Id);
                 latched = true;
                 await NotifyAsync(alarm, "recover", cancellationToken);
             }
@@ -427,6 +444,17 @@ public sealed class AlarmEngine : BackgroundService
     private Device? DeviceOf(Tag tag) =>
         tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? device : null;
 
+    private bool IsOfficialActive(int ruleId) =>
+        _activeEventIds.ContainsKey(ruleId) && !_activeSimulated.GetValueOrDefault(ruleId);
+
+    private bool IsInputSimulated(int tagId)
+    {
+        var value = _cache.Get(tagId);
+        Device? device = null;
+        if (_tags.TryGetValue(tagId, out var tag)) device = DeviceOf(tag);
+        return ControlCommandService.IsSimulatedInput(value, device);
+    }
+
     private int? AreaOf(Tag tag) =>
         tag.AreaId ?? (tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var device) ? device.AreaId : null);
 
@@ -488,6 +516,7 @@ public sealed class AlarmEngine : BackgroundService
                 {
                     _evaluator.RestoreActive(ruleId);
                     _activeEventIds[ruleId] = alarm.Id;
+                    _activeSimulated[ruleId] = alarm.Simulated;
                     _suppressed[ruleId] = alarm.Suppressed;
                 }
             }
@@ -553,39 +582,62 @@ public sealed class AlarmEngine : BackgroundService
         // 规则删除后清理按 ruleId 索引的内存状态。未结束事件由删除路径关闭，不必再按已不存在的规则登记。
         foreach (var stale in _raiseHistory.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _raiseHistory.Remove(stale);
         foreach (var stale in _suppressed.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _suppressed.Remove(stale);
-        foreach (var stale in _activeEventIds.Keys.Where(id => !_rules.ContainsKey(id)).ToList()) _activeEventIds.Remove(stale);
+        foreach (var stale in _activeEventIds.Keys.Where(id => !_rules.ContainsKey(id)).ToList())
+        {
+            _activeEventIds.Remove(stale);
+            _activeSimulated.Remove(stale);
+        }
     }
 
     private void ApplyFlags(AlarmEvent alarm, AlarmRule rule, long now)
     {
         alarm.Shelved = _shelf.IsShelved(rule.Id);
-        var reason = SuppressionReason(rule);
-        alarm.Suppressed = reason is not null;
-        alarm.SuppressReason = reason;
+        // 新建时若抑制条件无法判定（含仿真条件对正式报警），按不抑制处理，宁可多报。
+        if (TrySuppressionReason(rule, alarm.Simulated, out var reason))
+        {
+            alarm.Suppressed = reason is not null;
+            alarm.SuppressReason = reason;
+        }
 
-        // 抖动：窗口内触发次数达到阈值即标记，标记的报警只记录不报警，提示工程上调整死区/延时。
-        if (!_raiseHistory.TryGetValue(rule.Id, out var history)) _raiseHistory[rule.Id] = history = new Queue<long>();
-        var window = Math.Max(_settings.AlarmChatterWindowSec, 1) * 1000L;
-        while (history.Count > 0 && now - history.Peek() > window) history.Dequeue();
-        history.Enqueue(now);
-        alarm.Chattering = _settings.AlarmChatterCount > 0 && history.Count >= _settings.AlarmChatterCount;
+        // 抖动：窗口内触发次数达到阈值即标记。演练默认不计入正式抖动窗口，避免一次演练把后续正式报警标成抖动。
+        if (!alarm.Simulated)
+        {
+            if (!_raiseHistory.TryGetValue(rule.Id, out var history)) _raiseHistory[rule.Id] = history = new Queue<long>();
+            var window = Math.Max(_settings.AlarmChatterWindowSec, 1) * 1000L;
+            while (history.Count > 0 && now - history.Peek() > window) history.Dequeue();
+            history.Enqueue(now);
+            alarm.Chattering = _settings.AlarmChatterCount > 0 && history.Count >= _settings.AlarmChatterCount;
+        }
+    }
+
+    private string? SuppressionReason(AlarmRule rule, bool forSimulatedAlarm = false)
+    {
+        TrySuppressionReason(rule, forSimulatedAlarm, out var reason);
+        return reason;
     }
 
     // 条件抑制：条件测点质量不好时不抑制（宁可多报，不可漏报）。
-    private string? SuppressionReason(AlarmRule rule)
+    // 仿真抑制条件不得改写正式报警：无法判定时返回 false，调用方保持现状。
+    private bool TrySuppressionReason(AlarmRule rule, bool forSimulatedAlarm, out string? reason)
     {
-        if (rule.SuppressMode == AlarmSuppressMode.None || rule.SuppressTagId is not int conditionId) return null;
+        reason = null;
+        if (rule.SuppressMode == AlarmSuppressMode.None || rule.SuppressTagId is not int conditionId) return true;
         var value = _cache.Get(conditionId);
-        if (value is null || value.Quality != TagQuality.Good) return null;
+        if (value is null || value.Quality != TagQuality.Good) return true;
+        var conditionTag = _tags.TryGetValue(conditionId, out var found) ? found : null;
+        var conditionDevice = conditionTag is null ? null : DeviceOf(conditionTag);
+        if (ControlCommandService.IsSimulatedInput(value, conditionDevice) && !forSimulatedAlarm)
+            return false;
         var on = value.Value >= 0.5;
-        var name = _tags.TryGetValue(conditionId, out var conditionTag) ? conditionTag.Name : $"#{conditionId}";
+        var name = conditionTag?.Name ?? $"#{conditionId}";
         var reading = value.Value.ToString("0.###");
-        return rule.SuppressMode switch
+        reason = rule.SuppressMode switch
         {
             AlarmSuppressMode.WhenOn when on => Trim($"条件抑制：{name} = {reading}，抑制条件成立", 200),
             AlarmSuppressMode.WhenOff when !on => Trim($"条件抑制：{name} = {reading}，设备处于停机状态", 200),
             _ => null
         };
+        return true;
     }
 
     // 定时处理：暂挂到期、活动报警的抑制状态随条件变化。
@@ -605,7 +657,8 @@ public sealed class AlarmEngine : BackgroundService
                     if (_suppressed.GetValueOrDefault(ruleId)) await SetSuppressedAsync(eventId, ruleId, null, now, cancellationToken);
                     continue;
                 }
-                var reason = SuppressionReason(rule);
+                if (!TrySuppressionReason(rule, _activeSimulated.GetValueOrDefault(ruleId), out var reason))
+                    continue;
                 // 条件抑制未生效时保留洪水抑制，等待洪水退出统一释放。
                 if (reason is null && _floodSuppressed.Contains(eventId)) continue;
                 if ((reason is not null) != _suppressed.GetValueOrDefault(ruleId))

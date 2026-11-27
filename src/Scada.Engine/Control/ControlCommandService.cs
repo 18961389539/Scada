@@ -168,12 +168,14 @@ public sealed class ControlCommandService
         if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
         var mode = DeviceControlMode.Remote; var lockoutTexts = new List<string>();
         var cached = _cache.Get(tag.Id);
-        var current = cached is { Quality: TagQuality.Good } v ? v.Value : (double?)null;
-        var (currentQuality, qualityReason) = DescribeQuality(cached);
+        Device? targetDevice = tag.DeviceId is int currentDeviceId && _config.TryGetDevice(currentDeviceId, out var foundDevice) ? foundDevice : null;
+        var current = UsableCurrentValue(cached, targetDevice);
+        var (currentQuality, qualityReason) = DescribeQuality(cached, targetDevice);
         if (tag.Kind != TagKind.Physical) refusals.Add("计算测点只读，不能下发现场控制");
-        else if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled) refusals.Add("设备不存在或未启用");
+        else if (tag.DeviceId is not int deviceId || targetDevice is null || !targetDevice.Enabled) refusals.Add("设备不存在或未启用");
         else
         {
+            var device = targetDevice;
             if (QualityRefusal(cached) is string qualityRefusal) refusals.Add(qualityRefusal);
             if (SimulationWriteRefusal(device, origin) is string simulationRefusal) refusals.Add(simulationRefusal);
             if (!tag.Writable) refusals.Add("测点不可写");
@@ -223,7 +225,8 @@ public sealed class ControlCommandService
         if (!_role.IsActive) refusals.Add(_role.StandbyMessage);
         var mode = DeviceControlMode.Remote;
         var cached = _cache.Get(tag.Id);
-        var (currentQuality, qualityReason) = DescribeQuality(cached);
+        Device? textDevice = tag.DeviceId is int textDeviceId && _config.TryGetDevice(textDeviceId, out var foundTextDevice) ? foundTextDevice : null;
+        var (currentQuality, qualityReason) = DescribeQuality(cached, textDevice);
         if (tag.DataType != TagDataType.String) refusals.Add("测点不是字符串类型");
         if (tag.Kind != TagKind.Physical) refusals.Add("计算测点只读，不能下发现场控制");
         else if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled) refusals.Add("设备不存在或未启用");
@@ -255,10 +258,23 @@ public sealed class ControlCommandService
             null, null, null, point?.FeedbackExpression, mode, lockoutTexts, currentQuality, qualityReason);
     }
 
-    internal static (TagQuality? Quality, string? Reason) DescribeQuality(TagValue? cached)
+    // 目标设备不在仿真时，仿真 Good 不能当作正式当前值展示或参与变化率校验。
+    internal static double? UsableCurrentValue(TagValue? cached, Device? device)
+    {
+        if (cached is not { Quality: TagQuality.Good }) return null;
+        if (device is { SimulationEnabled: true }) return cached.Value;
+        return IsSimulatedInput(cached, device) ? null : cached.Value;
+    }
+
+    internal static (TagQuality? Quality, string? Reason) DescribeQuality(TagValue? cached, Device? device = null)
     {
         if (cached is null) return (null, "尚无采样值");
-        if (cached.Quality == TagQuality.Good) return (TagQuality.Good, null);
+        if (cached.Quality == TagQuality.Good)
+        {
+            if (device is not { SimulationEnabled: true } && IsSimulatedInput(cached, device))
+                return (null, "当前值为仿真，不能作为正式当前值");
+            return (TagQuality.Good, null);
+        }
         var detail = string.IsNullOrWhiteSpace(cached.Error) ? null : cached.Error.Trim();
         var reason = cached.Quality switch
         {

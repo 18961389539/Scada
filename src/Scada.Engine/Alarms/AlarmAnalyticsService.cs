@@ -251,11 +251,12 @@ public sealed class AlarmAnalyticsService(IDbContextFactory<ConfigDbContext> fac
     }
 
     // 下钻：开始于 [from,to) 的报警明细，可按报警源、种类（annunciated/fleeting/chattering/shelved/suppressed）过滤；ids 指定时只取这些报警。
-    public async Task<AlarmEventPage> EventsAsync(long from, long to, Func<AlarmSample, bool> include, string? source, string? kind, IReadOnlyCollection<int>? ids, int limit, CancellationToken ct = default)
+    public async Task<AlarmEventPage> EventsAsync(long from, long to, Func<AlarmSample, bool> include, string? source, string? kind, IReadOnlyCollection<int>? ids, int limit, CancellationToken ct = default, bool includeSimulated = false)
     {
         var th = (await GetThresholdsAsync(ct)).Thresholds;
         await using var db = await runtime.CreateDbContextAsync(ct);
         var q = db.AlarmEvents.AsNoTracking().Where(x => x.StartTs >= from && x.StartTs < to);
+        if (!includeSimulated) q = q.Where(x => !x.Simulated);
         if (ids is { Count: > 0 }) q = q.Where(x => ids.Contains(x.Id));
         var rows = (await Project(q.OrderByDescending(x => x.StartTs)).Take(Math.Max(1000, _settings.AlarmAnalyticsMaxRows)).ToListAsync(ct)).Where(include);
         if (!string.IsNullOrEmpty(source)) rows = rows.Where(x => x.Source == source);

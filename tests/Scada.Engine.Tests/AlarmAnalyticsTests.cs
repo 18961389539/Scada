@@ -277,8 +277,8 @@ public class AlarmAnalyticsTests
         return (connection, factory, analytics, rollup);
     }
 
-    private static AlarmEvent E(int rule, long start, long? end = null, long? ack = null, AlarmLevel level = AlarmLevel.Warning, bool shelved = false) =>
-        new() { RuleId = rule, TagId = rule, Level = level, StartTs = start, EndTs = end, AckTs = ack, AckUser = ack is null ? null : "op", Message = $"R{rule}", Shelved = shelved };
+    private static AlarmEvent E(int rule, long start, long? end = null, long? ack = null, AlarmLevel level = AlarmLevel.Warning, bool shelved = false, bool simulated = false) =>
+        new() { RuleId = rule, TagId = rule, Level = level, StartTs = start, EndTs = end, AckTs = ack, AckUser = ack is null ? null : "op", Message = $"R{rule}", Shelved = shelved, Simulated = simulated };
 
     [Fact]
     public async Task DailyRollupsSplitAtLocalMidnightAcrossMonth()
@@ -422,5 +422,24 @@ public class AlarmAnalyticsTests
         Assert.Equal(1, (await analytics.EventsAsync(T0, T0 + H, _ => true, null, "fleeting", null, 100)).Total);
         Assert.Equal(1, (await analytics.EventsAsync(T0, T0 + H, _ => true, null, "shelved", null, 100)).Total);
         Assert.Equal(0, (await analytics.EventsAsync(T0, T0 + H, x => x.RuleId != 1 && x.RuleId != 2, null, null, null, 100)).Total);
+    }
+
+    [Fact]
+    public async Task EventsAsync_ExcludesSimulatedUnlessRequested()
+    {
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        var (connection, factory, analytics, _) = await Setup(runtime);
+        await using var __ = connection;
+        await using (var db = runtime.CreateDbContext())
+        {
+            db.AlarmEvents.AddRange(E(1, T0), E(2, T0 + M, simulated: true));
+            await db.SaveChangesAsync();
+        }
+        var official = await analytics.EventsAsync(T0, T0 + H, _ => true, null, null, null, 100);
+        Assert.Equal(1, official.Total);
+        Assert.False(Assert.Single(official.Items).Simulated);
+        var all = await analytics.EventsAsync(T0, T0 + H, _ => true, null, null, null, 100, includeSimulated: true);
+        Assert.Equal(2, all.Total);
+        Assert.Contains(all.Items, x => x.Simulated);
     }
 }

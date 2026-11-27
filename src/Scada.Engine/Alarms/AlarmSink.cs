@@ -42,6 +42,8 @@ public sealed class AlarmSink : IAlarmSink
             // 设备名在这里补，调用方只负责给原因；历史实现把设备名留给调用方，采集侧漏写后通知里就没了主语。
             Message = AlarmMessageBuilder.DeviceOffline(device, reason),
             MessageEn = AlarmMessageBuilder.DeviceOfflineEn(device, reason),
+            Simulated = device.SimulationEnabled
+                || (!string.IsNullOrWhiteSpace(reason) && reason.Contains("仿真", StringComparison.Ordinal)),
         };
         db.AlarmEvents.Add(alarm);
         await db.SaveChangesAsync(cancellationToken);

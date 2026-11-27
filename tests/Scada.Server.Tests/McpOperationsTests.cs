@@ -80,6 +80,8 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
         var data = McpApiTests.Data(await CallAsync(client, "get_alarm_summary"));
         Assert.True(data.GetProperty("unack").GetInt32() >= 2);
         Assert.True(data.GetProperty("ackableUnack").GetInt32() >= 2);
+        Assert.Equal(data.GetProperty("unack").GetInt32(), data.GetProperty("ackableUnack").GetInt32());
+        Assert.True(data.GetProperty("simulatedUnack").GetInt32() >= 0);
         Assert.Equal(0, data.GetProperty("shelvedRules").GetInt32());
         Assert.Equal(0, data.GetProperty("outOfServiceRules").GetInt32());
         var flood = data.GetProperty("flood");
@@ -100,6 +102,7 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
         var timeline = McpApiTests.Data(await CallAsync(client, "get_alarm_timeline", new { alarmId = _site.AlarmA }));
         Assert.Equal(_site.AlarmA, timeline.GetProperty("alarm").GetProperty("id").GetInt32());
         Assert.Equal("Unack", timeline.GetProperty("alarm").GetProperty("state").GetString());
+        Assert.False(timeline.GetProperty("alarm").GetProperty("simulated").GetBoolean());
         var activity = Assert.Single(timeline.GetProperty("activities").EnumerateArray());
         Assert.Equal("MCP note", activity.GetProperty("note").GetString());
         var notification = Assert.Single(timeline.GetProperty("notifications").EnumerateArray());
@@ -109,6 +112,43 @@ public sealed class McpOperationsTests : IClassFixture<McpOperationsTests.Site>
         Assert.False(timeline.GetProperty("truncated").GetBoolean());
         Assert.True(timeline.GetProperty("dataAsOf").GetInt64() > 0);
         Assert.Equal("not_found", ErrorCode(await CallAsync(client, "get_alarm_timeline", new { alarmId = int.MaxValue })));
+    }
+
+    [Fact]
+    public async Task OfficialSummaryAndContext_ExcludeSimulatedAlarmsButTimelineMarksThem()
+    {
+        using var client = _site.Server.CreateClient();
+        var beforeSummary = McpApiTests.Data(await CallAsync(client, "get_alarm_summary"));
+        var beforeContext = McpApiTests.Data(await CallAsync(client, "get_operations_context", new { deviceId = _site.DeviceB }));
+        int simulatedId;
+        await using (var db = await Runtime().CreateDbContextAsync())
+        {
+            var alarm = new AlarmEvent
+            {
+                TagId = _site.TagB, DeviceId = _site.DeviceB, Level = AlarmLevel.Warning,
+                StartTs = ScadaTime.NowMs(), Message = "演练离线", Simulated = true
+            };
+            db.AlarmEvents.Add(alarm);
+            await db.SaveChangesAsync();
+            simulatedId = alarm.Id;
+        }
+
+        var summary = McpApiTests.Data(await CallAsync(client, "get_alarm_summary"));
+        Assert.Equal(beforeSummary.GetProperty("unack").GetInt32(), summary.GetProperty("unack").GetInt32());
+        Assert.Equal(beforeSummary.GetProperty("ackableUnack").GetInt32(), summary.GetProperty("ackableUnack").GetInt32());
+        Assert.Equal(summary.GetProperty("unack").GetInt32(), summary.GetProperty("ackableUnack").GetInt32());
+        Assert.Equal(beforeSummary.GetProperty("simulatedUnack").GetInt32() + 1, summary.GetProperty("simulatedUnack").GetInt32());
+
+        var timeline = McpApiTests.Data(await CallAsync(client, "get_alarm_timeline", new { alarmId = simulatedId }));
+        Assert.True(timeline.GetProperty("alarm").GetProperty("simulated").GetBoolean());
+
+        var context = McpApiTests.Data(await CallAsync(client, "get_operations_context", new { deviceId = _site.DeviceB }));
+        Assert.Equal(beforeContext.GetProperty("activeAlarmCount").GetInt32(), context.GetProperty("activeAlarmCount").GetInt32());
+        Assert.Equal(beforeContext.GetProperty("unackAlarmCount").GetInt32(), context.GetProperty("unackAlarmCount").GetInt32());
+        Assert.Equal(beforeContext.GetProperty("simulatedActiveAlarmCount").GetInt32() + 1, context.GetProperty("simulatedActiveAlarmCount").GetInt32());
+        Assert.Equal(beforeContext.GetProperty("simulatedUnackAlarmCount").GetInt32() + 1, context.GetProperty("simulatedUnackAlarmCount").GetInt32());
+        Assert.Contains(context.GetProperty("activeAlarms").EnumerateArray(),
+            x => x.GetProperty("id").GetInt32() == simulatedId && x.GetProperty("simulated").GetBoolean());
     }
 
     [Fact]

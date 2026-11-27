@@ -102,6 +102,98 @@ public class AlarmManagementTests
     }
 
     [Fact]
+    public async Task SimulatedSampleDoesNotRecoverOfficialAlarmAndOfficialSampleContinuesIt()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        var rule = new AlarmRule { Id = 1, TagId = 1, Type = AlarmRuleType.High, Threshold = 10, Enabled = true };
+        using var bus = new RealtimeBus(); var cache = new RealtimeCache(); var notifier = new Recorder();
+        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance);
+        await engine.StartAsync(default);
+        var ts = ScadaTime.NowMs();
+        var official = new TagValue(1, 15, TagQuality.Good, ts); cache.Set(official); bus.Publish(official);
+        var raised = await notifier.WaitAsync("raise");
+        Assert.False(raised.Simulated);
+
+        var simulated = new TagValue(1, 0, TagQuality.Good, ts + 1_000, Simulated: true); cache.Set(simulated); bus.Publish(simulated);
+        await Task.Delay(400);
+        await using (var mid = runtime.CreateDbContext())
+        {
+            var active = Assert.Single(await mid.AlarmEvents.ToListAsync());
+            Assert.Equal(raised.Id, active.Id);
+            Assert.Null(active.EndTs);
+            Assert.False(active.Simulated);
+        }
+
+        var stillHigh = new TagValue(1, 16, TagQuality.Good, ts + 2_000); cache.Set(stillHigh); bus.Publish(stillHigh);
+        await Task.Delay(300);
+        var recover = new TagValue(1, 0, TagQuality.Good, ts + 3_000); cache.Set(recover); bus.Publish(recover);
+        var ended = await notifier.WaitAsync("recover");
+        Assert.Equal(raised.Id, ended.Id);
+        await engine.StopAsync(default);
+        await using var check = runtime.CreateDbContext();
+        var alarms = await check.AlarmEvents.ToListAsync();
+        Assert.Single(alarms);
+        Assert.Equal(raised.Id, alarms[0].Id);
+        Assert.NotNull(alarms[0].EndTs);
+        Assert.False(alarms[0].Simulated);
+    }
+
+    [Fact]
+    public async Task SimulatedSuppressConditionDoesNotSuppressOfficialAlarm()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        var rule = new AlarmRule { Id = 1, TagId = 1, Type = AlarmRuleType.High, Threshold = 10, Enabled = true, SuppressTagId = 2, SuppressMode = AlarmSuppressMode.WhenOff };
+        using var bus = new RealtimeBus(); var cache = new RealtimeCache(); var notifier = new Recorder();
+        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance);
+        cache.Set(new TagValue(2, 1, TagQuality.Good, ScadaTime.NowMs()));
+        await engine.StartAsync(default);
+        var value = new TagValue(1, 15, TagQuality.Good, ScadaTime.NowMs()); cache.Set(value); bus.Publish(value);
+        var raised = await notifier.WaitAsync("raise");
+        Assert.False(raised.Suppressed);
+
+        cache.Set(new TagValue(2, 0, TagQuality.Good, ScadaTime.NowMs(), Simulated: true));
+        await Task.Delay(600);
+        await engine.StopAsync(default);
+        await using var check = runtime.CreateDbContext();
+        var alarm = await check.AlarmEvents.SingleAsync();
+        Assert.False(alarm.Suppressed);
+        Assert.DoesNotContain(await check.AlarmActivities.ToListAsync(), x => x.Action == "suppress");
+    }
+
+    [Fact]
+    public async Task SimulatedRaisesDoNotCountTowardOfficialChatter()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);
+        await using var runtimeConnection = TestRuntime.Open(); var runtime = TestRuntime.Factory(runtimeConnection);
+        await using (var db = factory.CreateDbContext()) await db.Database.EnsureCreatedAsync();
+        var rule = new AlarmRule { Id = 1, TagId = 1, Type = AlarmRuleType.High, Threshold = 10, Enabled = true };
+        using var bus = new RealtimeBus(); var cache = new RealtimeCache(); var notifier = new Recorder();
+        var settings = Options.Create(new ScadaSettings { AlarmChatterCount = 3, AlarmChatterWindowSec = 60 });
+        using var engine = new AlarmEngine(bus, new Snapshot([rule]), cache, factory, runtime, notifier, NullLogger<AlarmEngine>.Instance, null, settings);
+        await engine.StartAsync(default);
+        var simulatedRaises = 0; var simulatedRecovers = 0;
+        foreach (var v in new[] { 15.0, 5, 15, 5, 15, 5 })
+        {
+            var value = new TagValue(1, v, TagQuality.Good, ScadaTime.NowMs(), Simulated: true);
+            cache.Set(value); bus.Publish(value);
+            if (v > 10) await notifier.WaitCountAsync("raise", ++simulatedRaises);
+            else await notifier.WaitCountAsync("recover", ++simulatedRecovers);
+        }
+        var official = new TagValue(1, 15, TagQuality.Good, ScadaTime.NowMs());
+        cache.Set(official); bus.Publish(official);
+        await notifier.WaitCountAsync("raise", 4);
+        await engine.StopAsync(default);
+        await using var check = runtime.CreateDbContext();
+        var officialAlarm = await check.AlarmEvents.SingleAsync(x => !x.Simulated);
+        Assert.False(officialAlarm.Chattering);
+        Assert.All(await check.AlarmEvents.Where(x => x.Simulated).ToListAsync(), x => Assert.False(x.Chattering));
+    }
+
+    [Fact]
     public async Task ShelveNeedsReasonAndExpiresAutomatically()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:"); await connection.OpenAsync(); var factory = new Factory(connection);

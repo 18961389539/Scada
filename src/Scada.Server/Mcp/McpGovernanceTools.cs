@@ -61,7 +61,7 @@ public sealed class McpGovernanceTools(
         {
             var counts = await alarms.CountStatesAsync(new AlarmQueryFilter(), ct);
             var ackableUnack = await alarms.CountAsync(null, null, cancellationToken: ct, liveOnly: true,
-                filter: new AlarmQueryFilter { State = AlarmListState.Unack });
+                filter: new AlarmQueryFilter { State = AlarmListState.Unack, Simulated = false });
             await alarmShelf.EnsureLoadedAsync(ct);
             await using var db = await factory.CreateDbContextAsync(ct);
             var rules = await db.AlarmRules.AsNoTracking().Select(x => new { x.Id, x.OutOfService }).ToListAsync(ct);
@@ -78,6 +78,7 @@ public sealed class McpGovernanceTools(
                 rules.Count(x => x.OutOfService), flood,
                 new McpFloodGuard(alarmFloodGuard.AutoSuppress, alarmFloodGuard.FirstOutEnabled,
                     alarmFloodGuard.SuppressMaxLevel, areas.Any(x => x.InFlood), areas),
+                counts.SimulatedUnack, counts.SimulatedAcked, counts.SimulatedRtnUnack,
                 now, false);
         }, cancellationToken);
 
@@ -271,9 +272,12 @@ public sealed class McpGovernanceTools(
             .Where(x => x.EndTs == null && !x.Shelved && !x.Suppressed)
             .Where(x => (x.DeviceId != null && deviceIds.Contains(x.DeviceId.Value))
                 || (x.DeviceId == null && x.TagId != null && alarmTagIds.Contains(x.TagId.Value)));
-        var activeAlarmCount = await alarmQuery.CountAsync(cancellationToken);
-        var unackAlarmCount = await alarmQuery.CountAsync(x => x.AckTs == null, cancellationToken);
-        var alarmRows = await alarmQuery.OrderByDescending(x => x.Level).ThenByDescending(x => x.StartTs)
+        var officialQuery = alarmQuery.Where(x => !x.Simulated);
+        var activeAlarmCount = await officialQuery.CountAsync(cancellationToken);
+        var unackAlarmCount = await officialQuery.CountAsync(x => x.AckTs == null, cancellationToken);
+        var simulatedActiveAlarmCount = await alarmQuery.CountAsync(x => x.Simulated, cancellationToken);
+        var simulatedUnackAlarmCount = await alarmQuery.CountAsync(x => x.Simulated && x.AckTs == null, cancellationToken);
+        var alarmRows = await alarmQuery.OrderBy(x => x.Simulated).ThenByDescending(x => x.Level).ThenByDescending(x => x.StartTs)
             .ThenByDescending(x => x.Id).Take(ContextAlarmLimit + 1).ToListAsync(cancellationToken);
         var access = new AccessContext(null, [new AccessGrant(Permission.View, null)], await accessModels.GetAsync(cancellationToken));
         var activeAlarms = alarmRows.Take(ContextAlarmLimit).Select(x => AlarmView(x, access)).ToArray();
@@ -294,7 +298,8 @@ public sealed class McpGovernanceTools(
         return new(scope, deviceItems, devicesTruncated, tagNames.Count, missing.Count, bad.Count, stale.Count,
             samples, problemTagsTruncated, activeAlarms, activeAlarmCount, unackAlarmCount, alarmsTruncated,
             gatewayItems, gatewaysTruncated, now,
-            devicesTruncated || problemTagsTruncated || alarmsTruncated || gatewaysTruncated);
+            devicesTruncated || problemTagsTruncated || alarmsTruncated || gatewaysTruncated,
+            simulatedActiveAlarmCount, simulatedUnackAlarmCount);
     }
 
     private static McpAlarmView AlarmView(AlarmEvent x, AccessContext access)
@@ -304,7 +309,7 @@ public sealed class McpGovernanceTools(
             : [];
         return new(x.Id, x.TagId, x.DeviceId, x.GatewayId, x.RuleId, x.Level, x.Value, x.StartTs, x.EndTs,
             x.EndReason, x.AckUser, x.AckTs, x.Message, x.Shelved, x.Suppressed, x.SuppressReason, x.Chattering,
-            x.FirstOut, AlarmStates.Of(x), areas);
+            x.FirstOut, AlarmStates.Of(x), areas, x.Simulated);
     }
 
     private sealed record ContextDeviceRow(int Id, string Name, bool Enabled, int? GatewayId);
@@ -320,6 +325,7 @@ public sealed class McpGovernanceTools(
         long DataAsOf, bool Truncated);
     public sealed record McpAlarmSummary(int Unack, int Acked, int RtnUnack, int Shelved, int Suppressed, int Chattering,
         int AckableUnack, int ShelvedRules, int OutOfServiceRules, AlarmFloodStatus Flood, McpFloodGuard FloodGuard,
+        int SimulatedUnack, int SimulatedAcked, int SimulatedRtnUnack,
         long DataAsOf, bool Truncated);
     public sealed record McpFloodGuard(bool AutoSuppress, bool FirstOut, AlarmLevel SuppressMaxLevel, bool AnyInFlood,
         IReadOnlyList<McpFloodArea> Areas);
@@ -337,7 +343,8 @@ public sealed class McpGovernanceTools(
         long DataAsOf, bool Truncated);
     public sealed record McpAlarmView(int Id, int? TagId, int? DeviceId, int? GatewayId, int? RuleId, AlarmLevel Level,
         double Value, long StartTs, long? EndTs, string? EndReason, string? AckUser, long? AckTs, string Message,
-        bool Shelved, bool Suppressed, string? SuppressReason, bool Chattering, bool FirstOut, string State, int[] Areas);
+        bool Shelved, bool Suppressed, string? SuppressReason, bool Chattering, bool FirstOut, string State, int[] Areas,
+        bool Simulated = false);
     public sealed record McpGatewayOverview(IReadOnlyList<McpGateway> Items, bool Truncated, long DataAsOf);
     public sealed record McpGateway(int Id, string Name, bool Enabled, bool Connected, long LastSeenTs, long LeaseUntilTs,
         string? AgentVersion, string? AppliedRevision, string? CurrentRevision, bool ConfigurationConfirmed,
@@ -354,5 +361,6 @@ public sealed class McpGovernanceTools(
         bool DevicesTruncated, int TotalTags, int MissingTags, int BadQualityTags, int StaleTags,
         IReadOnlyList<McpContextTag> ProblemTags, bool ProblemTagsTruncated,
         IReadOnlyList<McpAlarmView> ActiveAlarms, int ActiveAlarmCount, int UnackAlarmCount, bool AlarmsTruncated,
-        IReadOnlyList<McpContextGateway> Gateways, bool GatewaysTruncated, long DataAsOf, bool Truncated);
+        IReadOnlyList<McpContextGateway> Gateways, bool GatewaysTruncated, long DataAsOf, bool Truncated,
+        int SimulatedActiveAlarmCount = 0, int SimulatedUnackAlarmCount = 0);
 }
