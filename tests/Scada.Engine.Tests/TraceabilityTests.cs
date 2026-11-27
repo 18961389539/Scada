@@ -14,6 +14,7 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
+using Scada.Engine.Control;
 using Scada.Engine.Realtime;
 using Scada.Engine.Traceability;
 
@@ -498,7 +499,71 @@ public sealed class TraceabilityTests
         Assert.NotEmpty(fixture.Service.Validate(fixture.Job));
     }
 
-    private sealed class CommitFailure : SaveChangesInterceptor
+    [Fact]
+    public async Task ReplyGoesThroughControlLoopWithServiceCommandId()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        await fixture.Service.ProcessOnceAsync(default);
+        Assert.Equal([2], fixture.Collector.Replies);
+        var context = Assert.Single(fixture.Collector.WriteContexts);
+        Assert.True(context.Service);
+        Assert.Equal("traceability", context.UserName);
+        await using var runtime = fixture.Runtime.CreateDbContext();
+        var attempt = await runtime.TraceabilityAttempts.SingleAsync();
+        Assert.Equal(TraceabilityService.TraceabilityCommandId(attempt.Id, 2), context.RequestId);
+        Assert.True(await runtime.OperationLogs.AnyAsync(log => log.Action.StartsWith("控制写入") && log.UserName == "traceability"));
+    }
+
+    [Fact]
+    public async Task ReplyIsRefusedAndAuditedWhenDeviceIsLocal()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        int deviceId;
+        await using (var db = fixture.Factory.CreateDbContext())
+            deviceId = await db.Devices.Select(x => x.Id).SingleAsync();
+        await using (var runtime = fixture.Runtime.CreateDbContext())
+        {
+            runtime.DeviceControlStates.Add(new DeviceControlState
+            {
+                DeviceId = deviceId, Mode = DeviceControlMode.Local, Reason = "现场", ChangedTs = ScadaTime.NowMs(), ChangedBy = "tech"
+            });
+            await runtime.SaveChangesAsync();
+        }
+        await fixture.Service.ProcessOnceAsync(default);
+        Assert.Empty(fixture.Collector.Replies);
+        var status = fixture.Service.Status(fixture.Job.Id);
+        Assert.Equal("awaitingReply", status.State);
+        Assert.Contains("就地", status.Error);
+        await using var logs = fixture.Runtime.CreateDbContext();
+        Assert.True(await logs.OperationLogs.AnyAsync(log => log.Action.StartsWith("控制被拒绝") && log.UserName == "traceability"));
+        Assert.False(await logs.TraceabilityAttempts.AnyAsync(attempt => attempt.Acknowledged));
+    }
+
+    [Fact]
+    public async Task ReplyIsRefusedAndAuditedWhenLockoutIsActive()
+    {
+        await using var fixture = await Fixture.CreateAsync(TraceabilitySnSource.Plc);
+        int deviceId;
+        await using (var db = fixture.Factory.CreateDbContext())
+            deviceId = await db.Devices.Select(x => x.Id).SingleAsync();
+        await using (var runtime = fixture.Runtime.CreateDbContext())
+        {
+            runtime.ControlLockouts.Add(new ControlLockout
+            {
+                DeviceId = deviceId, Kind = ControlLockoutKind.NoOperate, Reason = "检修挂牌", PlacedBy = "tech", PlacedTs = ScadaTime.NowMs()
+            });
+            await runtime.SaveChangesAsync();
+        }
+        await fixture.Service.ProcessOnceAsync(default);
+        Assert.Empty(fixture.Collector.Replies);
+        var status = fixture.Service.Status(fixture.Job.Id);
+        Assert.Equal("awaitingReply", status.State);
+        Assert.Contains("挂牌", status.Error);
+        await using var logs = fixture.Runtime.CreateDbContext();
+        Assert.True(await logs.OperationLogs.AnyAsync(log => log.Action.StartsWith("控制被拒绝") && log.UserName == "traceability"));
+    }
+
+        private sealed class CommitFailure : SaveChangesInterceptor
     {
         public bool Enabled { get; set; }
         public override ValueTask<InterceptionResult<int>> SavingChangesAsync(DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
@@ -528,6 +593,7 @@ public sealed class TraceabilityTests
         public bool Simulated { get; set; }
         public int Captures { get; private set; }
         public List<int> Replies { get; } = [];
+        public List<CollectorCommandContext> WriteContexts { get; } = [];
         private double _trigger = 1;
         public void Trigger(double value) { _trigger = value; cache.Set(new(1, value, TagQuality.Good, ScadaTime.NowMs())); }
         public IReadOnlyList<CollectorDeviceStatus> GetStatuses() => [];
@@ -539,7 +605,11 @@ public sealed class TraceabilityTests
                 BadData && id == 3 ? TagQuality.Bad : TagQuality.Good, ScadaTime.NowMs(), Simulated: Simulated)).ToArray());
         }
         public Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default)
+            => WriteIdentifiedAsync(deviceId, tag, value, new CollectorCommandContext(null, null, "test"), cancellationToken);
+
+        public Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken cancellationToken = default)
         {
+            WriteContexts.Add(context);
             Replies.Add((int)value);
             if (FailReply) return Task.FromResult(new CommandExecutionResult(false, "Reply failed."));
             Trigger(value);
@@ -556,7 +626,11 @@ public sealed class TraceabilityTests
         public TraceabilityJob Job => job;
         public Task ReloadAsync() => config.ReloadAsync();
         public TraceabilityService Service { get; private set; } = null!;
-        public TraceabilityService NewService() => new(factory, runtime, config, cache, collector, new StandaloneNodeRole(), NullLogger<TraceabilityService>.Instance);
+        public TraceabilityService NewService()
+        {
+            var commands = new ControlCommandService(config, collector, cache, factory, runtime, NullLogger<ControlCommandService>.Instance, role: new StandaloneNodeRole());
+            return new(factory, runtime, config, cache, collector, commands, new StandaloneNodeRole(), NullLogger<TraceabilityService>.Instance);
+        }
         public static async Task<Fixture> CreateAsync(TraceabilitySnSource source)
         {
             var root = Path.Combine(Path.GetTempPath(), "scada-trace-" + Guid.NewGuid().ToString("N"));

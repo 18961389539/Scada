@@ -204,7 +204,7 @@ import { hmiLayoutApi, getLocalWorkstation, WORKSTATION_ID_KEY, WORKSTATION_KEY,
 import { alarmApi, areaApi, deviceApi } from '../api'
 import { annunciatorApi } from '../api/annunciators'
 import { screenApi } from '../api/screens'
-import { errorMessage } from '../api/http'
+import { errorMessage, setMonitorOnlyClient } from '../api/http'
 import { queryMonitors, openOnMonitor, windowManagementSupported, type MonitorInfo, type MonitorNotice } from '../components/console/windowing'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
@@ -290,7 +290,11 @@ const monitorModeKey = computed(() => `scada-console-monitor-mode:${auth.user?.i
 const mobileBlocked = computed(() => controlBlockedOnMobile())
 const monitorMode = ref(!!props.previewLayout || localStorage.getItem(monitorModeKey.value) === 'true')
 watch(monitorModeKey, key => { if (!props.previewLayout) monitorMode.value = localStorage.getItem(key) === 'true' })
-watch(monitorMode, value => { if (props.previewLayout) return; try { localStorage.setItem(monitorModeKey.value, String(value)) } catch { /* This preference remains available for the current window. */ } })
+watch(monitorMode, value => {
+  if (props.previewLayout) return
+  try { localStorage.setItem(monitorModeKey.value, String(value)) } catch { /* This preference remains available for the current window. */ }
+  setMonitorOnlyClient(value)
+}, { immediate: true })
 const controlLock = computed(() => {
   if (monitorMode.value) return tr('consoleUx.monitorOnlyLock')
   if (station.value && !station.value.allowControl) return tr('consoleUx.stationLock', [station.value.name])

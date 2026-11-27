@@ -43,6 +43,13 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/oee/downtimes/4")]
     [InlineData("/api/oee/downtimes/4/confirm")]
     [InlineData("/api/oee/corrections")]
+    [InlineData("/api/quality/inspections")]
+    [InlineData("/api/quality/inspections/9")]
+    [InlineData("/api/quality/inspections/9/delete")]
+    [InlineData("/api/work-orders")]
+    [InlineData("/api/work-orders/4")]
+    [InlineData("/api/work-orders/4/status")]
+    [InlineData("/api/work-orders/4/parts")]
     public void ControlPath_Includes_Field_Changing_Routes(string path)
     {
         Assert.Matches(ClientControlPolicy.ControlPath(), path);
@@ -65,6 +72,8 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/alarms/9")]
     [InlineData("/api/oee/downtimes/import-alarms")]
     [InlineData("/api/oee/analytics")]
+    [InlineData("/api/quality/defect-codes")]
+    [InlineData("/api/quality/inspections/templates")]
     public void ControlPath_Ignores_Configuration_Or_Read_Routes(string path)
     {
         Assert.DoesNotMatch(ClientControlPolicy.ControlPath(), path);
@@ -109,6 +118,13 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/OeeEndpoints.cs", "/api/oee/downtimes/1"),
             ("Endpoints/OeeEndpoints.cs", "/api/oee/downtimes/1/confirm"),
             ("Endpoints/OeeEndpoints.cs", "/api/oee/corrections"),
+            ("Endpoints/QualityEndpoints.cs", "/api/quality/inspections"),
+            ("Endpoints/QualityEndpoints.cs", "/api/quality/inspections/1"),
+            ("Endpoints/QualityEndpoints.cs", "/api/quality/inspections/1/delete"),
+            ("Endpoints/AssetEndpoints.cs", "/api/work-orders"),
+            ("Endpoints/AssetEndpoints.cs", "/api/work-orders/1"),
+            ("Endpoints/AssetEndpoints.cs", "/api/work-orders/1/status"),
+            ("Endpoints/AssetEndpoints.cs", "/api/work-orders/1/parts"),
         };
         var missing = new List<string>();
         foreach (var (file, sample) in required)
@@ -149,12 +165,31 @@ public sealed class ClientControlPolicyTests
     [InlineData("POST", "/api/oee/corrections", true)]
     [InlineData("GET", "/api/oee/downtimes", false)]
     [InlineData("POST", "/api/oee/downtimes/import-alarms", false)]
+    [InlineData("POST", "/api/quality/inspections", true)]
+    [InlineData("PUT", "/api/quality/inspections/9", true)]
+    [InlineData("DELETE", "/api/quality/inspections/9", true)]
+    [InlineData("POST", "/api/quality/inspections/9/delete", true)]
+    [InlineData("GET", "/api/quality/inspections", false)]
+    [InlineData("POST", "/api/work-orders", true)]
+    [InlineData("PUT", "/api/work-orders/4", true)]
+    [InlineData("POST", "/api/work-orders/4/status", true)]
+    [InlineData("POST", "/api/work-orders/4/parts", true)]
+    [InlineData("GET", "/api/work-orders", false)]
     public void IsControlRequest_IncludesDeleteFaultAndCalcReset(string method, string path, bool expected)
     {
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
         http.Request.Method = method;
         http.Request.Path = path;
         Assert.Equal(expected, ClientControlPolicy.IsControlRequest(http));
+    }
+
+    [Fact]
+    public void IsMonitorOnly_ReadsHeader()
+    {
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        Assert.False(ClientControlPolicy.IsMonitorOnly(http));
+        http.Request.Headers[ClientControlPolicy.MonitorOnlyHeader] = "1";
+        Assert.True(ClientControlPolicy.IsMonitorOnly(http));
     }
 
     private static string FindRoot([System.Runtime.CompilerServices.CallerFilePath] string source = "")

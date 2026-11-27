@@ -49,6 +49,7 @@ public static class RuntimeCleanupHooks
         RuntimeCleanupCatalog.Register("DeviceControlStateOnDelete", (db, ids, ct) =>
             db.DeviceControlStates.Where(x => ids.Contains(x.DeviceId)).ExecuteDeleteAsync(ct));
 
+        // 成功释放后的残留行清理；删除前的失电优先释放由 MomentaryControlService.ReleaseBeforeDeleteAsync 完成。
         RuntimeCleanupCatalog.Register("MomentaryLeaseOnDelete", (db, ids, ct) =>
             db.MomentaryLeases.Where(x => ids.Contains(x.TagId)).ExecuteDeleteAsync(ct));
 

@@ -14,7 +14,7 @@ using Scada.Data;
 
 namespace Scada.Engine.Control;
 
-public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe, Annunciator, External }
+public enum ControlOrigin { Operator, Screen, Sequence, Script, Recipe, Annunciator, External, Traceability }
 
 public sealed record ControlActor(int? UserId, string UserName);
 
@@ -23,7 +23,7 @@ public sealed record ControlActor(int? UserId, string UserName);
 // Text 非空表示字符串测点写入，此时 Value 不参与判断。
 public sealed record ControlSubmission(int TagId, double Value, ControlActor Actor, ControlOrigin Origin, string Source,
     bool Confirmed = false, Guid? RequestId = null, bool PreApproved = false, string? ApprovedBy = null, string? Text = null,
-    long? ConfirmationGrantTs = null);
+    long? ConfirmationGrantTs = null, bool Service = false);
 
 public sealed record ControlSubmissionResult(bool Success, string Message, double? ReadBack = null, GatewayCommandOutcome? Outcome = null, Guid? CommandId = null,
     bool Pending = false, Guid? ApprovalId = null, IReadOnlyList<string>? Refusals = null, string? ReadBackText = null)
@@ -38,7 +38,7 @@ public sealed record ControlCheck(int TagId, string TagName, double? Current, IR
     TagQuality? CurrentQuality = null, string? QualityReason = null);
 
 // 现场控制闭环：检查（就地/远程、挂牌、限幅、变化率、许可互锁）→ 确认 → 双人复核 → 下发及同点回读 → 独立反馈等待 → 审计。
-// 操作员接口、运行画面、顺控和计算脚本的写入都走这里。
+// 操作员接口、运行画面、顺控、计算脚本和追溯自动应答的写入都走这里。
 public sealed class ControlCommandService
 {
     private readonly IConfigSnapshot _config;
@@ -287,7 +287,7 @@ public sealed class ControlCommandService
 
     public static bool IsLocalSimulationWrite(ControlOrigin origin) =>
         origin is ControlOrigin.Operator or ControlOrigin.Screen or ControlOrigin.Sequence
-            or ControlOrigin.Recipe or ControlOrigin.Script or ControlOrigin.Annunciator;
+            or ControlOrigin.Recipe or ControlOrigin.Script or ControlOrigin.Annunciator or ControlOrigin.Traceability;
 
     public static string? SimulationWriteRefusal(Device? device, ControlOrigin origin, bool sourceSimulated = false)
     {
@@ -362,7 +362,7 @@ public sealed class ControlCommandService
         if (!_config.TryGetDevice(deviceId, out var device)) return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
 
         var oldText = _cache.Get(tag.Id)?.Text;
-        var result = ControlSubmissionResult.From(await _collector.WriteTextIdentifiedAsync(device.Id, tag, s.Text!, new(s.RequestId, s.Actor.UserId, s.Actor.UserName), ct));
+        var result = ControlSubmissionResult.From(await _collector.WriteTextIdentifiedAsync(device.Id, tag, s.Text!, new(s.RequestId, s.Actor.UserId, s.Actor.UserName, Service: s.Service), ct));
         if (result.Success && !string.IsNullOrWhiteSpace(check.Feedback))
         {
             try
@@ -435,7 +435,7 @@ public sealed class ControlCommandService
 
         var device = _config.TryGetDevice(tag.DeviceId!.Value, out var d) ? d : throw new InvalidOperationException();
         var oldValue = _cache.Get(tag.Id)?.Value;
-        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, s.Value, new(s.RequestId, s.Actor.UserId, s.Actor.UserName), ct));
+        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, s.Value, new(s.RequestId, s.Actor.UserId, s.Actor.UserName, Service: s.Service), ct));
         if (result.Success && !string.IsNullOrWhiteSpace(check.Feedback))
         {
             try

@@ -12,6 +12,7 @@ using Scada.Core.Simulation;
 using Scada.Data;
 using Scada.Data.Infrastructure;
 using Scada.Data.RuntimeCleanup;
+using Scada.Engine.Control;
 
 namespace Scada.Server.Services;
 
@@ -32,9 +33,11 @@ public sealed class DeviceCommandService(
     ISimulationRuntime simulations,
     TagUsageService? usage = null,
     RuntimeCleanupRunner? cleanup = null,
-    IConfiguredSerialProfiles? serialProfiles = null)
+    IConfiguredSerialProfiles? serialProfiles = null,
+    MomentaryControlService? momentary = null)
 {
     public const string DuplicateNameMessage = "设备名称已存在";
+    public const string ActiveMomentaryLeaseMessage = "点动输出尚未释放，请核对现场后再删除";
 
     public async Task<DeviceCommandResult> CreateAsync(
         ConfigDbContext db, Device device, CancellationToken cancellationToken)
@@ -148,6 +151,13 @@ public sealed class DeviceCommandService(
                 return DeviceCommandResult.Failed(DeviceCommandError.Referenced,
                     $"设备测点仍被 {scan.References.Count} 处配置引用：{summary}。请先使用“替换测点”或修改这些配置");
             }
+        }
+
+        if (momentary is not null && tags.Count > 0)
+        {
+            var release = await momentary.ReleaseBeforeDeleteAsync(tags, cancellationToken);
+            if (!release.Success)
+                return DeviceCommandResult.Failed(DeviceCommandError.ActiveMomentaryLease, release.Error ?? ActiveMomentaryLeaseMessage);
         }
 
         db.Devices.Remove(device);
@@ -318,7 +328,8 @@ public enum DeviceCommandError
     Validation,
     DuplicateName,
     Referenced,
-    Conflict
+    Conflict,
+    ActiveMomentaryLease
 }
 
 public sealed record DeviceCommandResult(
@@ -340,6 +351,7 @@ public sealed record DeviceCommandResult(
         DeviceCommandError.DuplicateName => "device.name.duplicate",
         DeviceCommandError.Referenced => "device.referenced",
         DeviceCommandError.Conflict => "device.conflict",
+        DeviceCommandError.ActiveMomentaryLease => "device.momentary.unreleased",
         _ => "device.request"
     };
 }

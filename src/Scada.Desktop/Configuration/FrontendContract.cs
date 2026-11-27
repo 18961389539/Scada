@@ -11,6 +11,7 @@ internal static class FrontendContract
     public const string ExpiresKey = "scada_token_expires";
     public const string WorkstationKey = "scada_workstation";
     public const string WorkstationIdKey = "scada_workstation_id";
+    public const string MonitorOnlyKey = "scada_monitor_only";
     public const string LocaleKey = "scada_locale";
     public const string DesktopBootKey = "__scada_desktop_boot";
 }

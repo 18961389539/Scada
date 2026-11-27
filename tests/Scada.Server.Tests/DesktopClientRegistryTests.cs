@@ -158,6 +158,25 @@ public sealed class DesktopClientRegistryTests
         Assert.Equal("version", blocked.BlockedReason);
     }
 
+    [Fact]
+    public void ListsCurrentlyOfflineClientsAndClearsAfterRecovery()
+    {
+        var clock = new MutableTimeProvider();
+        var registry = Registry(clock);
+        var clientId = Guid.NewGuid().ToString("D");
+        registry.Heartbeat(Heartbeat(clientId, "PC-A"), 1, "kiosk", "127.0.0.1", "A", Options(90));
+        Assert.Empty(registry.ListCurrentlyOffline(Options(90)));
+
+        clock.Now = clock.Now.AddSeconds(91);
+        registry.Sweep(Options(90));
+        var offline = Assert.Single(registry.ListCurrentlyOffline(Options(90)));
+        Assert.Equal(clientId, offline.ClientId);
+        Assert.False(offline.Online);
+
+        registry.Heartbeat(Heartbeat(clientId, "PC-A"), 1, "kiosk", "127.0.0.1", "A", Options(90));
+        Assert.Empty(registry.ListCurrentlyOffline(Options(90)));
+    }
+
     private static DesktopClientRegistry Registry(TimeProvider clock) =>
         new(NullLogger<DesktopClientRegistry>.Instance, clock);
 

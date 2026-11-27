@@ -106,6 +106,7 @@ internal sealed class SettingsForm : Form
         _kindScreen.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindLayout.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindWorkstation.CheckedChanged += (_, _) => UpdateTargetControls();
+        _monitorOnly.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindWorkspace.CheckedChanged += (_, _) => UpdateTargetControls();
         _serverUrl.TextChanged += (_, _) => MarkConnectionDirty();
         _userName.TextChanged += (_, _) => MarkConnectionDirty();
@@ -398,7 +399,7 @@ internal sealed class SettingsForm : Form
         _screenCombo.Enabled = !locked && kind == "screen";
         _monitorOnly.Enabled = !locked && kind == "screen";
         _layoutCombo.Enabled = !locked && kind == "layout";
-        _workstationCombo.Enabled = !locked && kind == "workstation";
+        _workstationCombo.Enabled = !locked && (kind == "workstation" || kind == "screen" && _monitorOnly.Checked);
     }
 
     private bool IsLocked(string field) =>
@@ -642,10 +643,20 @@ internal sealed class SettingsForm : Form
             var connectionChanged = !string.Equals(url, _originalServerUrl, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(userName, _originalUserName ?? string.Empty, StringComparison.Ordinal)
                 || _password.Text.Length > 0;
+            if (kind == "screen" && _monitorOnly.Checked && station is not null)
+            {
+                var bound = _workstations.FirstOrDefault(row => row.Id == station.Id);
+                if (bound is { AllowControl: true })
+                {
+                    SetStatus("监视模式只能绑定只允许监视的工作站，请改选或先在服务器上将此工作站设为只监视。", true);
+                    return;
+                }
+            }
+
             var targetChanged = kind != _originalKind
                 || kind == "screen" && screenId != _originalScreenId
                 || kind == "layout" && layoutId != _originalLayoutId
-                || kind == "workstation" && station?.Id != _originalWorkstationId;
+                || (kind == "workstation" || kind == "screen" && _monitorOnly.Checked) && station?.Id != _originalWorkstationId;
             if ((connectionChanged || targetChanged) && !_authenticated)
             {
                 SetStatus("连接信息或显示目标已修改，请先登录并加载列表。", true);
@@ -686,8 +697,8 @@ internal sealed class SettingsForm : Form
                     Kind = kind,
                     ScreenId = kind == "screen" ? screenId : null,
                     LayoutId = kind == "layout" ? layoutId : null,
-                    WorkstationId = kind == "workstation" ? station!.Id : null,
-                    WorkstationName = kind == "workstation" ? station!.Name : null,
+                    WorkstationId = kind == "workstation" || kind == "screen" && _monitorOnly.Checked ? station?.Id : null,
+                    WorkstationName = kind == "workstation" || kind == "screen" && _monitorOnly.Checked ? station?.Name : null,
                     TargetName = kind == "workspace" ? "多页面工作台" : null,
                     MonitorOnly = kind == "screen" && _monitorOnly.Checked
                 },

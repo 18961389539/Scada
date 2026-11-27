@@ -265,6 +265,22 @@ public sealed class DesktopClientRegistry(ILogger<DesktopClientRegistry> logger,
         }
     }
 
+    /// <summary>当前已登记且心跳超时的桌面/操作台，供健康告警与交班页使用。</summary>
+    public IReadOnlyList<DesktopClientView> ListCurrentlyOffline(DesktopClientOptions options)
+    {
+        var now = NowMs();
+        var views = new List<DesktopClientView>();
+        foreach (var entry in _clients.Values)
+        {
+            lock (entry)
+            {
+                if (IsOnline(entry, now, options.OnlineThresholdSeconds)) continue;
+                views.Add(BuildView(entry, now, options));
+            }
+        }
+        return views.OrderBy(view => view.LastSeenTs).ToArray();
+    }
+
     /// <summary>调用方必须已持有 <paramref name="entry"/> 的锁。返回当前是否在线。</summary>
     private bool TrackOffline(Entry entry, long now, DesktopClientOptions options)
     {
@@ -279,6 +295,7 @@ public sealed class DesktopClientRegistry(ILogger<DesktopClientRegistry> logger,
         else if (online && entry.OfflineLogged)
         {
             entry.OfflineLogged = false;
+            logger.LogInformation("桌面客户端 {ClientId} {Machine} 已恢复在线", entry.ClientId, entry.MachineName);
         }
         return online;
     }

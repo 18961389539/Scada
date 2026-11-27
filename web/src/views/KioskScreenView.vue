@@ -44,6 +44,7 @@ import RuntimeBanners from '../components/RuntimeBanners.vue'
 import { useAlarmSession } from '../composables/useAlarmSession'
 import { applyKioskAlarmEvent, emptyKioskAlarmPause, type KioskAlarmPauseState } from '../composables/kioskAlarmPause'
 import { alarmApi } from '../api'
+import { setMonitorOnlyClient } from '../api/http'
 import { onHubEvent, onHubReconnected } from '../realtime/hub'
 import { useServiceStatus } from '../composables/useServiceStatus'
 import { alarmMessage } from '../utils'
@@ -65,6 +66,8 @@ const playlistIds = computed(() => {
 const id = computed(() => Number.isFinite(routeId.value) ? routeId.value : playlistIds.value[0] ?? Number.NaN)
 const invalidId = computed(() => !Number.isFinite(id.value))
 const monitorOnly = computed(() => route.query.monitorOnly === '1')
+watch(monitorOnly, value => { setMonitorOnlyClient(value) }, { immediate: true })
+onBeforeUnmount(() => { setMonitorOnlyClient(false) })
 const intervalSec = computed(() => {
   const value = Number(route.query.interval)
   return Number.isFinite(value) ? Math.max(2, Math.min(600, Math.round(value))) : 20

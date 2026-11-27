@@ -50,15 +50,30 @@ public sealed class InjectionScriptTests
     [Fact]
     public void ClearsStaleWorkstationBindingForOtherTargets()
     {
-        var script = InjectionScript.Build(Settings("screen", screenId: 1), Session(), "boot-1");
+        var script = InjectionScript.Build(Settings("screen", screenId: 1, monitorOnly: false), Session(), "boot-1");
         Assert.Contains("localStorage.removeItem(" + JsonSerializer.Serialize("scada_workstation_id") + ")", script);
         Assert.Contains("localStorage.removeItem(" + JsonSerializer.Serialize("scada_workstation") + ")", script);
+        Assert.Contains("localStorage.removeItem(" + JsonSerializer.Serialize("scada_monitor_only") + ")", script);
     }
 
-    private static DesktopSettings Settings(string kind, int? screenId = null, int? workstationId = null) => new()
+    [Fact]
+    public void MonitorOnlyScreenWritesFlagAndOptionalWorkstation()
+    {
+        var unbound = InjectionScript.Build(Settings("screen", screenId: 1, monitorOnly: true), Session(), "boot-1");
+        Assert.Contains(JsonSerializer.Serialize("scada_monitor_only"), unbound);
+        Assert.Contains(JsonSerializer.Serialize("1"), unbound);
+        Assert.Contains("localStorage.removeItem(" + JsonSerializer.Serialize("scada_workstation_id") + ")", unbound);
+
+        var bound = InjectionScript.Build(Settings("screen", screenId: 1, workstationId: 9, monitorOnly: true), Session(), "boot-1");
+        Assert.Contains(JsonSerializer.Serialize("scada_workstation_id"), bound);
+        Assert.Contains(JsonSerializer.Serialize("9"), bound);
+        Assert.Contains(JsonSerializer.Serialize("scada_monitor_only"), bound);
+    }
+
+    private static DesktopSettings Settings(string kind, int? screenId = null, int? workstationId = null, bool monitorOnly = false) => new()
     {
         ServerUrl = "http://localhost:5080",
-        Target = new DesktopTarget { Kind = kind, ScreenId = screenId, WorkstationId = workstationId }
+        Target = new DesktopTarget { Kind = kind, ScreenId = screenId, WorkstationId = workstationId, MonitorOnly = monitorOnly }
     };
 
     private static SessionData Session() =>

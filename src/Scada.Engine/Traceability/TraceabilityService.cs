@@ -9,6 +9,7 @@ using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
+using Scada.Engine.Control;
 
 namespace Scada.Engine.Traceability;
 
@@ -16,7 +17,7 @@ public sealed record TraceabilityStatus(int JobId, string State, string? Pending
 
 public sealed class TraceabilityService(
     IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IConfigSnapshot config, IRealtimeCache cache,
-    ICollectorControl collector, INodeRole role, ILogger<TraceabilityService> logger) : BackgroundService
+    ICollectorControl collector, ControlCommandService commands, INodeRole role, ILogger<TraceabilityService> logger) : BackgroundService
 {
     public static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     // 重码检测窗口默认：同一任务近 10 天内已出现过的 SN。任务可另行配置天数。
@@ -303,8 +304,9 @@ public sealed class TraceabilityService(
         try { await runtime.SaveChangesAsync(ct); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var failure = await collector.WriteIdentifiedAsync(deviceId, trigger, 3, TraceabilityCommand(attempt.Id, 3), ct);
-            _statuses[job.Id] = new(job.Id, failure.Success ? "failed" : "awaitingReply", null, null, 3, ex.Message);
+            var failure = await WriteReplyAsync(trigger, 3, attempt.Id, ct);
+            _statuses[job.Id] = new(job.Id, failure.Success ? "failed" : "awaitingReply", null, null, 3,
+                failure.Success ? ex.Message : $"{ex.Message}；应答被拒绝：{failure.Message}");
             logger.LogError(ex, "Cannot start traceability capture for job {JobId} because its database is unavailable", job.Id);
             return;
         }
@@ -370,7 +372,7 @@ public sealed class TraceabilityService(
             throw new IOException($"触发点 #{trigger.Id} 在确认前变为 {feedback.Value}（期望 {attempt.Reply} 或 1），待确认结果需人工核对。");
         if (feedback.Value == 1)
         {
-            var result = await collector.WriteIdentifiedAsync(trigger.DeviceId.Value, trigger, attempt.Reply, TraceabilityCommand(attempt.Id, attempt.Reply), ct);
+            var result = await WriteReplyAsync(trigger, attempt.Reply, attempt.Id, ct);
             if (!result.Success) throw new IOException($"向触发点 #{trigger.Id} 写入应答 {attempt.Reply} 失败：{result.Message}");
         }
         attempt.Acknowledged = true; attempt.ClosedTs = ScadaTime.NowMs();
@@ -381,10 +383,17 @@ public sealed class TraceabilityService(
     }
 
     /// <summary>同一尝试、同一应答码始终得到同一命令号，重试不会再写一次。</summary>
-    private static CollectorCommandContext TraceabilityCommand(Guid attemptId, int reply)
+    internal static Guid TraceabilityCommandId(Guid attemptId, int reply)
     {
         var bytes = attemptId.ToByteArray();
         bytes[^1] ^= (byte)reply;
-        return new(new Guid(bytes), null, "traceability", Service: true);
+        return new Guid(bytes);
     }
+
+    // 追溯应答走控制闭环：挂牌或就地时拒绝并留下审计，命令号保持幂等，服务来源写入现场。
+    private Task<ControlSubmissionResult> WriteReplyAsync(Tag trigger, int reply, Guid attemptId, CancellationToken ct) =>
+        commands.SubmitAsync(new ControlSubmission(
+            trigger.Id, reply, new ControlActor(null, "traceability"), ControlOrigin.Traceability,
+            $"追溯应答 {reply}", Confirmed: true, RequestId: TraceabilityCommandId(attemptId, reply), Service: true), ct);
+
 }

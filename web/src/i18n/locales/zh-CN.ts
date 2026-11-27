@@ -1128,6 +1128,10 @@ export default {
     noExternalWrites: '近期没有成功的外部或 MCP 写入',
     viewAudit: '打开审计日志',
     byUser: '操作者 {0}',
+    offlineDesktops: '桌面/操作台离线',
+    noOfflineDesktops: '当前没有已登记且离线的桌面或操作台',
+    offlineSince: '最后心跳',
+    offlineDesktopTarget: '目标',
   },
 
   runtimeBanners: {

@@ -11,6 +11,7 @@ using Scada.Data;
 using Scada.Data.Infrastructure;
 using Scada.Engine.Calculations;
 using Scada.Engine.Reports;
+using Scada.Engine.Control;
 using Scada.Server.Endpoints;
 using Scada.Server.Services;
 
@@ -32,8 +33,9 @@ public sealed class ProjectApplier : ProjectSection
     public ProjectApplier(ConfigDbContext db, CalcJobConfiguration jobs, AccessContext? access, int? userId, string userName,
         IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Core.Options.ScadaSettings? settings = null,
         Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null,
-        IConfiguredSerialProfiles? serialProfiles = null)
-        : base(new ProjectApplyContext(db, jobs, access, userId, userName, runtimeFactory, settings, drivers, serialProfiles))
+        IConfiguredSerialProfiles? serialProfiles = null,
+        MomentaryControlService? momentary = null)
+        : base(new ProjectApplyContext(db, jobs, access, userId, userName, runtimeFactory, settings, drivers, serialProfiles, momentary))
     {
     }
 

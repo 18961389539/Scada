@@ -11,6 +11,7 @@ using Scada.Data;
 using Scada.Data.Infrastructure;
 using Scada.Engine.Calculations;
 using Scada.Engine.Reports;
+using Scada.Engine.Control;
 using Scada.Server.Endpoints;
 using Scada.Server.Services;
 
@@ -31,7 +32,8 @@ public sealed class ProjectApplyContext(
     IDbContextFactory<RuntimeDbContext> runtimeFactory,
     Scada.Core.Options.ScadaSettings? settings = null,
     Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null,
-    IConfiguredSerialProfiles? serialProfiles = null)
+    IConfiguredSerialProfiles? serialProfiles = null,
+    MomentaryControlService? momentary = null)
 {
     public static readonly JsonSerializerOptions ScreenJson = new(JsonSerializerDefaults.Web);
 
@@ -44,6 +46,7 @@ public sealed class ProjectApplyContext(
     public Scada.Core.Options.ScadaSettings? Settings { get; } = settings;
     public Scada.Core.Interfaces.IProtocolDriverAvailability? Drivers { get; } = drivers;
     public IConfiguredSerialProfiles? SerialProfiles { get; } = serialProfiles;
+    public MomentaryControlService? Momentary { get; } = momentary;
 
     public readonly long Now = ScadaTime.NowMs();
 

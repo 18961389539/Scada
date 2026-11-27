@@ -21,6 +21,24 @@ function notifySession(update: SessionUpdate): void {
 export const TOKEN_KEY = 'scada_token'
 export const USER_KEY = 'scada_user'
 export const EXPIRES_KEY = 'scada_token_expires'
+export const MONITOR_ONLY_KEY = 'scada_monitor_only'
+
+export function setMonitorOnlyClient(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(MONITOR_ONLY_KEY, '1')
+    else localStorage.removeItem(MONITOR_ONLY_KEY)
+  } catch { /* 私密模式或存储不可用时仍可走 URL 参数 */ }
+}
+
+export function isMonitorOnlyClient(): boolean {
+  try {
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('monitorOnly') === '1') return true
+    return localStorage.getItem(MONITOR_ONLY_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 
 export const http = axios.create({
   baseURL: '/api',
@@ -94,6 +112,7 @@ http.interceptors.request.use(async (config) => {
   config.headers['X-Scada-Locale'] = locale
   // 移动端按设备类型声明，不按窗口宽度：与 isMobileUserAgent / 服务端判定一致。
   if (isMobileUserAgent()) config.headers['X-Scada-Client'] = 'mobile'
+  if (isMonitorOnlyClient()) config.headers['X-Scada-Monitor-Only'] = '1'
   return config
 })
 

@@ -27,6 +27,7 @@ public class ControlSimulationWriteTests
         Assert.Null(ControlCommandService.SimulationWriteRefusal(device, ControlOrigin.Recipe));
         Assert.Null(ControlCommandService.SimulationWriteRefusal(device, ControlOrigin.Script));
         Assert.Null(ControlCommandService.SimulationWriteRefusal(device, ControlOrigin.Annunciator));
+        Assert.Null(ControlCommandService.SimulationWriteRefusal(device, ControlOrigin.Traceability));
     }
 
     [Fact]

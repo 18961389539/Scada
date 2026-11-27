@@ -101,6 +101,19 @@
         </ul>
       </section>
       <section>
+        <h2>{{ $t('dutyHandover.offlineDesktops') }}</h2>
+        <p v-if="!offlineDesktops.length" data-test="handover-offline-desktops-empty">{{ $t('dutyHandover.noOfflineDesktops') }}</p>
+        <ul v-else data-test="handover-offline-desktops">
+          <li v-for="client in offlineDesktops" :key="client.clientId">
+            <router-link data-test="handover-offline-desktop-link" to="/ops">
+              {{ client.machineName }}
+              <span v-if="client.targetName || client.targetKind"> · {{ $t('dutyHandover.offlineDesktopTarget') }} {{ client.targetName || client.targetKind }}</span>
+              · {{ $t('dutyHandover.offlineSince') }} {{ formatTime(client.lastSeenTs) }}
+            </router-link>
+          </li>
+        </ul>
+      </section>
+      <section>
         <h2>{{ $t('dutyHandover.externalWrites') }}</h2>
         <p v-if="!externalWrites.length" data-test="handover-external-writes-empty">{{ $t('dutyHandover.noExternalWrites') }}</p>
         <ul v-else data-test="handover-external-writes">
@@ -129,6 +142,7 @@
 import { computed, onMounted, ref } from 'vue'
 import RuntimeBanners from '../components/RuntimeBanners.vue'
 import { alarmApi, ruleApi, workOrderApi } from '../api'
+import { opsApi, type DesktopClient } from '../api/ops'
 import { controlApi, type ControlLockout, type ControlRun, type DeviceControlState, type ExternalWrite } from '../api/control'
 import { recipeApi, type RecipeDownload } from '../api/recipes'
 import { pendingControlRequests, type ControlRequestRow } from '../composables/pendingApprovals'
@@ -158,6 +172,7 @@ const pending = ref<ControlRequestRow[]>([])
 const runningSequences = ref<ControlRun[]>([])
 const openWorkOrders = ref<MaintenanceWorkOrder[]>([])
 const externalWrites = ref<ExternalWrite[]>([])
+const offlineDesktops = ref<DesktopClient[]>([])
 const runningRecipes = ref<RecipeDownload[]>([])
 const lockouts = ref<ControlLockout[]>([])
 const localDevices = ref<DeviceControlState[]>([])
@@ -240,7 +255,7 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const [events, summary, shelves, oosPage, requests, runs, downloads, lockoutPage, modes, , orderRows, writeRows] = await Promise.all([
+    const [events, summary, shelves, oosPage, requests, runs, downloads, lockoutPage, modes, , orderRows, writeRows, desktopList] = await Promise.all([
       alarmApi.query({ live: true, unackedOnly: true, includeShelved: true, priorityFirst: true, limit: 2000 }),
       alarmApi.summary().catch(() => null),
       ruleApi.shelves().catch(() => []),
@@ -252,7 +267,8 @@ async function load(): Promise<void> {
       controlApi.modes().catch(() => [] as DeviceControlState[]),
       refreshHealth(),
       workOrderApi.list({ take: 100 }).catch(() => [] as MaintenanceWorkOrder[]),
-      controlApi.externalWrites(20).catch(() => [] as ExternalWrite[])
+      controlApi.externalWrites(20).catch(() => [] as ExternalWrite[]),
+      opsApi.desktopClients().catch(() => null)
     ])
     const counts: Record<string, number> = { Critical: 0, Warning: 0, Info: 0 }
     let simulated = 0
@@ -284,6 +300,8 @@ async function load(): Promise<void> {
     openWorkOrders.value = orderList.filter(order => order.status !== 'Completed' && order.status !== 'Cancelled')
       .sort((a, b) => Number(isOverdueOrder(b)) - Number(isOverdueOrder(a)) || (a.plannedEndTs ?? 0) - (b.plannedEndTs ?? 0))
     externalWrites.value = Array.isArray(writeRows) ? writeRows : []
+    offlineDesktops.value = (desktopList?.clients ?? []).filter(client => !client.online)
+      .sort((a, b) => a.lastSeenTs - b.lastSeenTs)
 
     interruptedSequences.value = runItems.filter(isInterruptedSequence)
     runningRecipes.value = downloadItems.filter(download => download.status === 'Pending' || download.status === 'Running')

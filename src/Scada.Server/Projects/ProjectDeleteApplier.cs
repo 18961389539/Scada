@@ -156,10 +156,28 @@ internal sealed class ProjectDeleteApplier(ProjectApplyContext context) : Projec
 
     internal async Task DeleteTagsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
     {
+        var pending = new List<(PlanEntry Entry, Tag Tag)>();
         foreach (var entry in Deletes(work, "tags").OrderBy(x => x.FinalKey.StartsWith('@') ? 0 : 1))
         {
             var tag = await FindTagAsync(entry.FinalKey, ct); if (tag is null) continue;
             Need(Permission.Configure, entry, await AreasOfAsync(tag, ct));
+            pending.Add((entry, tag));
+        }
+
+        if (Ctx.Momentary is { } momentary && pending.Count > 0)
+        {
+            var release = await momentary.ReleaseBeforeDeleteAsync(pending.Select(item => item.Tag.Id), ct);
+            if (!release.Success)
+            {
+                var failed = release.FailedTagIds.ToHashSet();
+                foreach (var (entry, tag) in pending.Where(item => failed.Contains(item.Tag.Id)))
+                    Error(entry, release.Error ?? "点动输出尚未释放，请核对现场后再删除");
+                pending = pending.Where(item => !failed.Contains(item.Tag.Id)).ToList();
+            }
+        }
+
+        foreach (var (entry, tag) in pending)
+        {
             PendingAlarmCloses.Add((tag.Id, "工程回滚删除测点"));
             await Db.TagDependencies.Where(x => x.TagId == tag.Id).ExecuteDeleteAsync(ct);
             Db.Tags.Remove(tag);

@@ -35,7 +35,8 @@ internal static class InjectionScript
             }
         }
 
-        if (settings.Target.Kind == "workstation" && settings.Target.WorkstationId is int workstationId)
+        if (settings.Target.WorkstationId is int workstationId
+            && (settings.Target.Kind == "workstation" || settings.Target.MonitorOnly))
         {
             builder.Append("localStorage.setItem(").Append(Js(FrontendContract.WorkstationIdKey)).Append(',')
                 .Append(Js(workstationId.ToString(CultureInfo.InvariantCulture))).Append(");");
@@ -53,6 +54,15 @@ internal static class InjectionScript
         {
             builder.Append("localStorage.removeItem(").Append(Js(FrontendContract.WorkstationIdKey)).Append(");");
             builder.Append("localStorage.removeItem(").Append(Js(FrontendContract.WorkstationKey)).Append(");");
+        }
+
+        if (settings.Target.MonitorOnly)
+        {
+            builder.Append("localStorage.setItem(").Append(Js(FrontendContract.MonitorOnlyKey)).Append(',').Append(Js("1")).Append(");");
+        }
+        else
+        {
+            builder.Append("localStorage.removeItem(").Append(Js(FrontendContract.MonitorOnlyKey)).Append(");");
         }
 
         builder.Append("sessionStorage.setItem(").Append(Js(FrontendContract.DesktopBootKey)).Append(',')

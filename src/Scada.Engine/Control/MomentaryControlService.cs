@@ -10,6 +10,11 @@ namespace Scada.Engine.Control;
 
 public sealed record MomentaryResult(ControlSubmissionResult Result, Guid? LeaseId = null);
 
+public sealed record MomentaryReleaseBeforeDeleteResult(bool Success, string? Error, IReadOnlyList<int> FailedTagIds)
+{
+    public static MomentaryReleaseBeforeDeleteResult Ok { get; } = new(true, null, []);
+}
+
 // 点动与瞬时按钮的保持租约：按下成功后由看门狗按期释放，瞬时按钮在脉冲宽度后自动释放。
 // 释放跳过联锁以保证失电优先；同一测点同时只允许一个点动租约。
 // 租约写入运行库，进程崩溃或掉电后启动先补写释放值，避免现场输出停在“按下”状态。
@@ -120,6 +125,45 @@ public sealed class MomentaryControlService : BackgroundService
         lock (lease) { lease.Starting = false; lease.ExpiresTs = ScadaTime.NowMs() + pulseMs; }
         await MarkActiveAsync(lease);
         return new(result with { Message = $"{result.Message}，{pulseMs} 毫秒后自动释放" }, lease.Id);
+    }
+
+    // 删除测点或设备前的失电优先释放：跳过联锁，释放成功后再允许删租约行。释放失败则拒绝删除。
+    public async Task<MomentaryReleaseBeforeDeleteResult> ReleaseBeforeDeleteAsync(IEnumerable<int> tagIds, CancellationToken ct)
+    {
+        var ids = tagIds.Distinct().ToArray();
+        if (ids.Length == 0) return MomentaryReleaseBeforeDeleteResult.Ok;
+
+        List<MomentaryLease> rows;
+        await using (var db = await _runtimeFactory.CreateDbContextAsync(ct))
+            rows = await db.MomentaryLeases.AsNoTracking().Where(x => ids.Contains(x.TagId)).ToListAsync(ct);
+
+        var failed = new List<(int TagId, string Message)>();
+        var handled = new HashSet<int>();
+        foreach (var id in ids)
+        {
+            if (!_leases.TryGetValue(id, out var lease)) continue;
+            handled.Add(id);
+            lock (lease) { lease.Releasing = true; }
+            var result = await ReleaseLeaseCoreAsync(lease, "配置删除前失电优先释放", lease.Actor);
+            if (!result.Success) failed.Add((id, result.Message));
+        }
+
+        foreach (var row in rows)
+        {
+            if (handled.Contains(row.TagId) || _leases.ContainsKey(row.TagId)) continue;
+            var lease = LeaseFrom(row);
+            var result = await ExecuteReleaseAsync(lease, "配置删除前失电优先释放", ct);
+            if (result.Success)
+            {
+                _recoveryPending.RemoveAll(x => x.Id == lease.Id);
+                await DeleteLeaseRowAsync(lease.Id);
+            }
+            else failed.Add((row.TagId, result.Message));
+        }
+
+        if (failed.Count == 0) return MomentaryReleaseBeforeDeleteResult.Ok;
+        var tags = string.Join("、", failed.Select(item => $"#{item.TagId}").Distinct());
+        return new(false, $"点动输出尚未释放（测点 {tags}），请核对现场后再删除", failed.Select(item => item.TagId).Distinct().ToArray());
     }
 
     // 操作人释放：按租约编号优先定位，找不到时按测点兜底；对未按下完成的租约只登记释放请求。

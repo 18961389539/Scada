@@ -5,6 +5,7 @@ using Scada.Core.Models;
 using Scada.Core.Protocols;
 using Scada.Data;
 using Scada.Data.RuntimeCleanup;
+using Scada.Engine.Control;
 
 namespace Scada.Server.Services;
 
@@ -20,9 +21,10 @@ namespace Scada.Server.Services;
 /// 授权与返回形态不属于本服务：区域权限、HTTP 状态码、MCP 的 success=false / 异常
 /// 由各入口自己决定（两者鉴权模型不同）。
 /// </summary>
-public sealed class TagCommandService(ConfigReloader reloader, TagUsageService usage, RuntimeCleanupRunner? cleanup = null)
+public sealed class TagCommandService(ConfigReloader reloader, TagUsageService usage, RuntimeCleanupRunner? cleanup = null, MomentaryControlService? momentary = null)
 {
     public const string DuplicateNameMessage = "同一设备下测点名称已存在";
+    public const string ActiveMomentaryLeaseMessage = "点动输出尚未释放，请核对现场后再删除";
 
     public async Task<TagCommandResult> CreateAsync(
         ConfigDbContext db, Tag tag, Device device, CancellationToken cancellationToken)
@@ -99,6 +101,14 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
             return TagCommandResult.Failed(TagCommandError.Referenced,
                 [new ValidationIssue("tag.referenced.configurations", null,
                     $"测点仍被 {references.References.Count} 处配置引用：{summary}。请先使用“替换测点”或修改这些配置")]);
+        }
+
+        if (momentary is not null)
+        {
+            var release = await momentary.ReleaseBeforeDeleteAsync([tag.Id], cancellationToken);
+            if (!release.Success)
+                return TagCommandResult.Failed(TagCommandError.ActiveMomentaryLease,
+                    [new ValidationIssue("tag.momentary.unreleased", null, release.Error ?? ActiveMomentaryLeaseMessage)]);
         }
 
         db.Tags.Remove(tag);
@@ -208,7 +218,8 @@ public enum TagCommandError
     NotPhysical,
     Referenced,
     Conflict,
-    AddressOverlap
+    AddressOverlap,
+    ActiveMomentaryLease
 }
 
 public sealed record TagCommandResult(
@@ -232,6 +243,7 @@ public sealed record TagCommandResult(
         TagCommandError.Referenced => "tag.referenced",
         TagCommandError.Conflict => "tag.conflict",
         TagCommandError.AddressOverlap => AddressOverlap.IssueCode,
+        TagCommandError.ActiveMomentaryLease => "tag.momentary.unreleased",
         _ => "tag.request"
     };
 }

@@ -1128,6 +1128,10 @@ export default {
     noExternalWrites: 'No recent successful external or MCP writes',
     viewAudit: 'Open audit log',
     byUser: 'By {0}',
+    offlineDesktops: 'Offline desktop / console clients',
+    noOfflineDesktops: 'No registered desktop or console clients are offline',
+    offlineSince: 'Last heartbeat',
+    offlineDesktopTarget: 'Target',
   },
 
   runtimeBanners: {
