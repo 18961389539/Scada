@@ -1123,6 +1123,11 @@ namespace Scada.Data.Migrations.Config
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("FailoverHoldMs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(10000);
+
                     b.Property<int?>("GatewayId")
                         .HasColumnType("INTEGER");
 
@@ -1210,6 +1215,19 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER")
                         .HasDefaultValue((short)1);
 
+                    b.Property<int?>("StandbyChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("StandbyGatewayId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StandbyHost")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StandbyPort")
+                        .HasColumnType("INTEGER");
+
                     b.Property<byte>("StationNumber")
                         .HasColumnType("INTEGER");
 
@@ -1217,6 +1235,11 @@ namespace Scada.Data.Migrations.Config
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(1);
+
+                    b.Property<int>("SwitchbackHoldMs")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(30000);
 
                     b.Property<int>("TimeoutMs")
                         .HasColumnType("INTEGER");
@@ -1231,6 +1254,10 @@ namespace Scada.Data.Migrations.Config
 
                     b.HasIndex("Name")
                         .IsUnique();
+
+                    b.HasIndex("StandbyChannelId");
+
+                    b.HasIndex("StandbyGatewayId");
 
                     b.ToTable("Device", (string)null);
                 });
@@ -3268,6 +3295,11 @@ namespace Scada.Data.Migrations.Config
                     b.HasOne("Scada.Core.Entities.AcquisitionGateway", null)
                         .WithMany()
                         .HasForeignKey("GatewayId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("Scada.Core.Entities.AcquisitionGateway", null)
+                        .WithMany()
+                        .HasForeignKey("StandbyGatewayId")
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 

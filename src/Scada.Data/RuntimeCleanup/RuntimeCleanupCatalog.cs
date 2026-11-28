@@ -58,6 +58,7 @@ public static class RuntimeCleanupCatalog
         Retain<ControlRequest>("控制复核请求历史。"),
         Must<ControlLockout>("Tag", "Device", "删除测点或设备时解除仍有效的挂牌。", "ControlLockoutOnDelete"),
         Must<DeviceControlState>("Device", "删除设备时清掉控制状态。", "DeviceControlStateOnDelete"),
+        Must<DeviceAcquisitionState>("Device", "删除设备时清掉采集路径状态。", "DeviceAcquisitionStateOnDelete"),
         Must<MomentaryLease>("Tag", "清理删除测点后残留的点动租约行；删除前须先由 MomentaryControlService 失电优先释放。", "MomentaryLeaseOnDelete"),
         Must<AnnunciatorSilence>("AnnunciatorPanel", "删除光字牌时清掉消音状态。", "AnnunciatorSilenceOnDelete"),
         Must<GatewayDataStream>("AcquisitionGateway", "删除网关时清掉数据流游标。", "GatewayDelete"),

@@ -102,6 +102,28 @@ export interface Device {
   protocolOptions?: string
   simulationEnabled: boolean
   simulationOptions: string
+  standbyGatewayId?: number | null
+  standbyChannelId?: number | null
+  standbyHost?: string | null
+  standbyPort?: number | null
+  failoverHoldMs?: number
+  switchbackHoldMs?: number
+}
+
+export type AcquisitionPathKind = 'Primary' | 'Standby'
+export interface DeviceAcquisitionInfo {
+  deviceId: number
+  name: string
+  areaId: number
+  activePath: AcquisitionPathKind
+  activeGatewayId: number | null
+  activeChannelId: number | null
+  activeHost: string | null
+  activePort: number | null
+  hasStandby: boolean
+  reason?: string | null
+  changedBy?: string | null
+  changedTs: number
 }
 
 export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'gatewayId'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }

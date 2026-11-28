@@ -64,7 +64,17 @@
         </template>
         <el-table-column type="selection" width="48" :selectable="canConfigureDevice" />
         <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" show-overflow-tooltip />
-        <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom" show-overflow-tooltip>
+        <el-table-column :label="$t('devicesView.activePath')" min-width="180" data-test="device-acquisition-path">
+        <template #default="{ row }">
+          <div v-if="acquisitionByDevice[row.id]?.hasStandby || acquisitionByDevice[row.id]?.activePath === 'Standby'">
+            <el-tag size="small" :type="acquisitionByDevice[row.id]?.activePath === 'Standby' ? 'warning' : 'success'">{{ acquisitionByDevice[row.id]?.activePath === 'Standby' ? $t('devicesView.pathStandby') : $t('devicesView.pathPrimary') }}</el-tag>
+            <el-button v-if="acquisitionByDevice[row.id]?.activePath === 'Standby'" link type="primary" :loading="switchingPath === row.id" data-test="device-switch-primary" @click="switchAcquisition(row, 'Primary')">{{ $t('devicesView.switchToPrimary') }}</el-button>
+            <el-button v-else link type="warning" :loading="switchingPath === row.id" data-test="device-switch-standby" @click="switchAcquisition(row, 'Standby')">{{ $t('devicesView.switchToStandby') }}</el-button>
+          </div>
+          <span v-else class="muted">—</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="name" :label="$t('devicesView.k1be7ae')" min-width="180" sortable="custom" show-overflow-tooltip>
           <template #default="{ row }">
             <div>{{ row.name }} <el-tag v-if="row.simulationEnabled" type="warning" size="small" data-test="device-simulation-badge">{{ $t('simulation.badge') }}</el-tag><el-tag v-if="row.channelId != null" type="info" size="small" data-test="device-channel-badge">{{ channelName(row.channelId) }}</el-tag></div>
             <router-link v-if="canConfigureDevice(row)" :to="{ path: '/config/tags', query: { deviceId: String(row.id) } }" class="tiny" data-test="device-tags">{{ $t('devicesView.viewTags') }}</router-link>
@@ -231,6 +241,23 @@ watch([() => JSON.stringify(catalog.applied.value), () => catalog.page.value, so
 const assignmentDeviceId = ref<number | null>(null), assignmentVisible = ref(false), assignmentSuggested = ref<number | undefined>()
 function clearFilter(): void { const query = { ...route.query }; delete query.gatewayId; void router.replace({ query }) }
 function openAssignment(id: number, suggested?: number): void { assignmentDeviceId.value = id; assignmentSuggested.value = suggested; assignmentVisible.value = true }
+const acquisitionByDevice = ref<Record<number, import('../types').DeviceAcquisitionInfo>>({})
+const switchingPath = ref<number | null>(null)
+async function loadAcquisition(): Promise<void> {
+  try {
+    const rows = await deviceApi.acquisition()
+    acquisitionByDevice.value = Object.fromEntries(rows.map(r => [r.deviceId, r]))
+  } catch { /* 列表页仍可显示设备本身 */ }
+}
+async function switchAcquisition(device: Device, path: 'Primary' | 'Standby'): Promise<void> {
+  switchingPath.value = device.id
+  try {
+    await deviceApi.switchAcquisitionPath(device.id, path)
+    await loadAcquisition()
+  } catch (e) {
+    ElMessage.error(errorMessage(e, tr('devicesView.switchFailed')))
+  } finally { switchingPath.value = null }
+}
 const loading = ref(false)
 const loadError = ref('')
 const actionError = ref('')
@@ -445,7 +472,7 @@ async function load(): Promise<void> {
   const healthTask = loadHealth()
   const catalogTask = loadAreasAndChannels()
   if (filterHealth.value !== 'all') await healthTask
-  await Promise.all([loadDevices(), catalogTask, healthTask])
+  await Promise.all([loadDevices(), catalogTask, healthTask, loadAcquisition()])
   void scanCertificates()
 }
 usePolling(loadHealth, 15000)

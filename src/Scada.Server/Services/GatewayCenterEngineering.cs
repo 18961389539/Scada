@@ -63,7 +63,7 @@ public sealed partial class GatewayCenterService
             await using var db = await OpenAsync(ct); await using var tx = await db.Database.BeginTransactionAsync(ct);
             await using var runtime = await _runtime.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
-            if (device.GatewayId is not int gatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请刷新后重试");
+            if (_paths.Resolve(device).GatewayId is not int gatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请刷新后重试");
             if (expectedGatewayId is not null && gatewayId != expectedGatewayId) throw new GatewayRequestException(409, "设备采集位置已变化，请重新核对证书作用范围");
             if (!service && !await EngineeringPermissionAsync(db, userId, deviceId, operation, ct)) throw new GatewayRequestException(403, "没有此工程操作的权限");
             var gateway = await db.Gateways.SingleAsync(x => x.Id == gatewayId, ct);

@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
 using Scada.Core.Entities;
+using Scada.Core.Acquisition;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -49,6 +50,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     private readonly TimeProvider _clock;
     private readonly IAlarmNotifier? _alarmNotifier;
     private readonly INodeRole? _role;
+    private readonly IDeviceAcquisitionPaths _paths;
     private readonly SemaphoreSlim _mutations = new(1, 1);
     private readonly ConcurrentDictionary<int, (Guid? SessionId, long Until, bool Enabled, string? Applied)> _leases = new();
     private readonly ConcurrentDictionary<int, (int Version, string Hash)> _revisions = new();
@@ -57,9 +59,40 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IDeviceCredentials credentials, IConfigSnapshot config,
         IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, ILocalCollector local, IOptions<GatewaySettings> settings,
-        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null)
-    { _role = role; _factory = factory; _deadLetters = new GatewayDeadLetterService(factory, runtimeFactory);
-        _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier; }
+        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null, IDeviceAcquisitionPaths? paths = null)
+    { _role = role; _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance; _factory = factory; _deadLetters = new GatewayDeadLetterService(factory, runtimeFactory);
+        _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier;
+        _paths.PathChanged += OnAcquisitionPathChanged; }
+    private void OnAcquisitionPathChanged(int deviceId, AcquisitionPathKind path, string reason)
+    {
+        _local.RequestReload();
+        _ = RefreshAcquisitionAssignmentsAsync(deviceId);
+    }
+    public async Task RefreshAcquisitionAssignmentsAsync(int deviceId, CancellationToken ct = default)
+    {
+        try
+        {
+            if (!_config.TryGetDevice(deviceId, out var device)) return;
+            var ids = new HashSet<int>();
+            if (device.GatewayId is int g) ids.Add(g);
+            if (device.StandbyGatewayId is int s) ids.Add(s);
+            if (ids.Count == 0) return;
+            await _mutations.WaitAsync(ct);
+            try
+            {
+                await using var db = await _factory.CreateDbContextAsync(ct);
+                foreach (var id in ids) await BuildConfigurationAsync(db, id, ct, recordRevision: true);
+                await db.SaveChangesAsync(ct);
+            }
+            finally { _mutations.Release(); }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "刷新设备 {DeviceId} 采集路径后的网关配置失败", deviceId);
+        }
+    }
+    private List<Device> ActiveDevicesFor(IEnumerable<Device> candidates, int gatewayId) =>
+        candidates.Where(x => _paths.Resolve(x).GatewayId == gatewayId).Select(x => _paths.Apply(x)).OrderBy(x => x.Id).ToList();
     private long Now => _clock.GetUtcNow().ToUnixTimeMilliseconds();
     // 实现已移到 GatewayRules；保留这个公开入口是因为测试与外部调用方按类名引用它。
     public static string TokenHash(string token) => GatewayRules.TokenHash(token);
@@ -72,7 +105,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         await using var transaction = SqliteTx.BeginDeferred(db);
         await db.Database.UseTransactionAsync(transaction, ct);
         var gateways = await db.Gateways.AsNoTracking().OrderBy(x => x.Id).ToListAsync(ct);
-        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId != null).OrderBy(x => x.Id).ToListAsync(ct);
+        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId != null || x.StandbyGatewayId != null).OrderBy(x => x.Id).ToListAsync(ct);
         var ids = devices.Select(x => x.Id).ToArray();
         var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).OrderBy(x => x.Id).ToListAsync(ct);
         var deviceGroups = devices.ToLookup(x => x.GatewayId!.Value); var tagGroups = tags.ToLookup(x => x.DeviceId);
@@ -86,7 +119,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         var now = Now;
         var result = gateways.Select(x =>
         {
-            var assigned = deviceGroups[x.Id].ToArray(); var revision = ConfigurationMetadata(assigned, assigned.SelectMany(d => tagGroups[d.Id]).OrderBy(t => t.Id).ToArray()).Revision;
+            var assigned = ActiveDevicesFor(devices, x.Id).ToArray(); var revision = ConfigurationMetadata(assigned, assigned.SelectMany(d => tagGroups[d.Id]).OrderBy(t => t.Id).ToArray()).Revision;
             var connected = x.Enabled && x.SessionId != null && x.LeaseUntilTs > now;
             return new GatewayAdminInfo(x.Id, x.Name, x.Enabled, connected, x.LastSeenTs, x.LeaseUntilTs, x.AgentVersion, x.AppliedRevision,
                 assigned.Length, x.PendingBatches, x.PendingBytes, x.OldestPendingTs, inbox.GetValueOrDefault(x.Id)?.Count ?? 0, inbox.GetValueOrDefault(x.Id)?.Bytes ?? 0,
@@ -195,7 +228,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             await SessionAsync(db, caller, sessionId, ct); var configuration = await BuildConfigurationAsync(db, caller.Id, ct);
             if (configuration.Revision == knownRevision)
             { await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); return null; }
-            var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id).OrderBy(x => x.Id).ToListAsync(ct);
+            var devices = ActiveDevicesFor(await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id || x.StandbyGatewayId == caller.Id).ToListAsync(ct), caller.Id);
             var secrets = devices.ToDictionary(x => x.Id, x => !UsesCredentials(x.Protocol) || x.OpcPasswordProtected is null ? null : _credentials.Unprotect(x.OpcPasswordProtected));
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);
             return configuration with { Devices = configuration.Devices.Select(x => x with { OpcPassword = secrets[x.Device.Id] }).ToArray() };
@@ -215,7 +248,7 @@ public sealed partial class GatewayCenterService : BackgroundService
             await using var runtime = await _runtime.CreateDbContextAsync(ct);
             if (heartbeat.AppliedRevision is not null && !await db.GatewayConfigurations.AnyAsync(x => x.GatewayId == caller.Id && x.Revision == heartbeat.AppliedRevision, ct))
                 throw new GatewayRequestException(409, "配置版本尚未下发给此网关");
-            var owned = await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id).ToDictionaryAsync(x => x.Id, ct);
+            var owned = ActiveDevicesFor(await db.Devices.AsNoTracking().Where(x => x.GatewayId == caller.Id || x.StandbyGatewayId == caller.Id).ToListAsync(ct), caller.Id).ToDictionary(x => x.Id);
             if (heartbeat.Devices is not null && (heartbeat.Devices.Any(x => x is null || !owned.ContainsKey(x.DeviceId) || x.LastPollTs < 0 || x.LastPollTs > Now + 120000 || x.StatusTs is < 1 || x.StatusTs > Now + 120000 || !double.IsFinite(x.LastCycleMs) || x.LastCycleMs < 0 || x.ReconnectAttempts < 0 || x.CommFailures < 0 || x.Error?.Length > 1000)
                 || heartbeat.Devices.Select(x => x.DeviceId).Distinct().Count() != heartbeat.Devices.Count)) throw new GatewayRequestException(400, "心跳包含无效或不属于此网关的设备状态");
             gateway.AppliedRevision = heartbeat.AppliedRevision; gateway.PendingBatches = heartbeat.PendingBatches; gateway.PendingBytes = heartbeat.PendingBytes;
@@ -411,7 +444,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
         {
             var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
-            if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == gateway.Id && observed.Enabled)
+            if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && _paths.Resolve(observed).GatewayId == gateway.Id && observed.Enabled)
             {
                 var fresh = packet.Values.Where(x => Fresh(x.Ts, Now, SampleFreshness(device))).ToArray();
                 if (fresh.Length > 0) health = await ObserveAsync(runtime, device, gateway, current.Revision, fresh.Max(x => x.Ts),
@@ -427,7 +460,7 @@ public sealed partial class GatewayCenterService : BackgroundService
         if (gateway.Enabled && gateway.LeaseUntilTs > Now && gateway.SessionId == batch.SessionId && gateway.AppliedRevision == current.Revision && packet.ConfigurationRevision == current.Revision)
         {
             var device = current.Devices.FirstOrDefault(x => x.Device.Id == packet.DeviceId)?.Device;
-            if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && observed.GatewayId == batch.GatewayId && observed.Enabled)
+            if (device?.Enabled == true && _config.TryGetDevice(device.Id, out var observed) && _paths.Resolve(observed).GatewayId == batch.GatewayId && observed.Enabled)
             {
                 var cutoff = Math.Max(3000L, Math.Max(device.PollIntervalMs * 3L, device.PollIntervalMs + (long)device.TimeoutMs));
                 foreach (var point in packet.Values)
@@ -532,15 +565,16 @@ public sealed partial class GatewayCenterService : BackgroundService
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses()
     {
         var now = Now;
-        return _config.Devices.Where(x => x.Enabled && x.GatewayId != null).Select(device =>
+        return _config.Devices.Where(x => x.Enabled && _paths.Resolve(x).GatewayId != null).Select(device =>
         {
             var tags = _config.Tags.Where(x => x.DeviceId == device.Id).ToList();
-            _leases.TryGetValue(device.GatewayId!.Value, out var lease); _revisions.TryGetValue(device.GatewayId.Value, out var revision);
+            var gatewayId = _paths.Resolve(device).GatewayId!.Value;
+            _leases.TryGetValue(gatewayId, out var lease); _revisions.TryGetValue(gatewayId, out var revision);
             _deviceStatuses.TryGetValue(device.Id, out var reported);
             _deviceHealth.TryGetValue(device.Id, out var health);
             var connected = lease.Enabled && lease.SessionId != null && lease.Until > now;
             var ready = connected && revision.Version == _config.Version && lease.Applied == revision.Hash;
-            var online = ready && health?.GatewayId == device.GatewayId && health.SessionId == lease.SessionId && health.ObservedRevision == revision.Hash
+            var online = ready && health?.GatewayId == gatewayId && health.SessionId == lease.SessionId && health.ObservedRevision == revision.Hash
                 && Fresh(health.ReceivedTs, now, _settings.LeaseSeconds * 1000L) && health.ObservedTs <= now + 1000 && Healthy(health, device);
             return new CollectorDeviceStatus(device.Id, device.Name, online, online ? health?.Error : !connected ? "网关未连接或租约已过期" : !ready ? "等待网关确认当前配置" : health?.Error ?? "等待当前会话的新鲜设备状态",
                 health?.LastPollTs ?? 0, reported?.LastCycleMs ?? 0, tags.Count, reported?.ReconnectAttempts ?? 0, reported?.CommFailures ?? 0, health?.ObservedTs);
@@ -549,7 +583,7 @@ public sealed partial class GatewayCenterService : BackgroundService
 
     private async Task<GatewayConfiguration> BuildConfigurationAsync(ConfigDbContext db, int gatewayId, CancellationToken ct, bool recordRevision = true)
     {
-        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
+        var devices = ActiveDevicesFor(await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId || x.StandbyGatewayId == gatewayId).ToListAsync(ct), gatewayId); var ids = devices.Select(x => x.Id).ToArray();
         var tags = await db.Tags.AsNoTracking().Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).OrderBy(x => x.Id).ToListAsync(ct);
         var configuration = ConfigurationMetadata(devices, tags); var revision = configuration.Revision;
         if (recordRevision && !await db.GatewayConfigurations.AnyAsync(x => x.GatewayId == gatewayId && x.Revision == revision, ct))
@@ -582,7 +616,7 @@ public sealed partial class GatewayCenterService : BackgroundService
     {
         await using var db = await _factory.CreateDbContextAsync(ct);
         if (!await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)) throw new GatewayRequestException(404, "网关不存在");
-        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
+        var devices = await db.Devices.AsNoTracking().Where(x => x.GatewayId == gatewayId || x.StandbyGatewayId == gatewayId).OrderBy(x => x.Id).ToListAsync(ct); var ids = devices.Select(x => x.Id).ToArray();
         var counts = await db.Tags.Where(x => x.DeviceId.HasValue && ids.Contains(x.DeviceId.Value)).GroupBy(x => x.DeviceId!.Value).Select(x => new { Id = x.Key, Count = x.Count() }).ToDictionaryAsync(x => x.Id, x => x.Count, ct);
         var statuses = GetStatuses().ToDictionary(x => x.DeviceId);
         return devices.Select(x => new GatewayManagedDevice(x.Id, x.Name, x.Protocol, x.Enabled, counts.GetValueOrDefault(x.Id),

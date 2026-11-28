@@ -37,6 +37,7 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/calc-jobs/8/reset")]
     [InlineData("/api/calc-jobs/8/maintenance-done")]
     [InlineData("/api/devices/12/diagnostics/reconnect")]
+    [InlineData("/api/devices/5/acquisition-path")]
     [InlineData("/api/devices/2/test")]
     [InlineData("/api/devices/test-draft")]
     [InlineData("/api/alarms/9/ack")]
@@ -67,6 +68,8 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/annunciators/2")]
     [InlineData("/api/devices/2/test-draft")]
     [InlineData("/api/devices/2/diagnostics")]
+    [InlineData("/api/devices/2/acquisition")]
+    [InlineData("/api/devices/acquisition")]
     [InlineData("/api/recipes/5")]
     [InlineData("/api/control/sequences")]
     [InlineData("/api/simulation/4")]
@@ -117,6 +120,7 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/maintenance-done"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/acknowledge-writes"),
             ("Endpoints/CollectorDiagnosticEndpoints.cs", "/api/devices/1/diagnostics/reconnect"),
+            ("Endpoints/DeviceEndpoints.cs", "/api/devices/1/acquisition-path"),
             ("Endpoints/DeviceEndpoints.cs", "/api/devices/1/test"),
             ("Endpoints/DeviceEndpoints.cs", "/api/devices/test-draft"),
             ("Endpoints/AlarmEndpoints.cs", "/api/alarms/1/ack"),

@@ -52,6 +52,7 @@ public class RuntimeDbContext : DbContext
     public DbSet<ProductionCountCorrection> ProductionCountCorrections => Set<ProductionCountCorrection>();
     public DbSet<ControlSequenceRun> ControlSequenceRuns => Set<ControlSequenceRun>();
     public DbSet<ProductionBatch> ProductionBatches => Set<ProductionBatch>();
+    public DbSet<DeviceAcquisitionState> DeviceAcquisitionStates => Set<DeviceAcquisitionState>();
     public DbSet<ControlRequest> ControlRequests => Set<ControlRequest>();
     public DbSet<ControlLockout> ControlLockouts => Set<ControlLockout>();
     public DbSet<DeviceControlState> DeviceControlStates => Set<DeviceControlState>();

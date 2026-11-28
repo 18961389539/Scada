@@ -9,6 +9,8 @@ using Scada.Data;
 using Scada.Server.Services;
 using Scada.Core;
 using Scada.Core.Simulation;
+using Scada.Core.Acquisition;
+using Scada.Engine.Acquisition;
 using Scada.Server.Auth;
 
 namespace Scada.Server.Endpoints;
@@ -28,10 +30,15 @@ public sealed record DeviceRequest(
     S7Cpu Cpu = S7Cpu.S71200, short Rack = 0, short Slot = 1,
     string OpcEndpointUrl = "opc.tcp://localhost:4840", OpcSecurityMode OpcSecurityMode = OpcSecurityMode.SignAndEncrypt,
     OpcSecurityPolicy OpcSecurityPolicy = OpcSecurityPolicy.Basic256Sha256, string OpcUserName = "", string? OpcPassword = null, bool ClearOpcPassword = false, int? AreaId = null, string? ProtocolOptions = null,
-    bool SimulationEnabled = false, string? SimulationOptions = null, int? ChannelId = null, long? Revision = null);
+    bool SimulationEnabled = false, string? SimulationOptions = null, int? ChannelId = null,
+    int? StandbyGatewayId = null, int? StandbyChannelId = null, string? StandbyHost = null, int? StandbyPort = null,
+    int FailoverHoldMs = 10_000, int SwitchbackHoldMs = 30_000, long? Revision = null);
 
 // 未保存设备的试连：沿用保存时的设备校验，但不落库；网关设备必须保存后由网关执行。
 public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
+public sealed record DeviceAcquisitionPathRequest(AcquisitionPathKind Path, string? Reason = null);
+public sealed record DeviceAcquisitionInfo(int DeviceId, string Name, int AreaId, AcquisitionPathKind ActivePath,
+    int? ActiveGatewayId, int? ActiveChannelId, string? ActiveHost, int? ActivePort, bool HasStandby, string? Reason, string? ChangedBy, long ChangedTs);
 
 
 public static class DeviceEndpoints
@@ -46,6 +53,59 @@ public static class DeviceEndpoints
     public static void MapDeviceEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/devices").AddEndpointFilter<AuditFailuresFilter>();
+
+        group.MapGet("/acquisition", async (
+            HttpContext http,
+            IDeviceAcquisitionPaths paths,
+            IDbContextFactory<ConfigDbContext> configFactory,
+            IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            CancellationToken cancellationToken) =>
+        {
+            var access = await http.GetAccessAsync();
+            await using var db = await configFactory.CreateDbContextAsync(cancellationToken);
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var devices = (await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken))
+                .Where(x => access.Has(Permission.View, x.AreaId)).ToList();
+            var states = await runtime.DeviceAcquisitionStates.AsNoTracking().ToDictionaryAsync(x => x.DeviceId, cancellationToken);
+            return Results.Ok(devices.Select(device => ToAcquisitionInfo(device, paths, states.GetValueOrDefault(device.Id))));
+        }).RequireAuthorization();
+
+        group.MapGet("/{id:int}/acquisition", async (
+            int id,
+            HttpContext http,
+            IDeviceAcquisitionPaths paths,
+            IDbContextFactory<ConfigDbContext> configFactory,
+            IDbContextFactory<RuntimeDbContext> runtimeFactory,
+            CancellationToken cancellationToken) =>
+        {
+            if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.View, $"查看设备采集路径 #{id}") is { } denied) return denied;
+            await using var db = await configFactory.CreateDbContextAsync(cancellationToken);
+            var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
+            if (device is null) return Results.NotFound();
+            await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
+            var state = await runtime.DeviceAcquisitionStates.AsNoTracking().SingleOrDefaultAsync(x => x.DeviceId == id, cancellationToken);
+            return Results.Ok(ToAcquisitionInfo(device, paths, state));
+        }).RequireAuthorization();
+
+        group.MapPost("/{id:int}/acquisition-path", async (
+            int id,
+            DeviceAcquisitionPathRequest request,
+            HttpContext http,
+            DeviceAcquisitionPathService paths,
+            CancellationToken cancellationToken) =>
+        {
+            if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Control, $"切换设备采集路径 #{id}") is { } denied) return denied;
+            try
+            {
+                var user = http.User.Identity?.Name ?? "user";
+                await paths.SwitchManualAsync(id, request.Path, request.Reason ?? "", user, cancellationToken);
+                return Results.Ok();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointHelpers.ValidationProblem([EndpointHelpers.Issue("device.acquisition.switch", "path", ex.Message)]);
+            }
+        }).RequireAuthorization(AccessPolicies.Control);
 
         group.MapGet("", async (
             string? search,
@@ -165,6 +225,7 @@ public static class DeviceEndpoints
                 SerialPort = request.SerialPort?.Trim() ?? "", BaudRate = request.BaudRate, DataBits = request.DataBits,
                 Parity = request.Parity, StopBits = request.StopBits, Cpu = request.Cpu, Rack = request.Rack, Slot = request.Slot
             };
+            ApplyStandbySettings(device, request);
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null)
                 return EndpointHelpers.ValidationProblem(
@@ -219,6 +280,7 @@ public static class DeviceEndpoints
             device.Enabled = request.Enabled;
             device.SerialPort = request.SerialPort?.Trim() ?? ""; device.BaudRate = request.BaudRate; device.DataBits = request.DataBits;
             device.Parity = request.Parity; device.StopBits = request.StopBits; device.Cpu = request.Cpu; device.Rack = request.Rack; device.Slot = request.Slot;
+            ApplyStandbySettings(device, request);
             var credentialError = ApplyOpcSettings(device, request, credentials);
             if (credentialError is not null)
                 return EndpointHelpers.ValidationProblem(
@@ -273,7 +335,7 @@ public static class DeviceEndpoints
             }
 
             if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Control, $"设备连通测试 #{id}") is { } denied) return denied;
-            if (device.GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
+            if ((http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance).Resolve(device).GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
             if (Settings(http) is { LocalCollectionEnabled: false })
                 return Results.Conflict(new { message = LocalCollection.DisabledMessage });
             try
@@ -307,7 +369,7 @@ public static class DeviceEndpoints
                 if (await EndpointHelpers.RequireAreaAsync(http, stored.AreaId, Permission.Control, $"测试设备 #{stored.Id}") is { } deniedStoredControl) return deniedStoredControl;
             }
 
-            if (stored?.GatewayId != null)
+            if (stored is not null && (http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance).Resolve(stored).GatewayId != null)
             {
                 return EndpointHelpers.BadRequest("该设备由网关采集，请保存后通过网关诊断测试连接");
             }
@@ -338,6 +400,7 @@ public static class DeviceEndpoints
                 Parity = request.Device.Parity, StopBits = request.Device.StopBits, Cpu = request.Device.Cpu, Rack = request.Device.Rack, Slot = request.Device.Slot,
                 ChannelId = request.Device.ChannelId
             };
+            ApplyStandbySettings(device, request.Device);
             var credentialError = ApplyOpcSettings(device, request.Device, credentials);
             if (credentialError is not null)
                 return EndpointHelpers.ValidationProblem(
@@ -392,6 +455,24 @@ public static class DeviceEndpoints
             "id" when descending => query.OrderByDescending(x => x.Id),
             _ => query.OrderBy(x => x.Id)
         };
+    }
+
+    private static DeviceAcquisitionInfo ToAcquisitionInfo(Device device, IDeviceAcquisitionPaths paths, DeviceAcquisitionState? state)
+    {
+        var route = paths.Resolve(device);
+        return new DeviceAcquisitionInfo(
+            device.Id, device.Name, device.AreaId, route.Path, route.GatewayId, route.ChannelId, route.Host, route.Port,
+            DeviceAcquisitionRules.HasStandby(device), state?.Reason, state?.ChangedBy, state?.ChangedTs ?? 0);
+    }
+
+    internal static void ApplyStandbySettings(Device device, DeviceRequest request)
+    {
+        device.StandbyGatewayId = request.StandbyGatewayId;
+        device.StandbyChannelId = request.StandbyChannelId;
+        device.StandbyHost = string.IsNullOrWhiteSpace(request.StandbyHost) ? null : request.StandbyHost.Trim();
+        device.StandbyPort = request.StandbyPort;
+        device.FailoverHoldMs = request.FailoverHoldMs;
+        device.SwitchbackHoldMs = request.SwitchbackHoldMs;
     }
 
     internal static string? ApplyOpcSettings(Device device, DeviceRequest request, IDeviceCredentials credentials)

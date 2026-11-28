@@ -4,16 +4,19 @@ using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
+using Scada.Core.Acquisition;
 
 namespace Scada.Server.Services;
 
-public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCenterService gateways, IConfigSnapshot config, LocalCommandLedger commands, IOptions<ScadaSettings> settings) : ICollectorControl
+public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCenterService gateways, IConfigSnapshot config, LocalCommandLedger commands, IOptions<ScadaSettings> settings, IDeviceAcquisitionPaths? paths = null) : ICollectorControl
 {
+    private readonly IDeviceAcquisitionPaths _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance;
+
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses() => local.GetStatuses().Concat(gateways.GetStatuses()).OrderBy(x => x.DeviceId).ToList();
     public void RequestReload() => local.RequestReload();
     public async Task<IReadOnlyList<TagValue>> ReadAsync(int deviceId, IReadOnlyList<int> tagIds, CancellationToken cancellationToken = default)
     {
-        if (!config.TryGetDevice(deviceId, out var device) || device.GatewayId is null)
+        if (!config.TryGetDevice(deviceId, out var device) || _paths.Resolve(device).GatewayId is null)
         {
             if (device is not null && !settings.Value.LocalCollectionEnabled)
                 throw new InvalidOperationException(LocalCollection.DisabledMessage);
@@ -26,7 +29,7 @@ public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCe
     }
     public async Task<CommandExecutionResult> WriteAsync(int deviceId, Tag tag, double value, CancellationToken cancellationToken = default)
     {
-        if (!config.TryGetDevice(deviceId, out var device) || device.GatewayId is null)
+        if (!config.TryGetDevice(deviceId, out var device) || _paths.Resolve(device).GatewayId is null)
         {
             if (device is not null && !settings.Value.LocalCollectionEnabled)
                 return new(false, LocalCollection.DisabledMessage, Outcome: GatewayCommandOutcome.NotSent);
@@ -39,7 +42,7 @@ public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCe
     }
     public Task<CommandExecutionResult> WriteIdentifiedAsync(int deviceId, Tag tag, double value, CollectorCommandContext context, CancellationToken ct = default)
     {
-        if (config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null)
+        if (config.TryGetDevice(deviceId, out var device) && _paths.Resolve(device).GatewayId is not null)
             return gateways.ExecuteCommandAsync(deviceId, tag.Id, value, context, ct);
         if (device is not null && !settings.Value.LocalCollectionEnabled)
             return Task.FromResult(new CommandExecutionResult(false, LocalCollection.DisabledMessage, Outcome: GatewayCommandOutcome.NotSent));
@@ -47,7 +50,7 @@ public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCe
     }
     public Task<CommandExecutionResult> WriteTextAsync(int deviceId, Tag tag, string text, CancellationToken cancellationToken = default)
     {
-        if (config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null)
+        if (config.TryGetDevice(deviceId, out var device) && _paths.Resolve(device).GatewayId is not null)
             return Task.FromResult(new CommandExecutionResult(false, "网关设备的字符串写入必须带命令号和操作账户", Outcome: GatewayCommandOutcome.NotSent));
         if (device is not null && !settings.Value.LocalCollectionEnabled)
             return Task.FromResult(new CommandExecutionResult(false, LocalCollection.DisabledMessage, Outcome: GatewayCommandOutcome.NotSent));

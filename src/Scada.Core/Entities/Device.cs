@@ -40,6 +40,13 @@ public class Device : IAuditedEntity
     // 仿真设备不连接现场，读写都落在仿真运行时；参数为 SimulationDeviceOptions JSON。
     public bool SimulationEnabled { get; set; }
     public string SimulationOptions { get; set; } = "";
+    // 设备级一主一备：不改写 GatewayId/ChannelId，运行时按活动路径叠加。
+    public int? StandbyGatewayId { get; set; }
+    public int? StandbyChannelId { get; set; }
+    public string? StandbyHost { get; set; }
+    public int? StandbyPort { get; set; }
+    public int FailoverHoldMs { get; set; } = 10_000;
+    public int SwitchbackHoldMs { get; set; } = 30_000;
     // 组态并发令牌。省略修订号的旧客户端仍可保存；带上则必须与当前值一致。
     public long Revision { get; set; } = 1;
     public bool HasOpcPassword => !string.IsNullOrEmpty(OpcPasswordProtected);
@@ -83,5 +90,11 @@ public class Device : IAuditedEntity
         ProtocolOptions = source.ProtocolOptions;
         SimulationEnabled = source.SimulationEnabled;
         SimulationOptions = source.SimulationOptions;
+        StandbyGatewayId = source.StandbyGatewayId;
+        StandbyChannelId = source.StandbyChannelId;
+        StandbyHost = source.StandbyHost;
+        StandbyPort = source.StandbyPort;
+        FailoverHoldMs = source.FailoverHoldMs;
+        SwitchbackHoldMs = source.SwitchbackHoldMs;
     }
 }

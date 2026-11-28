@@ -187,7 +187,7 @@ public sealed class ProjectApplyContext(
         "screens" => ScreenIdsByName.TryGetValue(key, out var s) ? s : null,
         "channels" => AcquisitionChannelIdsByName.TryGetValue(key, out var channel) ? channel : null,
         "productionLines" => LineIdsByName.TryGetValue(key, out var line) ? line : null,
-        _ => field == "gatewayRef" ? GatewayIdsByName.TryGetValue(key, out var g) ? g : null : ChannelIdsByName.TryGetValue(key, out var c) ? c : null
+        _ => field is "gatewayRef" or "standbyGatewayRef" ? GatewayIdsByName.TryGetValue(key, out var g) ? g : null : ChannelIdsByName.TryGetValue(key, out var c) ? c : null
     };
 
     internal static string RefLabel(string field) => ProjectFormat.RefTargets[field] is string section ? ProjectFormat.SectionLabels[section] : "对象";

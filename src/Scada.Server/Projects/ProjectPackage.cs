@@ -49,10 +49,10 @@ public static class ProjectFormat
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
     public static readonly Dictionary<string, string?> RefTargets = new()
     {
-        ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
+        ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["standbyGatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
         ["tagRef"] = "tags", ["tagRefs"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["publishedReadTagRefs"] = "tags", ["publishedWriteTagRefs"] = "tags", ["screenRef"] = "screens", ["screenRefs"] = "screens",
         ["stateTagRef"] = "tags", ["goodCountTagRef"] = "tags", ["rejectCountTagRef"] = "tags", ["totalCountTagRef"] = "tags", ["productRef"] = "productionProducts",
-        ["acquisitionChannelRef"] = "channels", ["lineRef"] = "productionLines"
+        ["acquisitionChannelRef"] = "channels", ["standbyChannelRef"] = "channels", ["lineRef"] = "productionLines"
     };
     public static readonly HashSet<string> ExpressionFields = ["expression", "script", "publishedScript", "permitExpression", "feedbackExpression", "confirmExpression"];
     public static readonly Regex KeyReference = new(@"#\{([^}]*)\}", RegexOptions.Compiled);
@@ -229,7 +229,9 @@ public static class ProjectExporter
         {
             var node = Node(device, "hasOpcPassword", "disabledSinceTs");
             Ref(node, "areaId", "areaRef", areaNames); Ref(node, "gatewayId", "gatewayRef", gateways);
+            Ref(node, "standbyGatewayId", "standbyGatewayRef", gateways);
             Ref(node, "channelId", "acquisitionChannelRef", channelNames);
+            Ref(node, "standbyChannelId", "standbyChannelRef", channelNames);
             if (!Add("devices", device.Name, [device.AreaId], node) || device.ChannelId is not int channelId) continue;
             if (!channelAreas.TryGetValue(channelId, out var channelAreaList)) channelAreas[channelId] = channelAreaList = [];
             channelAreaList.Add(device.AreaId);

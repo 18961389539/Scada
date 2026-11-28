@@ -9,6 +9,7 @@ using Scada.Core.Models;
 using Scada.Core.Protocols;
 using Scada.Core.Options;
 using Scada.Core.Simulation;
+using Scada.Core.Acquisition;
 using Scada.Data;
 using Scada.Data.Infrastructure;
 using Scada.Data.RuntimeCleanup;
@@ -237,6 +238,10 @@ public sealed class DeviceCommandService(
             return [new ValidationIssue("device.gateway.required", nameof(Device.GatewayId), LocalCollection.UnassignedDeviceMessage)];
         if (await ValidateChannelStationAsync(db, device, cancellationToken) is { } station) return [station];
         if (await ValidateSerialBusAsync(db, device, cancellationToken, serialProfiles) is { } bus) return [bus];
+        if (DeviceAcquisitionRules.Validate(device) is string pathError)
+            return [new ValidationIssue("device.standby.invalid", nameof(Device.StandbyHost), pathError)];
+        if (await ValidateStandbyGatewayAsync(db, device, cancellationToken) is { } standbyGateway) return [standbyGateway];
+        if (await ValidateStandbyChannelAsync(db, device, cancellationToken) is { } standbyChannel) return [standbyChannel];
 
         var duplicate = excludeDeviceId is int exclude
             ? await db.Devices.AnyAsync(x => x.Id != exclude && x.Name == device.Name, cancellationToken)
@@ -320,6 +325,32 @@ public sealed class DeviceCommandService(
     }
 
     // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。
+    private static async Task<ValidationIssue?> ValidateStandbyGatewayAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (device.StandbyGatewayId is not int gatewayId) return null;
+        return await db.Gateways.AnyAsync(x => x.Id == gatewayId, ct)
+            ? null
+            : new ValidationIssue("device.standby.gatewayNotFound", nameof(Device.StandbyGatewayId), "备用网关不存在");
+    }
+
+    private static async Task<ValidationIssue?> ValidateStandbyChannelAsync(ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (device.StandbyChannelId is not int channelId) return null;
+        if (!ChannelProtocols.Supports(device.Protocol))
+            return new ValidationIssue("device.standby.channelProtocol", nameof(Device.StandbyChannelId),
+                "该协议无法共享物理通道；备路径不能绑定通道");
+        if (SoftElementByteOrder.Applies(device.Protocol) && !SoftElementByteOrder.IsRtu(device))
+            return new ValidationIssue("device.standby.channelSerialOnly", nameof(Device.StandbyChannelId),
+                "汇川、信捷、台达只有 RTU 可以绑定备用通道");
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, ct);
+        if (channel is null)
+            return new ValidationIssue("device.standby.channelNotFound", nameof(Device.StandbyChannelId), "备用通道不存在");
+        if (channel.Protocol != device.Protocol)
+            return new ValidationIssue("device.standby.channelMismatch", nameof(Device.StandbyChannelId),
+                $"备用通道「{channel.Name}」使用 {channel.Protocol}，与设备协议 {device.Protocol} 不一致");
+        return null;
+    }
+
     private static async Task<ValidationIssue?> ValidateChannelStationAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.ChannelId is not int channelId || !device.Enabled || !ChannelProtocols.Supports(device.Protocol)) return null;

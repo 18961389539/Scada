@@ -61,7 +61,7 @@ import type {
   TagInput,
   TagValue,
   UserItem
-} from '../types'
+} from '../types, DeviceAcquisitionInfo, AcquisitionPathKind}
 
 export interface SiteInfo { siteName: string; demoMode: boolean }
 
@@ -119,6 +119,9 @@ export const deviceApi = {
   },
   create: async (input: DeviceInput) => (await http.post<Device>('/devices', input)).data,
   update: async (id: number, input: DeviceInput) => (await http.put<Device>(`/devices/${id}`, input)).data,
+  acquisition: async () => (await http.get<import('../types').DeviceAcquisitionInfo[]>('/devices/acquisition')).data,
+  switchAcquisitionPath: async (id: number, path: 'Primary' | 'Standby', reason?: string) =>
+    (await http.post(`/devices/${id}/acquisition-path`, { path, reason })).data,
   remove: async (id: number) => http.delete(`/devices/${id}`),
   test: async (id: number, area: string, address: number, dataType: string, dbNumber = 1, bitOffset = 0, nodeId = '', textLength = 0) =>
     (

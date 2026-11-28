@@ -561,6 +561,39 @@ namespace Scada.Data.Migrations.Runtime
                     b.ToTable("ControlSequenceRuns", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.DeviceAcquisitionState", b =>
+                {
+                    b.Property<int>("DeviceId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("ActivePath")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("ActiveUnhealthySince")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChangedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ChangedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("PrimaryHealthySince")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("DeviceId");
+
+                    b.HasIndex("ActivePath");
+
+                    b.ToTable("DeviceAcquisitionStates", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.DeviceControlState", b =>
                 {
                     b.Property<int>("DeviceId")

@@ -32,6 +32,12 @@ public sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         entity.Property(x => x.ProtocolOptions).HasMaxLength(16000).HasDefaultValue("");
         entity.Property(x => x.SimulationOptions).HasMaxLength(16000).HasDefaultValue("");
         entity.HasIndex(x => x.ChannelId);
+        entity.HasOne<AcquisitionGateway>().WithMany().HasForeignKey(x => x.StandbyGatewayId).OnDelete(DeleteBehavior.Restrict);
+        entity.HasIndex(x => x.StandbyGatewayId);
+        entity.HasIndex(x => x.StandbyChannelId);
+        entity.Property(x => x.StandbyHost).HasMaxLength(256);
+        entity.Property(x => x.FailoverHoldMs).HasDefaultValue(10_000);
+        entity.Property(x => x.SwitchbackHoldMs).HasDefaultValue(30_000);
         entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
     }
 }

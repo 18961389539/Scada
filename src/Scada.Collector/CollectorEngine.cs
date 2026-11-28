@@ -9,6 +9,7 @@ using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
 using Scada.Core.Protocols;
+using Scada.Core.Acquisition;
 
 namespace Scada.Collector;
 
@@ -27,6 +28,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
     private readonly ICollectorJournal? _journal;
     private readonly INodeRole _role;
     private readonly LivenessRegistry? _liveness;
+    private readonly IDeviceAcquisitionPaths _paths;
     private long _loadedRoleGeneration = -1;
 
     private readonly ConcurrentDictionary<int, DeviceWorker> _workers = new();
@@ -67,7 +69,8 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         ILogger<CollectorEngine> logger,
         ICollectorJournal? journal = null,
         INodeRole? role = null,
-        LivenessRegistry? liveness = null)
+        LivenessRegistry? liveness = null,
+        IDeviceAcquisitionPaths? paths = null)
     {
         _liveness = liveness;
         _role = role ?? new StandaloneNodeRole();
@@ -81,7 +84,11 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         _logger = logger;
         _journal = journal;
         _channels = new ChannelRegistry(logger, Math.Max(settings.Value.CollectorBusDisposeGraceMs, 1));
+        _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance;
+        _paths.PathChanged += OnAcquisitionPathChanged;
     }
+
+    private void OnAcquisitionPathChanged(int deviceId, AcquisitionPathKind path, string reason) => RequestReload();
 
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses() =>
         _statuses.Values.OrderBy(x => x.DeviceId).ToList();
@@ -101,7 +108,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         if (device.Enabled && tags.Count > 0 && _workers.TryGetValue(deviceId, out var worker)) return worker.Diagnostics(pending);
         var idle = new DeviceDiagnostics(device, tags, _planBuilder.Build(device, tags), _config.CollectionVersion).Snapshot(0, pending);
         // 启动失败要显式暴露，否则面板会一直显示"等待连接"，运维看不到真正的原因。
-        if (!_settings.Value.LocalCollectionEnabled && device.GatewayId is null)
+        if (!_settings.Value.LocalCollectionEnabled && _paths.Apply(device).GatewayId is null)
             return idle with { State = "Disabled", CurrentError = LocalCollection.DisabledMessage };
         if (_startFailures.TryGetValue(deviceId, out var startError))
             return idle with { State = "Faulted", CurrentError = startError };
@@ -330,14 +337,15 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         _workerCts ??= CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         // 备机不采集：不建立任何设备连接，避免与主机同时轮询现场（部分设备只允许单连接）。
-        var enabledDevices = _role.IsActive && _settings.Value.LocalCollectionEnabled ? _config.Devices.Where(x => x.Enabled && x.GatewayId == null).ToList() : [];
+        var enabledDevices = _role.IsActive && _settings.Value.LocalCollectionEnabled ? _config.Devices.Where(x => x.Enabled && _paths.Apply(x).GatewayId == null).ToList() : [];
         if (!_role.IsActive) { _statuses.Clear(); _statusEpochs.Clear(); }
 
         var wanted = new Dictionary<int, (Device Device, IReadOnlyList<Tag> Tags, string Fingerprint)>();
         foreach (var device in enabledDevices)
         {
             var tags = _config.TagsOfDevice(device.Id).Where(x => x.Kind == TagKind.Physical).ToList();
-            if (tags.Count > 0) wanted[device.Id] = (device, tags, CollectionFingerprint.OfDevice(device, tags));
+            var effective = _paths.Apply(device);
+            if (tags.Count > 0) wanted[device.Id] = (effective, tags, CollectionFingerprint.OfDevice(effective, tags));
         }
 
         // 先停掉不再需要采集的设备（已删除、已禁用、已交给网关）。

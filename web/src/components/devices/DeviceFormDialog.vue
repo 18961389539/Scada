@@ -105,6 +105,34 @@
         <el-form-item :label="$t('simulation.max')"><el-input-number v-model="simOptions.max" :controls="false" style="width: 100%" /></el-form-item>
         <el-form-item :label="$t('simulation.noise')"><el-input-number v-model="simOptions.noisePercent" :min="0" :max="50" style="width: 100%" /></el-form-item>
       </template>
+      <template v-if="!form.simulationEnabled">
+        <h4>{{ $t('devicesView.standbyTitle') }}</h4>
+        <p class="tiny muted">{{ $t('devicesView.standbyHint') }}</p>
+        <el-form-item :label="$t('devicesView.standbyGateway')">
+          <el-select v-model="form.standbyGatewayId" clearable style="width: 100%" data-test="device-standby-gateway">
+            <el-option :label="$t('devicesView.standbyGatewayNone')" :value="null" />
+            <el-option v-for="g in standbyGateways" :key="g.id" :label="`#${g.id} · ${g.name}`" :value="g.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="channelChoices.length || form.standbyChannelId" :label="$t('devicesView.standbyChannel')">
+          <el-select v-model="form.standbyChannelId" clearable style="width: 100%" data-test="device-standby-channel">
+            <el-option :label="$t('devicesView.channelNone')" :value="null" />
+            <el-option v-for="c in channelChoices" :key="c.id" :label="`#${c.id} · ${c.name}`" :value="c.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="showHostPort" :label="$t('devicesView.standbyHost')">
+          <el-input v-model="form.standbyHost" data-test="device-standby-host" placeholder="10.0.0.2" />
+        </el-form-item>
+        <el-form-item v-if="showHostPort" :label="$t('devicesView.standbyPort')">
+          <el-input-number v-model="form.standbyPort" data-test="device-standby-port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
+        </el-form-item>
+        <el-form-item :label="$t('devicesView.failoverHoldSec')">
+          <el-input-number :model-value="Math.round((form.failoverHoldMs || 10000) / 1000)" :min="1" :max="600" style="width: 100%" data-test="device-failover-hold" @update:model-value="(v: number | undefined) => form.failoverHoldMs = Math.round((v ?? 10) * 1000)" />
+        </el-form-item>
+        <el-form-item :label="$t('devicesView.switchbackHoldSec')">
+          <el-input-number :model-value="Math.round((form.switchbackHoldMs || 30000) / 1000)" :min="1" :max="600" style="width: 100%" data-test="device-switchback-hold" @update:model-value="(v: number | undefined) => form.switchbackHoldMs = Math.round((v ?? 30) * 1000)" />
+        </el-form-item>
+      </template>
       <details :open="advancedOpen" data-test="device-advanced" @toggle="advancedOpen = ($event.target as HTMLDetailsElement).open">
         <summary>{{ $t('configurationUx.advanced') }}</summary>
         <p class="tiny muted">{{ $t('configurationUx.advancedHint') }}</p>
@@ -237,6 +265,8 @@ const emptyForm = (): DeviceInput => ({
   enabled: true,
   areaId: 1,
   channelId: null,
+  standbyGatewayId: null, standbyChannelId: null, standbyHost: '', standbyPort: null,
+  failoverHoldMs: 10000, switchbackHoldMs: 30000,
   serialPort: 'COM1', baudRate: 9600, dataBits: 8, parity: 'None', stopBits: 'One', cpu: 'S71200', rack: 0, slot: 1,
   opcEndpointUrl: 'opc.tcp://localhost:4840', opcSecurityMode: 'SignAndEncrypt', opcSecurityPolicy: 'Basic256Sha256', opcUserName: '', opcPassword: '', clearOpcPassword: false,
   simulationEnabled: false,
@@ -244,6 +274,7 @@ const emptyForm = (): DeviceInput => ({
 })
 const form = reactive<DeviceInput>(emptyForm())
 // 可选通道按协议过滤：一条通道只承载一种帧格式，跨协议绑定没有意义。
+const standbyGateways = ref<{ id: number; name: string }[]>([])
 const channelChoices = computed(() => props.channels.filter(c => c.enabled && c.protocol === form.protocol && (!softElementProtocol(form.protocol) || options.transport === 'Rtu')))
 const channelBound = computed(() => form.channelId != null)
 const options = reactive<Record<string, string | number | boolean>>({})
@@ -356,6 +387,9 @@ function openEdit(device: Device): void {
     enabled: device.enabled,
     areaId: device.areaId ?? 1,
     channelId: device.channelId ?? null,
+    standbyGatewayId: device.standbyGatewayId ?? null, standbyChannelId: device.standbyChannelId ?? null,
+    standbyHost: device.standbyHost ?? '', standbyPort: device.standbyPort ?? null,
+    failoverHoldMs: device.failoverHoldMs ?? 10000, switchbackHoldMs: device.switchbackHoldMs ?? 30000,
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
@@ -381,6 +415,9 @@ function fillFromDevice(device: Device, nameOverride?: string): void {
     enabled: device.enabled,
     areaId: device.areaId ?? 1,
     channelId: device.channelId ?? null,
+    standbyGatewayId: device.standbyGatewayId ?? null, standbyChannelId: device.standbyChannelId ?? null,
+    standbyHost: device.standbyHost ?? '', standbyPort: device.standbyPort ?? null,
+    failoverHoldMs: device.failoverHoldMs ?? 10000, switchbackHoldMs: device.switchbackHoldMs ?? 30000,
     serialPort: device.serialPort, baudRate: device.baudRate, dataBits: device.dataBits, parity: device.parity,
     stopBits: device.stopBits, cpu: device.cpu, rack: device.rack, slot: device.slot,
     opcEndpointUrl: device.opcEndpointUrl, opcSecurityMode: device.opcSecurityMode, opcSecurityPolicy: device.opcSecurityPolicy,
@@ -404,13 +441,25 @@ function openCopy(device: Device): void {
   visible.value = true
 }
 
+async function loadStandbyGateways(): Promise<void> {
+  try {
+    const { gatewayApi } = await import('../../api/gateways')
+    const list = await gatewayApi.list() as { id: number; name: string }[]
+    standbyGateways.value = list.map(g => ({ id: g.id, name: g.name }))
+  } catch {
+    standbyGateways.value = []
+  }
+}
+
 function open(device?: Device | null, mode: { copy?: boolean; gatewayId?: number | null } = {}): void {
+  void loadStandbyGateways()
   if (!device) { openCreate(mode.gatewayId ?? null); return }
   if (mode.copy) openCopy(device)
   else openEdit(device)
 }
 
 async function onDialogOpened(): Promise<void> {
+  void loadStandbyGateways()
   await nextTick()
   formRef.value?.clearValidate()
   await editDialog.focusInitial()
@@ -424,6 +473,12 @@ function devicePayload(): DeviceInput {
     opcPassword: form.opcPassword?.length ? form.opcPassword : null,
     protocolOptions: currentDef.value ? JSON.stringify(iec61850 ? { ...options, useReports: false } : options) : '',
     simulationOptions: form.simulationEnabled ? JSON.stringify(simOptions) : '',
+    standbyGatewayId: form.standbyGatewayId || null,
+    standbyChannelId: form.standbyChannelId || null,
+    standbyHost: form.standbyHost?.trim() ? form.standbyHost.trim() : null,
+    standbyPort: form.standbyPort || null,
+    failoverHoldMs: form.failoverHoldMs || 10000,
+    switchbackHoldMs: form.switchbackHoldMs || 30000,
     revision: editingRevision.value
   }
 }
