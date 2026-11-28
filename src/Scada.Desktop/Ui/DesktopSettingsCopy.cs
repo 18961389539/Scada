@@ -1,4 +1,5 @@
 using Scada.Desktop.Api;
+using Scada.Desktop.Configuration;
 
 namespace Scada.Desktop.Ui;
 
@@ -7,15 +8,26 @@ internal static class DesktopSettingsCopy
 {
     public const string MustChangeLoginStatus = LoginResult.MustChangePasswordMessage;
 
-    public const string WorkspaceHint = "工作台不需要再选画面或布局，改密并登录后即可保存并启动。";
-
     public const string DemoPasswordHint = "当前是演示站点。文档中的示例账号 admin / admin123 仍需先修改初始密码，可在本窗口完成改密后再保存并启动。";
 
     public const string SavedCipherStaleHint = "请填写并保存新密码，已保存的旧密码已不能再用。";
 
-    public const string MustChangePendingHint = "该账号需要先改密。请在下方填写新密码，或打开浏览器改密后再回到本窗口输入新密码。已保存的旧密码不能沿用。";
+    public const string MustChangePendingHint = "该账号需要先改密。可在下方填写新密码，或打开浏览器改密。改密前已保存的当前密码仍可使用。";
 
-    public const string PasswordChangedHint = "密码已更新，保存并启动时会写入本机。请勿留空，以免沿用旧密码。";
+    public const string PasswordChangedHint = "密码已更新，请先点“保存并启动”，把新密码写入本机。请勿留空，以免沿用旧密码。";
+
+    public const string CredentialsRejectedHint = "请重新输入密码。不要留空沿用刚才失败的已保存密码。";
+
+    public const string AwaitingNewPasswordHint = "请在上方密码框输入新密码，再点“登录并加载列表”，然后保存并启动。不要留空沿用旧密码。";
+
+    public const string BrowserDoneButton = "已在浏览器完成改密，请输入新密码后登录";
+
+    public const string UnsavedPasswordCloseMessage = "新密码已在服务器生效，但尚未保存到本机。若不保存，下次仍会用旧密码登录并失败。\n\n要保存并启动吗？";
+
+    public static string WorkspaceHintText(bool mustChangePending) =>
+        mustChangePending
+            ? "工作台不需要再选画面或布局，改密并登录后即可保存并启动。"
+            : "工作台不需要再选画面或布局，登录后即可保存并启动。";
 
     public static string Notice(string? siteName, bool demoMode)
     {
@@ -30,10 +42,12 @@ internal static class DesktopSettingsCopy
             ? "当前目标是多页面工作台，可使用工程或管理员账号登录。"
             : "当前目标更适合现场只看的专用账号；若需禁止下发，请授予查看权限或启用监视模式。";
 
-    public static string PasswordHint(bool hasSavedCipher, bool savedCipherStale, bool mustChangePending, bool passwordChanged)
+    public static string PasswordHint(bool hasSavedCipher, bool savedCipherStale, bool mustChangePending, bool passwordChanged, bool rejectSavedCipher = false)
     {
         if (passwordChanged) return PasswordChangedHint;
-        if (mustChangePending || savedCipherStale) return mustChangePending ? MustChangePendingHint : SavedCipherStaleHint;
+        if (savedCipherStale) return SavedCipherStaleHint;
+        if (rejectSavedCipher) return CredentialsRejectedHint;
+        if (mustChangePending) return MustChangePendingHint;
         return hasSavedCipher ? "已保存密码，留空表示沿用" : "尚未保存密码";
     }
 
@@ -44,7 +58,23 @@ internal static class DesktopSettingsCopy
     }
 
     public static string BrowserHint(string loginUrl) =>
-        $"浏览器地址：{loginUrl}\n在浏览器中登录并改密后，请回到本窗口输入新密码再登录。窗口已取消置顶，以免挡住浏览器。";
+        $"浏览器地址：{loginUrl}\n在浏览器中登录并改密后，请回到本窗口，点“{BrowserDoneButton}”，输入新密码后再登录并保存。窗口不会置顶，以免挡住浏览器。";
+
+    public static bool ShowDemoPasswordHint(bool demoMode, bool mustChangePending) =>
+        demoMode && mustChangePending;
+
+    public static bool CanReuseSavedCipher(bool savedCipherStale, bool rejectSavedCipher) =>
+        !savedCipherStale && !rejectSavedCipher;
+
+    public static bool ShouldStartClientAfterSettings(bool restartAfter, bool saved, bool unsavedServerPasswordChange)
+    {
+        if (saved) return true;
+        if (unsavedServerPasswordChange) return false;
+        return restartAfter;
+    }
+
+    public static bool ShouldOpenWithoutTopMost(string? initialError) =>
+        DesktopLaunchError.IsMustChangePassword(initialError);
 
     public static string? ValidateNewPassword(string currentPassword, string newPassword, string confirmPassword)
     {

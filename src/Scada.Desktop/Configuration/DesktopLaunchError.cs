@@ -55,6 +55,12 @@ internal static class DesktopLaunchError
             || message.Contains("首次登录或密码已被重置", StringComparison.Ordinal);
     }
 
+    public static bool IsInvalidCredentials(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return false;
+        return message.Contains("用户名或密码错误", StringComparison.Ordinal);
+    }
+
     public static string SupervisorPrompt(string? launchError)
     {
         if (IsMustChangePassword(launchError))

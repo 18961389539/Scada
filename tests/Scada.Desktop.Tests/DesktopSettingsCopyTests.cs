@@ -1,4 +1,5 @@
 using Scada.Desktop.Api;
+using Scada.Desktop.Configuration;
 using Scada.Desktop.Ui;
 
 namespace Scada.Desktop.Tests;
@@ -24,15 +25,21 @@ public sealed class DesktopSettingsCopyTests
     }
 
     [Fact]
-    public void PasswordHintStopsSuggestingReuseWhenCipherIsStale()
+    public void PasswordHintStopsSuggestingReuseWhenCipherIsStaleOrRejected()
     {
         Assert.Equal("尚未保存密码", DesktopSettingsCopy.PasswordHint(false, false, false, false));
         Assert.Equal("已保存密码，留空表示沿用", DesktopSettingsCopy.PasswordHint(true, false, false, false));
-        Assert.Equal(DesktopSettingsCopy.MustChangePendingHint, DesktopSettingsCopy.PasswordHint(true, true, true, false));
-        Assert.DoesNotContain("留空表示沿用", DesktopSettingsCopy.PasswordHint(true, true, true, false));
+        Assert.Equal(DesktopSettingsCopy.MustChangePendingHint, DesktopSettingsCopy.PasswordHint(true, false, true, false));
+        Assert.Contains("仍可使用", DesktopSettingsCopy.MustChangePendingHint);
+        Assert.DoesNotContain("不能沿用", DesktopSettingsCopy.MustChangePendingHint);
+        Assert.DoesNotContain("留空表示沿用", DesktopSettingsCopy.PasswordHint(true, false, true, false));
         Assert.Equal(DesktopSettingsCopy.SavedCipherStaleHint, DesktopSettingsCopy.PasswordHint(true, true, false, false));
         Assert.Equal(DesktopSettingsCopy.PasswordChangedHint, DesktopSettingsCopy.PasswordHint(true, true, false, true));
+        Assert.Contains("保存并启动", DesktopSettingsCopy.PasswordChangedHint);
         Assert.DoesNotContain("留空表示沿用", DesktopSettingsCopy.PasswordChangedHint);
+        Assert.Equal(DesktopSettingsCopy.CredentialsRejectedHint, DesktopSettingsCopy.PasswordHint(true, false, false, false, true));
+        Assert.DoesNotContain("留空表示沿用", DesktopSettingsCopy.CredentialsRejectedHint);
+        Assert.Contains("重新输入", DesktopSettingsCopy.CredentialsRejectedHint);
     }
 
     [Fact]
@@ -41,8 +48,9 @@ public sealed class DesktopSettingsCopyTests
         Assert.Equal("http://127.0.0.1:18927/login", DesktopSettingsCopy.LoginPageUrl("http://127.0.0.1:18927/"));
         var hint = DesktopSettingsCopy.BrowserHint("http://127.0.0.1:18927/login");
         Assert.Contains("http://127.0.0.1:18927/login", hint);
-        Assert.Contains("回到本窗口输入新密码", hint);
-        Assert.Contains("取消置顶", hint);
+        Assert.Contains("输入新密码后再登录并保存", hint);
+        Assert.Contains(DesktopSettingsCopy.BrowserDoneButton, hint);
+        Assert.Contains("不会置顶", hint);
     }
 
     [Fact]
@@ -56,10 +64,45 @@ public sealed class DesktopSettingsCopyTests
     }
 
     [Fact]
-    public void WorkspaceHintExplainsNoScreenSelection()
+    public void WorkspaceAndDemoHintsDependOnMustChangePending()
     {
-        Assert.Contains("不需要再选画面或布局", DesktopSettingsCopy.WorkspaceHint);
-        Assert.Contains("保存并启动", DesktopSettingsCopy.WorkspaceHint);
+        Assert.Contains("不需要再选画面或布局", DesktopSettingsCopy.WorkspaceHintText(false));
+        Assert.Contains("登录后即可保存并启动", DesktopSettingsCopy.WorkspaceHintText(false));
+        Assert.DoesNotContain("改密", DesktopSettingsCopy.WorkspaceHintText(false));
+        Assert.Contains("改密并登录后即可保存并启动", DesktopSettingsCopy.WorkspaceHintText(true));
+        Assert.False(DesktopSettingsCopy.ShowDemoPasswordHint(true, false));
+        Assert.True(DesktopSettingsCopy.ShowDemoPasswordHint(true, true));
+        Assert.False(DesktopSettingsCopy.ShowDemoPasswordHint(false, true));
         Assert.Equal(LoginResult.MustChangePasswordMessage, DesktopSettingsCopy.MustChangeLoginStatus);
+    }
+
+    [Fact]
+    public void SavedCipherCanBeReusedUntilChangeSucceedsOrCredentialsAreRejected()
+    {
+        Assert.True(DesktopSettingsCopy.CanReuseSavedCipher(false, false));
+        Assert.False(DesktopSettingsCopy.CanReuseSavedCipher(true, false));
+        Assert.False(DesktopSettingsCopy.CanReuseSavedCipher(false, true));
+        Assert.False(DesktopSettingsCopy.CanReuseSavedCipher(true, true));
+    }
+
+    [Fact]
+    public void CancelAfterUnsavedServerPasswordChangeDoesNotRestartClient()
+    {
+        Assert.True(DesktopSettingsCopy.ShouldStartClientAfterSettings(true, true, false));
+        Assert.True(DesktopSettingsCopy.ShouldStartClientAfterSettings(false, true, false));
+        Assert.True(DesktopSettingsCopy.ShouldStartClientAfterSettings(true, false, false));
+        Assert.False(DesktopSettingsCopy.ShouldStartClientAfterSettings(true, false, true));
+        Assert.False(DesktopSettingsCopy.ShouldStartClientAfterSettings(false, false, true));
+        Assert.False(DesktopSettingsCopy.ShouldStartClientAfterSettings(false, false, false));
+        Assert.Contains("尚未保存到本机", DesktopSettingsCopy.UnsavedPasswordCloseMessage);
+        Assert.Contains("要保存并启动吗", DesktopSettingsCopy.UnsavedPasswordCloseMessage);
+    }
+
+    [Fact]
+    public void MustChangeLaunchErrorOpensSettingsWithoutTopMost()
+    {
+        Assert.True(DesktopSettingsCopy.ShouldOpenWithoutTopMost("该账号需要先修改初始密码"));
+        Assert.False(DesktopSettingsCopy.ShouldOpenWithoutTopMost("用户名或密码错误"));
+        Assert.False(DesktopSettingsCopy.ShouldOpenWithoutTopMost(null));
     }
 }

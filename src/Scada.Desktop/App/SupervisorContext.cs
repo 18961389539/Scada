@@ -301,7 +301,9 @@ internal sealed class SupervisorContext : ApplicationContext
             DesktopLaunchError.Clear(_paths);
             DesktopLogger.Info("设置已保存");
         }
-        if (restartAfter || result == DialogResult.OK) StartClient();
+        if (DesktopSettingsCopy.ShouldStartClientAfterSettings(
+                restartAfter, form.SavedSettings is not null, form.UnsavedServerPasswordChange))
+            StartClient();
     }
 
     private void ConfirmExit()

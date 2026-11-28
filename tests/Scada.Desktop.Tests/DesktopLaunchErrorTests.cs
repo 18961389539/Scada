@@ -53,4 +53,14 @@ public sealed class DesktopLaunchErrorTests
     {
         Assert.Equal(expected, DesktopLaunchError.IsMustChangePassword(message));
     }
+
+    [Theory]
+    [InlineData("用户名或密码错误", true)]
+    [InlineData("用户名或密码错误。请在托盘菜单中打开设置，更新账号或密码。", true)]
+    [InlineData("账号已验证，需要先修改初始密码后才能继续。", false)]
+    [InlineData(null, false)]
+    public void DetectsInvalidCredentialsMessage(string? message, bool expected)
+    {
+        Assert.Equal(expected, DesktopLaunchError.IsInvalidCredentials(message));
+    }
 }
