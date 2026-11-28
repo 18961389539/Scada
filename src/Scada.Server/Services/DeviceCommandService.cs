@@ -112,6 +112,25 @@ public sealed class DeviceCommandService(
             return DeviceCommandResult.Failed(DeviceCommandError.Validation,
                 [new ValidationIssue("device.pollInterval.laneBudget", nameof(Device.PollIntervalMs), laneError)]);
 
+        if (momentary is not null)
+        {
+            var entry = db.Entry(device);
+            var original = entry.State != Microsoft.EntityFrameworkCore.EntityState.Detached
+                ? entry.OriginalValues.ToObject() as Device
+                : null;
+            if (original is not null && MomentaryLeaseImpact.CutsDevice(original, device))
+            {
+                var tagIds = await db.Tags.AsNoTracking().Where(x => x.DeviceId == device.Id).Select(x => x.Id).ToListAsync(cancellationToken);
+                if (tagIds.Count > 0)
+                {
+                    var release = await momentary.ReleaseBeforeChangeAsync(tagIds, "修改", cancellationToken);
+                    if (!release.Success)
+                        return DeviceCommandResult.Failed(DeviceCommandError.ActiveMomentaryLease,
+                            release.Error ?? "点动输出尚未释放，请核对现场后再修改");
+                }
+            }
+        }
+
         try
         {
             await db.SaveChangesAsync(cancellationToken);

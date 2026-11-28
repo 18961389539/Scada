@@ -164,7 +164,7 @@ internal sealed class ProjectDeleteApplier(ProjectApplyContext context) : Projec
             pending.Add((entry, tag));
         }
 
-        if (Ctx.Momentary is { } momentary && pending.Count > 0)
+        if (Ctx.Momentary is { } momentary && pending.Count > 0 && !Ctx.DryRun)
         {
             var release = await momentary.ReleaseBeforeDeleteAsync(pending.Select(item => item.Tag.Id), ct);
             if (!release.Success)

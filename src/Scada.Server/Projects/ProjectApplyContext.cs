@@ -33,7 +33,8 @@ public sealed class ProjectApplyContext(
     Scada.Core.Options.ScadaSettings? settings = null,
     Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null,
     IConfiguredSerialProfiles? serialProfiles = null,
-    MomentaryControlService? momentary = null)
+    MomentaryControlService? momentary = null,
+    bool dryRun = false)
 {
     public static readonly JsonSerializerOptions ScreenJson = new(JsonSerializerDefaults.Web);
 
@@ -47,6 +48,7 @@ public sealed class ProjectApplyContext(
     public Scada.Core.Interfaces.IProtocolDriverAvailability? Drivers { get; } = drivers;
     public IConfiguredSerialProfiles? SerialProfiles { get; } = serialProfiles;
     public MomentaryControlService? Momentary { get; } = momentary;
+    public bool DryRun { get; } = dryRun;
 
     public readonly long Now = ScadaTime.NowMs();
 

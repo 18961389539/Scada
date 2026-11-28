@@ -8,6 +8,7 @@ using Scada.Core.Models;
 using Scada.Core.Protocols;
 using System.Text.RegularExpressions;
 using Scada.Data;
+using Scada.Engine.Control;
 using Scada.Server.Endpoints;
 using Scada.Core.Configuration;
 
@@ -34,8 +35,13 @@ public static class ExcelImportImpact
 public sealed class TagExcelService
 {
     private readonly Scada.Core.Options.ScadaSettings _settings;
+    private readonly MomentaryControlService? _momentary;
 
-    public TagExcelService(Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> options) => _settings = options.Value;
+    public TagExcelService(Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> options, MomentaryControlService? momentary = null)
+    {
+        _settings = options.Value;
+        _momentary = momentary;
+    }
 
     public TagExcelService() : this(Microsoft.Extensions.Options.Options.Create(new Scada.Core.Options.ScadaSettings())) { }
 
@@ -300,6 +306,24 @@ public sealed class TagExcelService
             return new(0, 0, skipped + created + updated, errors.Take(50).ToList());
         if (overlapErrors.Count > 0)
             return new(0, 0, skipped + created + updated, errors.Take(50).ToList());
+        if (!dryRun && _momentary is not null)
+        {
+            var impacted = tags.Values
+                .Where(item => item.Id != 0 && baseline.TryGetValue(item.Id, out var prior) && MomentaryLeaseImpact.CutsOrRetargets(prior, item))
+                .Select(item => item.Id)
+                .Distinct()
+                .ToList();
+            if (impacted.Count > 0)
+            {
+                var release = await _momentary.ReleaseBeforeChangeAsync(impacted, "修改", cancellationToken);
+                if (!release.Success)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    return new ImportResult(0, 0, skipped + created + updated,
+                        [release.Error ?? "点动输出尚未释放，请核对现场后再导入"], conflicts);
+                }
+            }
+        }
         if (!dryRun) await db.SaveChangesAsync(cancellationToken);
         var calculationCreated = 0;
         var calculationUpdated = 0;

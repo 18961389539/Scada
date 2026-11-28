@@ -61,6 +61,13 @@ public sealed class TagCommandService(ConfigReloader reloader, TagUsageService u
         var before = tag.Clone();
         if (!Scada.Core.Configuration.ConfigRevision.TryAccept(tag.CalculationRevision, expectedRevision, out var revisionIssue))
             return TagCommandResult.Failed(TagCommandError.Conflict, [revisionIssue!.Value]);
+        if (momentary is not null && MomentaryLeaseImpact.CutsOrRetargets(before, updated))
+        {
+            var release = await momentary.ReleaseBeforeChangeAsync([tag.Id], "修改", cancellationToken);
+            if (!release.Success)
+                return TagCommandResult.Failed(TagCommandError.ActiveMomentaryLease,
+                    [new ValidationIssue("tag.momentary.unreleased", null, release.Error ?? "点动输出尚未释放，请核对现场后再修改")]);
+        }
         tag.ApplyEditableFrom(updated);
         tag.CalculationRevision = Scada.Core.Configuration.ConfigRevision.Next(tag.CalculationRevision);
         try

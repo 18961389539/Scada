@@ -34,8 +34,9 @@ public sealed class ProjectApplier : ProjectSection
         IDbContextFactory<RuntimeDbContext> runtimeFactory, Scada.Core.Options.ScadaSettings? settings = null,
         Scada.Core.Interfaces.IProtocolDriverAvailability? drivers = null,
         IConfiguredSerialProfiles? serialProfiles = null,
-        MomentaryControlService? momentary = null)
-        : base(new ProjectApplyContext(db, jobs, access, userId, userName, runtimeFactory, settings, drivers, serialProfiles, momentary))
+        MomentaryControlService? momentary = null,
+        bool dryRun = false)
+        : base(new ProjectApplyContext(db, jobs, access, userId, userName, runtimeFactory, settings, drivers, serialProfiles, momentary, dryRun))
     {
     }
 

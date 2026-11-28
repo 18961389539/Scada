@@ -390,6 +390,35 @@ public static class ControlEndpoints
             }
             return Results.Ok(items);
         });
+
+        group.MapGet("/momentary-leases", async (
+            HttpContext http, MomentaryControlService momentary, IConfigSnapshot config, CancellationToken ct) =>
+        {
+            var access = await http.GetAccessAsync();
+            var rows = await momentary.ListPersistedAsync(ct);
+            var items = new List<object>();
+            foreach (var row in rows)
+            {
+                if (!access.CanTag(Permission.View, row.TagId)) continue;
+                var tagName = config.TryGetTag(row.TagId, out var tag) ? tag.Name : $"#{row.TagId}";
+                items.Add(new
+                {
+                    id = row.Id,
+                    tagId = row.TagId,
+                    tagName,
+                    deviceId = row.DeviceId,
+                    releaseValue = row.ReleaseValue,
+                    source = row.Source,
+                    userName = row.UserName,
+                    kind = row.Kind.ToString(),
+                    state = row.State.ToString(),
+                    createdTs = row.CreatedTs,
+                    expiresTs = row.ExpiresTs,
+                    releaseRetrying = row.ReleaseRetrying
+                });
+            }
+            return Results.Ok(items);
+        });
     }
 
     public static ControlActor Actor(HttpContext http) => new(http.User.GetUserId(), http.User.GetUserName());

@@ -20,7 +20,8 @@ public sealed record HealthTakeoverReview(
     IReadOnlyList<TakeoverReviewItem> Items,
     HistorySpoolPending? UnreplayedSpool = null,
     int LossWindows = 0,
-    long? LossOldestFrom = null);
+    long? LossOldestFrom = null,
+    int UnreleasedMomentary = 0);
 
 /// <summary>
 /// 接管或重启后留下的结果未知 / 中断项，供健康页核对现场。不自动续跑顺控或配方。
@@ -40,10 +41,12 @@ public sealed class TakeoverReviewService(
         var commands = 0;
         var sequences = 0;
         var recipes = 0;
+        var momentary = 0;
 
+        await using (var db = await runtime.CreateDbContextAsync(ct))
+        {
         if (role.IsActive)
         {
-            await using var db = await runtime.CreateDbContextAsync(ct);
 
             var commandRows = await db.LocalControlCommands.AsNoTracking()
                 .Where(x => x.State == "Unknown")
@@ -69,6 +72,19 @@ public sealed class TakeoverReviewService(
                 .ToListAsync(ct);
             recipes = recipeRows.Count;
             items.AddRange(recipeRows.Select(x => new TakeoverReviewItem("recipe", x.Id.ToString(), x.RecipeName, x.Message ?? "", x.EndedTs ?? x.StartedTs ?? x.CreatedTs)));
+        }
+
+            var leaseRows = await db.MomentaryLeases.AsNoTracking()
+                .OrderBy(x => x.ExpiresTs)
+                .Take(Limit)
+                .ToListAsync(ct);
+            momentary = leaseRows.Count;
+            items.AddRange(leaseRows.Select(x => new TakeoverReviewItem(
+                "momentary",
+                x.Id.ToString(),
+                $"测点 #{x.TagId}",
+                $"点动输出未释放，释放值 {x.ReleaseValue}，来源 {x.Source}；看门狗正在重试，请核对现场。",
+                x.CreatedTs)));
         }
 
         HistorySpoolPending? pending = null;
@@ -101,7 +117,7 @@ public sealed class TakeoverReviewService(
             }
         }
 
-        return new(commands, sequences, recipes, items.OrderByDescending(x => x.Ts ?? 0).Take(Limit).ToList(), pending, lossWindows, lossOldest);
+        return new(commands, sequences, recipes, items.OrderByDescending(x => x.Ts ?? 0).Take(Limit).ToList(), pending, lossWindows, lossOldest, momentary);
     }
 
     public IEnumerable<SystemWarning> HealthWarnings()
@@ -110,17 +126,21 @@ public sealed class TakeoverReviewService(
         try { review = SnapshotAsync().GetAwaiter().GetResult(); }
         catch { yield break; }
         var spoolPending = review.UnreplayedSpool is { } queued && (queued.ApproxCount > 0 || queued.Bytes > 0);
-        if (review.UnknownCommands + review.InterruptedSequences + review.InterruptedRecipes == 0 && !spoolPending && review.LossWindows == 0)
+        var takeoverUnknown = review.UnknownCommands + review.InterruptedSequences + review.InterruptedRecipes > 0;
+        if (!takeoverUnknown && !spoolPending && review.LossWindows == 0 && review.UnreleasedMomentary == 0)
             yield break;
-        var parts = new List<string>
-        {
-            $"有 {review.UnknownCommands} 条本机控制命令结果未知、{review.InterruptedSequences} 条顺控中断、{review.InterruptedRecipes} 条配方下发中断"
-        };
+        var parts = new List<string>();
+        if (takeoverUnknown)
+            parts.Add($"有 {review.UnknownCommands} 条本机控制命令结果未知、{review.InterruptedSequences} 条顺控中断、{review.InterruptedRecipes} 条配方下发中断");
         if (spoolPending)
             parts.Add($"未回放历史暂存约 {review.UnreplayedSpool!.ApproxCount} 条");
         if (review.LossWindows > 0)
             parts.Add($"历史缺口 {review.LossWindows} 个窗口");
-        yield return new("ha_takeover_review",
-            string.Join("，", parts) + "，不会自动重发或续跑，请核对现场后再用新命令执行。");
+        if (review.UnreleasedMomentary > 0)
+            parts.Add($"未释放点动 {review.UnreleasedMomentary} 个（看门狗正在重试，请核对现场；不计入官方工艺报警 KPI）");
+        var suffix = takeoverUnknown || spoolPending || review.LossWindows > 0
+            ? "，不会自动重发或续跑顺控或配方，请核对现场后再用新命令执行。"
+            : "。";
+        yield return new("ha_takeover_review", string.Join("，", parts) + suffix);
     }
 }

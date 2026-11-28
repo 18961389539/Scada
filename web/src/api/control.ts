@@ -32,6 +32,22 @@ export interface ControlStepResult { index: number; stepId?: string | null; type
 export interface ControlRun { id: number; sequenceId: number; sequenceName: string; areaId: number; status: string; startedTs: number; endedTs: number | null; startedBy: string; approvedBy: string | null; message: string | null; steps: ControlStepResult[] }
 export type ControlSubmission = CommandSubmissionResult & { pending?: boolean; approvalId?: string | null; refusals?: string[] | null }
 
+
+export interface MomentaryLease {
+  id: string
+  tagId: number
+  tagName: string
+  deviceId: number | null
+  releaseValue: number
+  source: string
+  userName: string
+  kind: string
+  state: string
+  createdTs: number
+  expiresTs: number
+  releaseRetrying: boolean
+}
+
 export const controlApi = {
   check: async (tagId: number, value: number) => (await http.post<ControlCheck>('/control/check', { tagId, value })).data,
   checkText: async (tagId: number, text: string) => (await http.post<ControlCheck>('/control/check-text', { tagId, text })).data,
@@ -63,7 +79,8 @@ export const controlApi = {
   runs: async (sequenceId?: number, before?: number) => readPage(await http.get<ControlRun[]>('/control/runs', { params: { sequenceId, before } })),
   run: async (id: number) => (await http.get<ControlRun>(`/control/runs/${id}`)).data,
   abort: async (id: number) => http.post(`/control/runs/${id}/abort`),
-  externalWrites: async (take = 20) => (await http.get<ExternalWrite[]>('/control/external-writes', { params: { take } })).data
+  externalWrites: async (take = 20) => (await http.get<ExternalWrite[]>('/control/external-writes', { params: { take } })).data,
+  momentaryLeases: async () => (await http.get<MomentaryLease[]>('/control/momentary-leases')).data
 }
 
 export interface ExternalWrite {

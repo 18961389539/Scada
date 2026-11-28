@@ -194,6 +194,7 @@ public partial class SqliteHistoryBackend : IHistoryBackend
     }
 
     // 更差的质量覆盖先到的点。质量相同保持先写入的值，重放不会改历史。更好的质量不能把坏点洗成好点。
+    // 正式样本覆盖同时间戳的仿真样本并清除仿真标记；仿真不得改写已落盘的正式点。
     private static string BuildHistoryInsert(int rows)
     {
         var sql = new StringBuilder("INSERT INTO HistoryValue (TagId,Ts,Value,Quality,Text,Simulated) VALUES ");
@@ -203,11 +204,8 @@ public partial class SqliteHistoryBackend : IHistoryBackend
             sql.Append("($tag").Append(index).Append(",$ts").Append(index).Append(",$value").Append(index)
                .Append(",$quality").Append(index).Append(",$text").Append(index).Append(",$simulated").Append(index).Append(')');
         }
-        sql.Append(" ON CONFLICT(TagId,Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality, Text = excluded.Text")
-           .Append(", Simulated = CASE WHEN excluded.Simulated OR HistoryValue.Simulated THEN 1 ELSE 0 END")
-           .Append(" WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END")
-           .Append(" > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END")
-           .Append(" OR (excluded.Simulated AND NOT HistoryValue.Simulated)");
+        // 正式点不得被仿真覆盖；同一时间戳上正式覆盖仿真并清除标记。同类样本仍按质量优先级：更差才覆盖先到的点。
+        sql.Append(SqliteHistoryReplica.HistoryValueOnConflict(hasSimulated: true).Replace("ON CONFLICT(TagId, Ts)", "ON CONFLICT(TagId,Ts)", StringComparison.Ordinal));
         return sql.ToString();
     }
 

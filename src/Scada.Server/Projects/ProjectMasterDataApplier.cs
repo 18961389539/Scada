@@ -118,6 +118,26 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             }
             else
             {
+                if (MomentaryLeaseImpact.CutsDevice(existing, incoming))
+                {
+                    if (Ctx.DryRun)
+                    {
+                        Ctx.WarningList.Add($"设备 {incoming.Name} 的变更将先释放其上的点动输出");
+                    }
+                    else if (Ctx.Momentary is { } momentary)
+                    {
+                        var tagIds = await Db.Tags.AsNoTracking().Where(x => x.DeviceId == existing.Id).Select(x => x.Id).ToListAsync(ct);
+                        if (tagIds.Count > 0)
+                        {
+                            var release = await momentary.ReleaseBeforeChangeAsync(tagIds, "修改", ct);
+                            if (!release.Success)
+                            {
+                                Error(entry, release.Error ?? "点动输出尚未释放，请核对现场后再修改");
+                                continue;
+                            }
+                        }
+                    }
+                }
                 incoming.OpcPasswordProtected = existing.OpcPasswordProtected;
                 incoming.DisabledSinceTs = incoming.Enabled ? 0 : existing.Enabled ? Now : existing.DisabledSinceTs;
                 incoming.Revision = Scada.Core.Configuration.ConfigRevision.Next(existing.Revision);
@@ -176,6 +196,22 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
             {
                 var engineeringChanged = existing.Kind != TagKind.Calculated
                     && (existing.Scale != incoming.Scale || existing.Offset != incoming.Offset || existing.Deadband != incoming.Deadband);
+                if (existing.Kind == TagKind.Physical && MomentaryLeaseImpact.CutsOrRetargets(existing, incoming))
+                {
+                    if (Ctx.DryRun)
+                    {
+                        Ctx.WarningList.Add($"测点 {incoming.Name} 的变更将先释放点动输出");
+                    }
+                    else if (Ctx.Momentary is { } momentary)
+                    {
+                        var release = await momentary.ReleaseBeforeChangeAsync([existing.Id], "修改", ct);
+                        if (!release.Success)
+                        {
+                            Error(entry, release.Error ?? "点动输出尚未释放，请核对现场后再修改");
+                            continue;
+                        }
+                    }
+                }
                 incoming.Id = existing.Id; incoming.CalculationRevision = Scada.Core.Configuration.ConfigRevision.Next(existing.CalculationRevision);
                 incoming.Expression = existing.Expression;
                 Db.Entry(existing).CurrentValues.SetValues(incoming); target = existing;

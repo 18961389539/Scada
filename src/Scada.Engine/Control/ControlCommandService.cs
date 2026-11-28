@@ -37,6 +37,67 @@ public sealed record ControlCheck(int TagId, string TagName, double? Current, IR
     double? LimitMin, double? LimitMax, double? MaxStep, string? Feedback, DeviceControlMode Mode, IReadOnlyList<string> Lockouts,
     TagQuality? CurrentQuality = null, string? QualityReason = null);
 
+
+/// <summary>点动按下时记下的现场目标。释放必须写回这些字段，不能跟随后改过的组态走。</summary>
+public sealed record MomentaryReleaseTarget(
+    int DeviceId,
+    int Address,
+    int DbNumber,
+    int BitOffset,
+    string? NodeId,
+    TagDataType DataType,
+    double Scale,
+    double Offset,
+    double? MinValue,
+    double? MaxValue)
+{
+    public static MomentaryReleaseTarget? FromLease(MomentaryLease row) =>
+        row.TargetDeviceId is int deviceId and > 0
+            ? new(deviceId, row.TargetAddress ?? 0, row.TargetDbNumber ?? 1, row.TargetBitOffset ?? 0,
+                row.TargetNodeId, (TagDataType)(row.TargetDataType ?? (int)TagDataType.Float),
+                row.TargetScale ?? 1, row.TargetOffset ?? 0, row.TargetMinValue, row.TargetMaxValue)
+            : null;
+
+    public static MomentaryReleaseTarget? FromTag(Tag? tag) =>
+        tag is { DeviceId: int deviceId and > 0 }
+            ? new(deviceId, tag.Address, tag.DbNumber, tag.BitOffset, tag.NodeId, tag.DataType,
+                tag.Scale, tag.Offset, tag.MinValue, tag.MaxValue)
+            : null;
+
+    public void CopyTo(MomentaryLease row)
+    {
+        row.TargetDeviceId = DeviceId;
+        row.TargetAddress = Address;
+        row.TargetDbNumber = DbNumber;
+        row.TargetBitOffset = BitOffset;
+        row.TargetNodeId = NodeId;
+        row.TargetDataType = (int)DataType;
+        row.TargetScale = Scale;
+        row.TargetOffset = Offset;
+        row.TargetMinValue = MinValue;
+        row.TargetMaxValue = MaxValue;
+    }
+
+    public Tag ApplyTo(Tag? current)
+    {
+        var tag = current?.Clone() ?? new Tag { Id = 0, Name = $"#{DeviceId}", Kind = TagKind.Physical };
+        tag.Kind = TagKind.Physical;
+        tag.DeviceId = DeviceId;
+        tag.Address = Address;
+        tag.DbNumber = DbNumber;
+        tag.BitOffset = BitOffset;
+        tag.NodeId = NodeId ?? "";
+        tag.DataType = DataType;
+        tag.Scale = Scale;
+        tag.Offset = Offset;
+        tag.Writable = true;
+        // 失电优先：释放不受事后收紧的限幅挡住。
+        tag.MinValue = null;
+        tag.MaxValue = null;
+        return tag;
+    }
+}
+
 // 现场控制闭环：检查（就地/远程、挂牌、限幅、变化率、许可互锁）→ 确认 → 双人复核 → 下发及同点回读 → 独立反馈等待 → 审计。
 // 操作员接口、运行画面、顺控、计算脚本和追溯自动应答的写入都走这里。
 public sealed class ControlCommandService
@@ -66,6 +127,10 @@ public sealed class ControlCommandService
 
     public bool IsActive => _role.IsActive;
     public string StandbyMessage => _role.StandbyMessage;
+
+    public MomentaryReleaseTarget? ResolveReleaseTarget(int tagId) =>
+        _config.TryGetTag(tagId, out var tag) ? MomentaryReleaseTarget.FromTag(tag) : null;
+
 
     // 计算脚本等自动化写入：不需要界面确认，但同样受就地/远程、挂牌、限幅、互锁约束；需双人复核的测点拒绝自动写入。
     public async Task<CommandExecutionResult> ExecuteAsync(int tagId, double value, int? userId, string userName, CancellationToken cancellationToken = default, Guid? requestId = null) =>
@@ -136,21 +201,37 @@ public sealed class ControlCommandService
         return result;
     }
 
-    // 点动/瞬时释放：失电优先。跳过确认、双人复核、限幅、互锁与就地限制，仍检查物理测点、可写、设备启用和值域，
-    // 并保留同点回读与审计，避免释放动作本身被联锁挡住。
+    // 点动/瞬时释放：失电优先。跳过确认、双人复核、限幅、互锁、就地限制，以及许可证输出开关。
+    // 已有租约不因事后停用或改为不可写而拒绝；若租约记下了原设备/地址，按原目标写入，不跟当前组态走。
     public async Task<ControlSubmissionResult> SubmitMomentaryReleaseAsync(int tagId, double value, ControlActor actor, string source,
-        Guid? requestId, CancellationToken ct = default)
+        Guid? requestId, CancellationToken ct = default, MomentaryReleaseTarget? target = null)
     {
-        if (OutputBlocked() is { } blocked) return blocked;
-        if (!_config.TryGetTag(tagId, out var tag)) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
-        if (tag.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发现场控制", Outcome: GatewayCommandOutcome.NotSent);
-        if (tag.DeviceId is not int deviceId || !_config.TryGetDevice(deviceId, out var device) || !device.Enabled)
-            return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
-        if (!tag.Writable) return new(false, "测点不可写", Outcome: GatewayCommandOutcome.NotSent);
+        _config.TryGetTag(tagId, out var current);
+        int deviceId;
+        Tag tag;
+        if (target is { DeviceId: > 0 } recorded)
+        {
+            tag = recorded.ApplyTo(current);
+            tag.Id = tagId;
+            if (string.IsNullOrWhiteSpace(tag.Name)) tag.Name = current?.Name ?? $"#{tagId}";
+            deviceId = recorded.DeviceId;
+        }
+        else
+        {
+            if (current is null) return new(false, "测点不存在", Outcome: GatewayCommandOutcome.NotSent);
+            if (current.Kind != TagKind.Physical) return new(false, "计算测点只读，不能下发现场控制", Outcome: GatewayCommandOutcome.NotSent);
+            if (current.DeviceId is not int currentDeviceId)
+                return new(false, "设备不存在或未启用", Outcome: GatewayCommandOutcome.NotSent);
+            tag = current.Clone();
+            tag.Writable = true;
+            tag.MinValue = null;
+            tag.MaxValue = null;
+            deviceId = currentDeviceId;
+        }
         if (!CommandValuePolicy.TryGetRawValue(tag, value, out _, out var error)) return new(false, error, Outcome: GatewayCommandOutcome.NotSent);
         var submission = new ControlSubmission(tagId, value, actor, ControlOrigin.Screen, source, Confirmed: true, requestId);
-        var oldValue = _cache.Get(tag.Id)?.Value;
-        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(device.Id, tag, value, new(requestId, actor.UserId, actor.UserName), ct));
+        var oldValue = _cache.Get(tagId)?.Value;
+        var result = ControlSubmissionResult.From(await _collector.WriteIdentifiedAsync(deviceId, tag, value, new(requestId, actor.UserId, actor.UserName), ct));
         var text = result.Outcome == GatewayCommandOutcome.Unknown ? $"结果未知：{result.Message}"
             : result.Outcome == GatewayCommandOutcome.NotSent ? $"未下发：{result.Message}"
             : result.Success ? $"成功，回读 {result.ReadBack:0.###}" : $"失败：{result.Message}";

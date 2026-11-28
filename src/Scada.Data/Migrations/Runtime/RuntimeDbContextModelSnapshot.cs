@@ -1013,6 +1013,37 @@ namespace Scada.Data.Migrations.Runtime
                         .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("TargetAddress")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetBitOffset")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetDataType")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetDbNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("TargetDeviceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("TargetMaxValue")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("TargetMinValue")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("TargetNodeId")
+                        .HasMaxLength(400)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("TargetOffset")
+                        .HasColumnType("REAL");
+
+                    b.Property<double?>("TargetScale")
+                        .HasColumnType("REAL");
+
                     b.HasKey("Id");
 
                     b.HasIndex("ExpiresTs");

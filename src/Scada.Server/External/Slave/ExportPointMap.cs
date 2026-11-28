@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
@@ -20,6 +21,7 @@ public sealed class ExportPointMap
     private int _builtVersion = -1;
     private ModbusSlaveOptions? _lastModbus;
     private Iec104ServerOptions? _lastIec;
+    private readonly ConcurrentDictionary<int, double> _lastOfficialGood = new();
 
     public ExportPointMap(IConfigSnapshot config, IRealtimeCache cache)
     {
@@ -158,18 +160,18 @@ public sealed class ExportPointMap
             ? kind
             : tag.DataType == TagDataType.Bool ? Iec104PointKind.SinglePoint : Iec104PointKind.MeasuredFloat;
 
-    /// <summary>读取测点当前值；质量不合格时按配置替换。仿真值不以 Good 上送。</summary>
+    /// <summary>读取测点当前值；质量不合格或仿真时按配置替换。Modbus 无品质位，仿真值不得作为正式过程值编码给主站。</summary>
     public ExportSample Read(ExportSlot slot, double? badQualityValue, TagQuality simulationQuality = TagQuality.Uncertain) =>
-        ReadCore(slot.TagId, badQualityValue, simulationQuality);
+        ReadCore(slot.TagId, badQualityValue, simulationQuality, substituteSimulated: true);
 
     /// <summary>IEC 104 侧没有"保持最后值"的语义要求，坏质量由品质位表达，因此不做替代。仿真值仍不以 Good 上送。</summary>
     public ExportSample ReadIec(IecSlot slot, TagQuality simulationQuality = TagQuality.Uncertain) =>
-        ReadCore(slot.TagId, null, simulationQuality);
+        ReadCore(slot.TagId, null, simulationQuality, substituteSimulated: false);
 
     internal static TagQuality NormalizeSimulationQuality(TagQuality quality) =>
         quality == TagQuality.Good ? TagQuality.Uncertain : quality;
 
-    private ExportSample ReadCore(int tagId, double? badQualityValue, TagQuality simulationQuality)
+    private ExportSample ReadCore(int tagId, double? badQualityValue, TagQuality simulationQuality, bool substituteSimulated)
     {
         var v = _cache.Get(tagId);
         // 没有缓存值时用当前 Unix 毫秒，不能用 TickCount64：后者是开机以来的毫秒数，
@@ -181,10 +183,23 @@ public sealed class ExportPointMap
             device = tag.DeviceId is int deviceId && _config.TryGetDevice(deviceId, out var found) ? found : null;
             v = TagFreshness.Apply(v, ScadaTime.NowMs(), tag, device);
         }
-        if (v.Simulated || device is { SimulationEnabled: true })
-            return new ExportSample(v.Value, NormalizeSimulationQuality(simulationQuality), v.SourceTs ?? v.Ts);
-        if (v.Quality == TagQuality.Good) return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);
-        if (badQualityValue is double fallback) return new ExportSample(fallback, v.Quality, v.Ts);
+        var simulated = v.Simulated || device is { SimulationEnabled: true };
+        if (simulated)
+        {
+            var quality = NormalizeSimulationQuality(simulationQuality);
+            var ts = v.SourceTs ?? v.Ts;
+            if (!substituteSimulated) return new ExportSample(v.Value, quality, ts);
+            // Modbus 没有品质位：已配置替代值则用替代值，否则保持该点上次正式好值，绝不把仿真数编码出去。
+            if (badQualityValue is double fallback) return new ExportSample(fallback, quality, ts);
+            if (_lastOfficialGood.TryGetValue(tagId, out var lastGood)) return new ExportSample(lastGood, quality, ts);
+            return new ExportSample(0, quality, ts);
+        }
+        if (v.Quality == TagQuality.Good)
+        {
+            _lastOfficialGood[tagId] = v.Value;
+            return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);
+        }
+        if (badQualityValue is double officialFallback) return new ExportSample(officialFallback, v.Quality, v.Ts);
         return new ExportSample(v.Value, v.Quality, v.SourceTs ?? v.Ts);
     }
 

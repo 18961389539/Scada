@@ -100,7 +100,7 @@ public sealed class ProjectService(IDbContextFactory<ConfigDbContext> factory, I
             ProjectFormat.UpgradeLegacyRules(target, await ProjectExporter.LegacyRuleKeysAsync(db, ct));
             if (!dryRun && expectedBaseSha is not null && expectedBaseSha != baseSha) throw new ProjectException("预览之后工程配置已被修改，请重新预览", 409);
             var plan = ProjectPlanner.Build(current, target, mirror, resolution, overrides);
-            var applier = new ProjectApplier(db, jobs, access, userId, userName, runtime, settings.Value, drivers, serialProfiles, momentary);
+            var applier = new ProjectApplier(db, jobs, access, userId, userName, runtime, settings.Value, drivers, serialProfiles, momentary, dryRun);
             var errors = new List<string>(); var forbidden = new List<string>();
             if (plan.Effective.Any())
                 try { await applier.ApplyAsync(plan, ct); }

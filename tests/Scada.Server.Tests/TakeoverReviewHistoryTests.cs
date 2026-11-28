@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -43,6 +44,30 @@ public sealed class TakeoverReviewHistoryTests
         {
             try { Directory.Delete(root, true); } catch { }
         }
+    }
+
+
+    [Fact]
+    public async Task SnapshotListsUnreleasedMomentaryLeases()
+    {
+        await using var connection = TestRuntime.Open();
+        var runtime = TestRuntime.Factory(connection);
+        await using (var db = runtime.CreateDbContext())
+        {
+            db.MomentaryLeases.Add(new MomentaryLease
+            {
+                Id = Guid.NewGuid(), TagId = 17, ReleaseValue = 0, UserName = "op", Source = "画面",
+                Kind = MomentaryLeaseKind.Press, State = MomentaryLeaseState.Active, ReleaseId = Guid.NewGuid(),
+                CreatedTs = 1_000, StartDeadlineTs = 2_000, ExpiresTs = 3_000
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new TakeoverReviewService(runtime, new StandaloneNodeRole());
+        var review = await service.SnapshotAsync();
+        Assert.Equal(1, review.UnreleasedMomentary);
+        Assert.Contains(review.Items, x => x.Kind == "momentary" && x.Name.Contains("#17") && x.Message.Contains("未释放"));
+        Assert.Contains(service.HealthWarnings(), x => x.Code == "ha_takeover_review" && x.Message.Contains("未释放点动") && x.Message.Contains("不计入官方工艺报警"));
     }
 
     [Fact]

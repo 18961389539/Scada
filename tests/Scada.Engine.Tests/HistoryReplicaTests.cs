@@ -83,8 +83,63 @@ public sealed class HistoryReplicaTests
         Assert.Equal("SN-42", cmd.ExecuteScalar());
     }
 
-    private static void ApplyRow(SqliteConnection db, string table, string?[] row) =>
-        SqliteHistoryReplica.Apply(db, table, new HistoryReplicaRows(File, table, [row], Columns));
+    private static readonly string[] ColumnsWithSimulated = ["TagId", "Ts", "Value", "Quality", "Text", "Simulated"];
+
+    [Fact]
+    public void Official_row_is_not_overwritten_by_a_simulated_sample_at_the_same_timestamp()
+    {
+        using var db = Open();
+        CreateSchema(db, withSimulated: true);
+        Exec(db, "INSERT INTO HistoryValue (TagId, Ts, Value, Quality, Simulated) VALUES (1, 1000, 5.0, 0, 0)");
+
+        ApplyRow(db, "HistoryValue", ["1", "1", "1000", "9.0", "2", null, "1"], ColumnsWithSimulated);
+
+        Assert.Equal(5.0, Scalar(db, "SELECT Value FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+        Assert.Equal(0L, Scalar(db, "SELECT Quality FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+        Assert.Equal(0L, Scalar(db, "SELECT Simulated FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+    }
+
+    [Fact]
+    public void Official_sample_replaces_simulated_row_and_clears_the_flag()
+    {
+        using var db = Open();
+        CreateSchema(db, withSimulated: true);
+        Exec(db, "INSERT INTO HistoryValue (TagId, Ts, Value, Quality, Simulated) VALUES (1, 1000, 8.0, 0, 1)");
+
+        ApplyRow(db, "HistoryValue", ["1", "1", "1000", "3.0", "1", null, "0"], ColumnsWithSimulated);
+
+        Assert.Equal(3.0, Scalar(db, "SELECT Value FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+        Assert.Equal(1L, Scalar(db, "SELECT Quality FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+        Assert.Equal(0L, Scalar(db, "SELECT Simulated FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+    }
+
+    [Fact]
+    public void Same_kind_rows_still_follow_quality_precedence()
+    {
+        using var db = Open();
+        CreateSchema(db, withSimulated: true);
+        Exec(db, "INSERT INTO HistoryValue (TagId, Ts, Value, Quality, Simulated) VALUES (1, 1000, 5.0, 0, 0)");
+
+        ApplyRow(db, "HistoryValue", ["1", "1", "1000", "6.0", "2", null, "0"], ColumnsWithSimulated);
+        Assert.Equal(6.0, Scalar(db, "SELECT Value FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+
+        ApplyRow(db, "HistoryValue", ["2", "1", "1000", "7.0", "0", null, "0"], ColumnsWithSimulated);
+        Assert.Equal(6.0, Scalar(db, "SELECT Value FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+        Assert.Equal(2L, Scalar(db, "SELECT Quality FROM HistoryValue WHERE TagId = 1 AND Ts = 1000"));
+    }
+
+    [Fact]
+    public void Host_and_replica_conflict_sql_match_when_simulated_is_present()
+    {
+        var sql = SqliteHistoryReplica.HistoryValueOnConflict(true);
+        Assert.Contains("Simulated = excluded.Simulated", sql, StringComparison.Ordinal);
+        Assert.Contains("NOT excluded.Simulated AND HistoryValue.Simulated", sql, StringComparison.Ordinal);
+        Assert.DoesNotContain("excluded.Simulated AND NOT HistoryValue.Simulated", sql, StringComparison.Ordinal);
+        Assert.Contains(SqliteHistoryReplica.QualityPriorityPredicate(), sql, StringComparison.Ordinal);
+    }
+
+    private static void ApplyRow(SqliteConnection db, string table, string?[] row, IReadOnlyList<string>? columns = null) =>
+        SqliteHistoryReplica.Apply(db, table, new HistoryReplicaRows(File, table, [row], columns ?? Columns));
 
     private static SqliteConnection Open()
     {
@@ -93,15 +148,16 @@ public sealed class HistoryReplicaTests
         return connection;
     }
 
-    private static void CreateSchema(SqliteConnection db)
+    private static void CreateSchema(SqliteConnection db, bool withSimulated = false)
     {
-        Exec(db, """
+        var simulated = withSimulated ? ", Simulated INTEGER NOT NULL DEFAULT 0" : "";
+        Exec(db, $"""
             CREATE TABLE HistoryValue (
                 TagId INTEGER NOT NULL,
                 Ts INTEGER NOT NULL,
                 Value REAL NOT NULL,
                 Quality INTEGER NOT NULL,
-                Text TEXT,
+                Text TEXT{simulated},
                 PRIMARY KEY (TagId, Ts));
             CREATE TABLE HistoryValueRewrite (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,

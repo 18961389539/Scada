@@ -1132,6 +1132,10 @@ export default {
     noOfflineDesktops: '当前没有已登记且离线的桌面或操作台',
     offlineSince: '最后心跳',
     offlineDesktopTarget: '目标',
+    unreleasedMomentary: "未释放的点动",
+    noUnreleasedMomentary: "当前没有未释放或释放失败的点动",
+    momentaryReleaseValue: "释放值",
+    momentaryRetrying: "释放失败，正在重试",
   },
 
   runtimeBanners: {

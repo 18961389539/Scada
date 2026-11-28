@@ -15,5 +15,6 @@ public sealed class MomentaryLeaseConfiguration : IEntityTypeConfiguration<Momen
         entity.HasIndex(x => x.ExpiresTs);
         entity.Property(x => x.UserName).HasMaxLength(100);
         entity.Property(x => x.Source).HasMaxLength(200);
+        entity.Property(x => x.TargetNodeId).HasMaxLength(400);
     }
 }

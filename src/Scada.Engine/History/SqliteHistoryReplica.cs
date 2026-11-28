@@ -14,10 +14,21 @@ public static class SqliteHistoryReplica
     public const string RewriteTable = "HistoryValueRewrite";
     public static readonly string[] LegacyRaw = ["TagId", "Ts", "Value", "Quality"];
     public static readonly string[] LegacyAggregate = ["TagId", "Ts", "Avg", "Min", "Max", "Count"];
-    // 与 SqliteHistoryBackend.BuildHistoryInsert 保持同一优先级：CommFailure > Bad > Uncertain > Good。
-    private const string QualityPriorityWhere =
-        " WHERE CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END" +
+    // 与 SqliteHistoryBackend.BuildHistoryInsert 保持同一规则：
+    // 质量优先级 CommFailure > Bad > Uncertain > Good；正式覆盖仿真并清除标记；仿真不得改写正式点。
+    public static string QualityPriorityPredicate() =>
+        "CASE excluded.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END" +
         " > CASE HistoryValue.Quality WHEN 2 THEN 3 WHEN 1 THEN 2 WHEN 3 THEN 1 ELSE 0 END";
+
+    public static string HistoryValueOnConflict(bool hasSimulated)
+    {
+        var set = " ON CONFLICT(TagId, Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality, Text = excluded.Text";
+        if (hasSimulated) set += ", Simulated = excluded.Simulated";
+        var where = hasSimulated
+            ? " WHERE (NOT excluded.Simulated AND HistoryValue.Simulated) OR (excluded.Simulated = HistoryValue.Simulated AND " + QualityPriorityPredicate() + ")"
+            : " WHERE " + QualityPriorityPredicate();
+        return set + where;
+    }
 
     public static HistoryReplicaRows Read(SqliteConnection connection, string file, string table, long after, int limit)
     {
@@ -69,9 +80,9 @@ public static class SqliteHistoryReplica
         var types = ColumnTypes(connection, target);
         using var cmd = connection.CreateCommand();
         var parameters = source.Select((_, i) => "$c" + i).ToArray();
-        // 与主机写入保持同一语义：更差的质量覆盖先到的点，更好的质量不能洗白坏点。
+        // 与主机写入保持同一语义：更差的质量覆盖先到的点，更好的质量不能洗白坏点；正式与仿真规则一致。
         var conflict = target == "HistoryValue"
-            ? " ON CONFLICT(TagId, Ts) DO UPDATE SET Value = excluded.Value, Quality = excluded.Quality, Text = excluded.Text" + QualityPriorityWhere
+            ? HistoryValueOnConflict(source.Contains("Simulated"))
             : "";
         var verb = target == "HistoryValue" ? "INSERT" : "INSERT OR REPLACE";
         cmd.CommandText = $"{verb} INTO {Quote(target)} ({string.Join(", ", source.Select(Quote))}) VALUES ({string.Join(", ", parameters)}){conflict}";

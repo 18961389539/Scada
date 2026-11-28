@@ -1132,6 +1132,10 @@ export default {
     noOfflineDesktops: 'No registered desktop or console clients are offline',
     offlineSince: 'Last heartbeat',
     offlineDesktopTarget: 'Target',
+    unreleasedMomentary: "Unreleased jog outputs",
+    noUnreleasedMomentary: "No unreleased or failed-to-release jog outputs",
+    momentaryReleaseValue: "Release value",
+    momentaryRetrying: "Release failed, retrying",
   },
 
   runtimeBanners: {
