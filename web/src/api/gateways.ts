@@ -9,7 +9,7 @@ export interface GatewayInfo {
   capabilities: string[]; adminRevision: string; serverTs: number
 }
 export interface GatewayDevice {
-  id: number; name: string; protocol: string; enabled: boolean; tagCount: number; online: boolean; error: string | null; lastPollTs: number
+  id: number; name: string; protocol: string; enabled: boolean; tagCount: number; online: boolean; error: string | null; lastPollTs: number; configuredStandby?: boolean
 }
 export interface GatewayAssignment {
   deviceId: number; deviceName: string; gatewayId: number | null; gatewayName: string | null

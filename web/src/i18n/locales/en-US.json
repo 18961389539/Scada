@@ -1488,7 +1488,9 @@
     "kf2f3e9": "Not connected",
     "kf3ea6d": "Actions",
     "kf9a96b": "Gateway reports: {0}",
-    "kfe6728": "Current configuration"
+    "kfe6728": "Current configuration",
+    "configuredPath": "Path role",
+    "configuredStandby": "Standby path"
   },
   "hmiLibraryView": {
     "k04c9f0": "Invalid file: {0}",

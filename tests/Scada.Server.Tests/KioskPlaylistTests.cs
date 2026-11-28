@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -130,5 +131,48 @@ public sealed class KioskPlaylistTests(AuthorizationTests.Site site) : IClassFix
 
         using var after = await admin.PostAsJsonAsync("/api/annunciators/silence-visible", new { });
         Assert.NotEqual(HttpStatusCode.Forbidden, after.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASecondLoginDoesNotUnlockAnotherTokensMonitorSession()
+    {
+        var wall = await site.ClientAsync("admin");
+        var suffix = U();
+        var screen = await SeedPublishedScreenAsync("监视画面" + suffix);
+        var created = await Ok(await wall.PostAsJsonAsync("/api/kiosk-playlists", new
+        {
+            name = "监视列表" + suffix,
+            screenIds = new[] { screen },
+            intervalSeconds = 20,
+            monitorOnly = true
+        }));
+        var id = created.GetProperty("id").GetInt32();
+
+        try
+        {
+            using (var enter = await wall.PostAsJsonAsync($"/api/kiosk-playlists/{id}/enter-monitor", new { }))
+                Assert.True(enter.IsSuccessStatusCode, await enter.Content.ReadAsStringAsync());
+
+            using var anonymous = site.CreateClient();
+            using var login = await anonymous.PostAsJsonAsync("/api/auth/login", new { userName = "admin", password = "admin123" });
+            Assert.True(login.IsSuccessStatusCode, await login.Content.ReadAsStringAsync());
+            var token = (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString()!;
+            using var engineer = site.CreateClient();
+            engineer.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            using (var stillBlocked = await wall.PostAsJsonAsync("/api/annunciators/silence-visible", new { }))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, stillBlocked.StatusCode);
+                Assert.Contains("监视专用", await stillBlocked.Content.ReadAsStringAsync());
+            }
+
+            using var allowed = await engineer.PostAsJsonAsync("/api/annunciators/silence-visible", new { });
+            Assert.NotEqual(HttpStatusCode.Forbidden, allowed.StatusCode);
+        }
+        finally
+        {
+            using var leave = await wall.PostAsync("/api/kiosk-playlists/leave-monitor", null);
+            Assert.True(leave.IsSuccessStatusCode, await leave.Content.ReadAsStringAsync());
+        }
     }
 }

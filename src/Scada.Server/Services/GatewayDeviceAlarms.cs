@@ -23,8 +23,11 @@ public sealed partial class GatewayCenterService
         if (state is null) { state = new() { DeviceId = device.Id }; runtime.GatewayDeviceHealth.Add(state); }
         if (state.GatewayId != gatewayId)
         {
-            state.GatewayId = gatewayId; state.SessionId = null; state.ObservedRevision = null; state.ReceivedTs = state.ObservedTs = state.LastPollTs = 0;
-            state.Online = false; state.Error = null; state.ExpectedRevision = "";
+            // 改挂到新活动网关：丢掉旧路径的观察，但不按未知故障清成离线。
+            // 对账在新路径确认配置前会抑制官方「设备离线」，宽限从配置就绪后重新起算。
+            state.GatewayId = gatewayId; state.SessionId = null; state.ObservedRevision = null;
+            state.ReceivedTs = state.ObservedTs = state.LastPollTs = 0;
+            state.Error = null; state.ExpectedRevision = ""; state.OfflineSinceTs = null; state.MonitoringSinceTs = Now;
         }
         if (state.ExpectedRevision != revision)
         { state.ExpectedRevision = revision; state.MonitoringSinceTs = Now; state.OfflineSinceTs = null; }
@@ -93,6 +96,9 @@ public sealed partial class GatewayCenterService
                     activeByDevice.TryGetValue(device.Id, out var alarm);
                     var connected = gateway.Enabled && gateway.SessionId != null && gateway.LeaseUntilTs > Now;
                     var ready = connected && gateway.AppliedRevision == revision;
+                    // 路径刚切过来、尚无本网关观察、且配置未确认时，抑制离线报警，并把宽限推迟到配置就绪之后。
+                    if (!ready && connected && state.ReceivedTs == 0 && state.LastPollTs == 0)
+                    { state.OfflineSinceTs = null; state.MonitoringSinceTs = Now; continue; }
                     var observed = ready && CurrentObservation(state, gateway, revision);
                     if (observed && Healthy(state, device))
                     { state.OfflineSinceTs = null; if (alarm is not null) Close(alarm, "当前网关已确认设备通信恢复", true); continue; }

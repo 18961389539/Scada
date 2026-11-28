@@ -1488,7 +1488,9 @@
     "kf2f3e9": "未连接",
     "kf3ea6d": "操作",
     "kf9a96b": "网关上报：{0}",
-    "kfe6728": "当前配置"
+    "kfe6728": "当前配置",
+    "configuredPath": "采集关系",
+    "configuredStandby": "备用路径"
   },
   "hmiLibraryView": {
     "k04c9f0": "文件无效：{0}",

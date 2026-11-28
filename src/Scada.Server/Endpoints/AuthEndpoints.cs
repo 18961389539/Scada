@@ -111,8 +111,9 @@ public static class AuthEndpoints
 
             // 登录成功意味着账号刚通过密码校验：清掉校验缓存，避免"刚被管理员启用"的账号
             // 因为 5 秒窗口内还留着旧的停用状态而拿到一个立刻被判失效的令牌。
+            // 不在这里 LeaveUser：Invalidate 只清 5 秒校验缓存，不会作废其他客户端已签发的令牌；
+            // 若解开全部监视锁，大屏上仍有效的令牌会重新能下发。改密/撤销/删除仍会清理。
             tokenCache.Invalidate(user.Id);
-            kioskMonitors.LeaveUser(user.Id);
             var (token, expiresAt) = tokenService.Create(user);
             return Results.Ok(new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
                 user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken)))));

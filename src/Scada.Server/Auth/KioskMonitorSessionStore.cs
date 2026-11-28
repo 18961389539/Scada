@@ -23,6 +23,7 @@ public sealed class KioskMonitorSessionStore
     private readonly INodeRole _role;
     private readonly TimeProvider _clock;
     private long _loadedGeneration = long.MinValue;
+    private bool _loadSucceeded;
 
     public KioskMonitorSessionStore(
         IDbContextFactory<RuntimeDbContext>? runtime = null,
@@ -110,6 +111,8 @@ public sealed class KioskMonitorSessionStore
     public bool IsLocked(HttpContext http)
     {
         EnsureFresh();
+        // 重载失败或本任期尚未成功对齐时按失败关闭：拒绝下发，避免升主窗口里锁蒸发成可写。
+        if (!IsReady()) return true;
         var key = SessionKey(http);
         if (string.IsNullOrWhiteSpace(key)) return false;
         if (!_sessions.TryGetValue(key, out var entry))
@@ -132,12 +135,17 @@ public sealed class KioskMonitorSessionStore
         return null;
     }
 
-    public void Reload()
+    public void Reload() => TryReload();
+
+    public bool IsReady() => _loadSucceeded && _loadedGeneration == _role.Generation;
+
+    private bool TryReload()
     {
         if (_runtime is null)
         {
             _loadedGeneration = _role.Generation;
-            return;
+            _loadSucceeded = true;
+            return true;
         }
         try
         {
@@ -159,21 +167,25 @@ public sealed class KioskMonitorSessionStore
                 if (!keep.Contains(key)) _sessions.TryRemove(key, out _);
             db.SaveChanges();
             _loadedGeneration = _role.Generation;
+            _loadSucceeded = true;
+            return true;
         }
         catch
         {
-            _loadedGeneration = _role.Generation;
+            // 失败时不把任期标成已对齐，也不清空已有内存会话；IsLocked 按失败关闭拒绝下发并重试重载。
+            _loadSucceeded = false;
+            return false;
         }
     }
 
     private void EnsureFresh()
     {
         var generation = _role.Generation;
-        if (generation == _loadedGeneration) return;
+        if (_loadSucceeded && generation == _loadedGeneration) return;
         lock (_loadLock)
         {
-            if (generation == _loadedGeneration) return;
-            Reload();
+            if (_loadSucceeded && generation == _loadedGeneration) return;
+            TryReload();
         }
     }
 

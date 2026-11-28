@@ -143,12 +143,19 @@ public sealed partial class GatewayCenterService
             {
                 Expire(command, gateway);
                 if (command.ResultJson is not null) continue;
-                if (command.State is "Reserved" or "Authorized") { holding = true; continue; }
-                if (holding || offer is not null) continue;
                 var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == command.DeviceId, ct);
                 var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
                 if (device is null || !Ready(gateway, device, revision) || command.Revision != revision)
-                { Finish(command, new(GatewayCommandOutcome.NotSent, "设备或配置已变化，命令未下发")); continue; }
+                {
+                    Finish(command, device is not null && _paths.Resolve(device).GatewayId != command.GatewayId
+                        ? PathChangeResult(command)
+                        : command.State == "Authorized"
+                            ? new(GatewayCommandOutcome.Unknown, "命令已失去在线、配置、权限或期限条件，不再授权执行")
+                            : new(GatewayCommandOutcome.NotSent, "设备或配置已变化，命令未下发"));
+                    continue;
+                }
+                if (command.State is "Reserved" or "Authorized") { holding = true; continue; }
+                if (holding || offer is not null) continue;
                 var caps = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json) ?? [];
                 if (command.Text is not null && !caps.Contains(GatewayProtocol.TextWriteCapability))
                 { Finish(command, new(GatewayCommandOutcome.NotSent, "此网关版本尚未支持字符串写入")); continue; }
@@ -248,6 +255,33 @@ public sealed partial class GatewayCenterService
         }
         finally { _mutations.Release(); }
     }
+    internal async Task SettleCommandsAfterPathChangeAsync(int deviceId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _mutations.WaitAsync(ct);
+            try
+            {
+                await using var runtime = await OpenRuntimeAsync(ct);
+                await using var tx = await runtime.Database.BeginTransactionAsync(ct);
+                var pending = await runtime.GatewayCommands.Where(x => x.DeviceId == deviceId && x.ResultJson == null).ToListAsync(ct);
+                foreach (var command in pending)
+                    Finish(command, PathChangeResult(command));
+                await runtime.SaveChangesAsync(ct); await tx.CommitAsync(ct);
+            }
+            finally { _mutations.Release(); }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "采集路径切换后收口设备 {DeviceId} 的未完成命令失败", deviceId);
+        }
+    }
+
+    private static GatewayCommandResult PathChangeResult(GatewayControlCommand command) =>
+        command.State == "Authorized"
+            ? new(GatewayCommandOutcome.Unknown, "采集路径已变更，执行授权已发出但结果未知；不会自动重发")
+            : new(GatewayCommandOutcome.NotSent, "采集路径已变更，命令未下发");
+
     private bool Ready(AcquisitionGateway gateway, Device device, string revision) => gateway.Enabled && gateway.SessionId is not null && gateway.LeaseUntilTs > Now
         && gateway.LastSeenTs >= Now - 10000 && gateway.AppliedRevision == revision && _paths.Resolve(device).GatewayId == gateway.Id && device.Enabled
         && _deviceHealth.TryGetValue(device.Id, out var status) && status.GatewayId == gateway.Id && status.SessionId == gateway.SessionId
