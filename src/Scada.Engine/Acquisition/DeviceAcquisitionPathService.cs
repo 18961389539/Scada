@@ -17,14 +17,25 @@ public sealed class DeviceAcquisitionPathService(
     IConfigSnapshot config,
     IRealtimeCache cache,
     ILogger<DeviceAcquisitionPathService> logger,
-    INodeRole? role = null) : BackgroundService, IDeviceAcquisitionPaths
+    INodeRole? role = null,
+    IDeviceDriverFactory? drivers = null,
+    IReadPlanBuilder? plans = null,
+    IServiceProvider? services = null) : BackgroundService, IDeviceAcquisitionPaths
 {
     private readonly INodeRole _role = role ?? new StandaloneNodeRole();
     private readonly ConcurrentDictionary<int, AcquisitionPathKind> _active = new();
+    private readonly ConcurrentDictionary<int, PrimaryProbe> _probes = new();
+    private readonly ConcurrentDictionary<int, byte> _probing = new();
+    private readonly SemaphoreSlim _probeGate = new(2, 2);
+    private readonly object _loadLock = new();
+    private long _loadedGeneration = long.MinValue;
     public event Action<int, AcquisitionPathKind, string>? PathChanged;
 
-    public AcquisitionPathKind Current(int deviceId) =>
-        _active.TryGetValue(deviceId, out var path) ? path : AcquisitionPathKind.Primary;
+    public AcquisitionPathKind Current(int deviceId)
+    {
+        EnsureFresh();
+        return _active.TryGetValue(deviceId, out var path) ? path : AcquisitionPathKind.Primary;
+    }
 
     public bool HasStandby(Device device) => DeviceAcquisitionRules.HasStandby(device);
 
@@ -43,6 +54,8 @@ public sealed class DeviceAcquisitionPathService(
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         do
         {
+            if (_loadedGeneration != _role.Generation)
+                await LoadAsync(stoppingToken);
             if (_role.IsActive)
                 await TickAsync(stoppingToken);
         }
@@ -54,13 +67,50 @@ public sealed class DeviceAcquisitionPathService(
         try
         {
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
-            foreach (var row in await runtime.DeviceAcquisitionStates.AsNoTracking().ToListAsync(ct))
-                _active[row.DeviceId] = row.ActivePath;
+            var rows = await runtime.DeviceAcquisitionStates.AsNoTracking().ToListAsync(ct);
+            lock (_loadLock)
+            {
+                ApplyRows(rows);
+                _loadedGeneration = _role.Generation;
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogError(ex, "加载设备采集路径失败");
         }
+    }
+
+    // 写值路由在升主后可能立刻到来，不能等下一轮 Tick。角色任期变化时同步从已同步的运行库重载。
+    internal void EnsureFresh()
+    {
+        var generation = _role.Generation;
+        if (generation == _loadedGeneration) return;
+        lock (_loadLock)
+        {
+            if (generation == _loadedGeneration) return;
+            try
+            {
+                using var runtime = runtimeFactory.CreateDbContext();
+                ApplyRows(runtime.DeviceAcquisitionStates.AsNoTracking().ToList());
+                _loadedGeneration = generation;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "角色切换后重载设备采集路径失败");
+            }
+        }
+    }
+
+    private void ApplyRows(IReadOnlyList<DeviceAcquisitionState> rows)
+    {
+        var keep = new HashSet<int>();
+        foreach (var row in rows)
+        {
+            _active[row.DeviceId] = row.ActivePath;
+            keep.Add(row.DeviceId);
+        }
+        foreach (var key in _active.Keys)
+            if (!keep.Contains(key)) _active.TryRemove(key, out _);
     }
 
     internal async Task TickAsync(CancellationToken ct)
@@ -79,8 +129,10 @@ public sealed class DeviceAcquisitionPathService(
                     }).Entity;
                 var current = state.ActivePath;
                 _active[device.Id] = current;
-                var activeHealthy = IsRouteHealthy(device, current, now);
-                var primaryHealthy = current == AcquisitionPathKind.Primary ? activeHealthy : IsPrimaryReachable(device);
+                var activeHealthy = IsRouteHealthy(device, now);
+                if (current == AcquisitionPathKind.Standby)
+                    RequestPrimaryProbe(device, ct);
+                var primaryHealthy = current == AcquisitionPathKind.Primary ? activeHealthy : IsPrimaryHealthy(device, now);
                 var next = Evaluate(device, state, activeHealthy, primaryHealthy, now);
                 if (next is null) continue;
                 if (Switch(runtime, device, state, next.Value.Path, next.Value.Reason, "system", now))
@@ -116,6 +168,7 @@ public sealed class DeviceAcquisitionPathService(
             return (AcquisitionPathKind.Standby, $"主路径持续离线或坏品质超过 {failover} 毫秒，切到备路径");
 
         if (state.ActivePath == AcquisitionPathKind.Standby
+            && !state.ManualLock
             && state.PrimaryHealthySince is long goodSince
             && now - goodSince >= switchback)
             return (AcquisitionPathKind.Primary, $"主路径恢复并保持 {switchback} 毫秒，自动切回");
@@ -143,9 +196,36 @@ public sealed class DeviceAcquisitionPathService(
             PathChanged?.Invoke(device.Id, path, state.Reason ?? reason);
     }
 
+    public async Task ResumeAutoAsync(int deviceId, string user, CancellationToken ct)
+    {
+        await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
+        if (!config.TryGetDevice(deviceId, out var device))
+            throw new InvalidOperationException("设备不存在");
+        if (!_role.IsActive)
+            throw new InvalidOperationException("备机不能切换采集路径");
+        var state = await runtime.DeviceAcquisitionStates.SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct)
+            ?? runtime.DeviceAcquisitionStates.Add(new DeviceAcquisitionState { DeviceId = deviceId }).Entity;
+        if (!state.ManualLock) return;
+        var now = ScadaTime.NowMs();
+        state.ManualLock = false;
+        state.PrimaryHealthySince = null;
+        state.ChangedTs = now;
+        state.ChangedBy = user;
+        state.Reason = "恢复自动回切";
+        runtime.OperationLogs.Add(new OperationLog
+        {
+            UserName = user, Ts = now,
+            Action = $"设备 {device.Name} 采集路径恢复自动回切",
+            Result = state.Reason, TargetType = "DeviceAcquisition", TargetId = device.Id.ToString()
+        });
+        await runtime.SaveChangesAsync(ct);
+        logger.LogInformation("设备 {Device} 采集路径恢复自动回切", device.Name);
+    }
+
     private bool Switch(RuntimeDbContext runtime, Device device, DeviceAcquisitionState state, AcquisitionPathKind path, string reason, string user, long now)
     {
-        if (state.ActivePath == path && _active.TryGetValue(device.Id, out var known) && known == path)
+        var locking = path == AcquisitionPathKind.Standby && !string.Equals(user, "system", StringComparison.Ordinal);
+        if (state.ActivePath == path && _active.TryGetValue(device.Id, out var known) && known == path && state.ManualLock == locking)
             return false;
         var from = state.ActivePath;
         state.ActivePath = path;
@@ -154,6 +234,7 @@ public sealed class DeviceAcquisitionPathService(
         state.Reason = reason.Length > 1000 ? reason[..1000] : reason;
         state.ActiveUnhealthySince = null;
         state.PrimaryHealthySince = path == AcquisitionPathKind.Primary ? now : null;
+        state.ManualLock = locking;
         _active[device.Id] = path;
         runtime.OperationLogs.Add(new OperationLog
         {
@@ -165,12 +246,16 @@ public sealed class DeviceAcquisitionPathService(
         return true;
     }
 
-    private bool IsRouteHealthy(Device device, AcquisitionPathKind path, long now)
+    internal static int StaleMs(Device device) => Math.Max(device.PollIntervalMs * 3, 3_000);
+
+    internal static bool IsSampleHealthy(int physicalCount, int goodCount) =>
+        physicalCount > 0 && goodCount * 2 >= physicalCount;
+
+    private bool IsRouteHealthy(Device device, long now)
     {
-        var tags = config.TagsOfDevice(device.Id);
-        var physical = tags.Where(x => x.Kind == TagKind.Physical).ToList();
+        var physical = config.TagsOfDevice(device.Id).Where(x => x.Kind == TagKind.Physical).ToList();
         if (physical.Count == 0) return false;
-        var staleMs = Math.Max(device.PollIntervalMs * 3, 3_000);
+        var staleMs = StaleMs(device);
         var healthy = 0;
         foreach (var tag in physical)
         {
@@ -178,21 +263,66 @@ public sealed class DeviceAcquisitionPathService(
             if (value is null) continue;
             if (value.Quality == TagQuality.Good && now - value.Ts <= staleMs) healthy++;
         }
-        return healthy * 2 >= physical.Count;
+        return IsSampleHealthy(physical.Count, healthy);
     }
 
-    // 备路径运行时主路径不再官方采集。第一期对主 Host/Port 做短 TCP 探活以判断能否回切；
-    // 没有可探地址时不自动回切，只允许人工切回。探活不写实时值和历史。
-    private bool IsPrimaryReachable(Device device)
+    private bool IsPrimaryHealthy(Device device, long now) =>
+        _probes.TryGetValue(device.Id, out var probe) && now - probe.Ts <= StaleMs(device) && probe.Healthy;
+
+    private void RequestPrimaryProbe(Device device, CancellationToken ct)
     {
-        var primary = DeviceAcquisitionRules.PrimaryOf(device);
-        if (string.IsNullOrWhiteSpace(primary.Host) || primary.Port is not int port) return false;
+        if (!_probing.TryAdd(device.Id, 0)) return;
+        _ = ProbePrimaryAsync(device, ct);
+    }
+
+    private async Task ProbePrimaryAsync(Device device, CancellationToken ct)
+    {
         try
         {
-            using var client = new System.Net.Sockets.TcpClient();
-            var task = client.ConnectAsync(primary.Host, port);
-            return task.Wait(TimeSpan.FromMilliseconds(Math.Clamp(device.TimeoutMs, 200, 1500))) && client.Connected;
+            await _probeGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                var healthy = await MeasurePrimaryHealthAsync(device, ct).ConfigureAwait(false);
+                _probes[device.Id] = new PrimaryProbe(healthy, ScadaTime.NowMs());
+            }
+            finally { _probeGate.Release(); }
         }
-        catch { return false; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _probes[device.Id] = new PrimaryProbe(false, ScadaTime.NowMs());
+            logger.LogDebug(ex, "主路径探活失败：{Device}", device.Name);
+        }
+        finally { _probing.TryRemove(device.Id, out _); }
     }
+
+    // 回切与切出使用同一套品质门槛。官方缓存在备路径运行时反映的是备路径，
+    // 因此对主键做短时、非发布的协议读取；主键走网关时改看网关租约/会话，主机不对 PLC 做 TCP 探活。
+    // 探活在评估循环之外异步进行，不会拖死 1 秒 Tick。
+    private async Task<bool> MeasurePrimaryHealthAsync(Device device, CancellationToken ct)
+    {
+        if (device.GatewayId is int gatewayId)
+        {
+            var health = services?.GetService(typeof(IGatewaySessionHealth)) as IGatewaySessionHealth;
+            return health?.IsHealthy(gatewayId) == true;
+        }
+        if (drivers is null || plans is null) return false;
+        var tags = config.TagsOfDevice(device.Id).Where(x => x.Kind == TagKind.Physical).ToList();
+        if (tags.Count == 0) return false;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(Math.Clamp(device.TimeoutMs, 500, 5_000));
+        await using var driver = drivers.Create(device);
+        await driver.ConnectAsync(device, timeout.Token);
+        var values = await driver.ReadAsync(device, plans.Build(device, tags), timeout.Token);
+        var byId = values.ToDictionary(x => x.TagId);
+        var good = 0;
+        foreach (var tag in tags)
+        {
+            if (byId.TryGetValue(tag.Id, out var value) && value.Quality == TagQuality.Good)
+                good++;
+        }
+        return IsSampleHealthy(tags.Count, good);
+    }
+
+    private readonly record struct PrimaryProbe(bool Healthy, long Ts);
 }

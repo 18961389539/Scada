@@ -12,4 +12,6 @@ public class DeviceAcquisitionState
     public string? Reason { get; set; }
     public long? ActiveUnhealthySince { get; set; }
     public long? PrimaryHealthySince { get; set; }
+    /// <summary>人工切到备路径后锁定，自动回切只在解锁或人工切回主机后恢复。</summary>
+    public bool ManualLock { get; set; }
 }

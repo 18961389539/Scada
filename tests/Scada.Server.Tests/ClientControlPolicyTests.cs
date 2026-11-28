@@ -38,6 +38,7 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/calc-jobs/8/maintenance-done")]
     [InlineData("/api/devices/12/diagnostics/reconnect")]
     [InlineData("/api/devices/5/acquisition-path")]
+    [InlineData("/api/devices/5/acquisition-path/auto")]
     [InlineData("/api/devices/2/test")]
     [InlineData("/api/devices/test-draft")]
     [InlineData("/api/alarms/9/ack")]
@@ -121,6 +122,7 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/acknowledge-writes"),
             ("Endpoints/CollectorDiagnosticEndpoints.cs", "/api/devices/1/diagnostics/reconnect"),
             ("Endpoints/DeviceEndpoints.cs", "/api/devices/1/acquisition-path"),
+            ("Endpoints/DeviceEndpoints.cs", "/api/devices/1/acquisition-path/auto"),
             ("Endpoints/DeviceEndpoints.cs", "/api/devices/1/test"),
             ("Endpoints/DeviceEndpoints.cs", "/api/devices/test-draft"),
             ("Endpoints/AlarmEndpoints.cs", "/api/alarms/1/ack"),
@@ -167,6 +169,8 @@ public sealed class ClientControlPolicyTests
     [InlineData("GET", "/api/calc-jobs/8/reset", false)]
     [InlineData("POST", "/api/devices/12/diagnostics/reconnect", true)]
     [InlineData("GET", "/api/devices/12/diagnostics/reconnect", false)]
+    [InlineData("POST", "/api/devices/12/acquisition-path/auto", true)]
+    [InlineData("GET", "/api/devices/12/acquisition-path/auto", false)]
     [InlineData("POST", "/api/devices/12/test", true)]
     [InlineData("GET", "/api/devices/12/test", false)]
     [InlineData("POST", "/api/devices/test-draft", true)]

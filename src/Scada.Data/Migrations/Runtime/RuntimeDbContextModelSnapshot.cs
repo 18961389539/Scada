@@ -580,6 +580,9 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<long>("ChangedTs")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("ManualLock")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long?>("PrimaryHealthySince")
                         .HasColumnType("INTEGER");
 

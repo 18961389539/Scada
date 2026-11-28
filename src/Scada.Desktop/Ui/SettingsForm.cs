@@ -1,3 +1,4 @@
+using System.Linq;
 using Scada.Desktop.Api;
 using Scada.Desktop.Configuration;
 
@@ -42,7 +43,7 @@ internal sealed class SettingsForm : Form
     private readonly ComboBox _playlistCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly Panel _layoutMonitorPanel = new() { AutoSize = true, Dock = DockStyle.Fill };
     private readonly ComboBox _workstationCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
-    private readonly CheckBox _monitorOnly = new() { Text = "监视模式（只读，不显示操作控件）", AutoSize = true, Checked = true };
+    private readonly CheckBox _monitorOnly = new() { Text = "默认以监视模式打开（播放列表若本身为监视模式，服务端会在播放期间禁止下发）", AutoSize = true, Checked = true };
     private readonly CheckBox _fullScreen = new() { Text = "全屏运行", AutoSize = true, Checked = true };
     private readonly ComboBox _monitorCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly CheckBox _autoStart = new() { Text = "Windows 登录后自动启动", AutoSize = true };
@@ -803,7 +804,8 @@ internal sealed class SettingsForm : Form
                     WorkstationId = kind == "workstation" || kind == "screen" && _monitorOnly.Checked ? station?.Id : null,
                     WorkstationName = kind == "workstation" || kind == "screen" && _monitorOnly.Checked ? station?.Name : null,
                     TargetName = kind == "playlist" ? (_playlistCombo.SelectedItem as PlaylistOption)?.Label : kind == "workspace" ? "多页面工作台" : null,
-                    MonitorOnly = (kind == "screen" || kind == "playlist") && _monitorOnly.Checked
+                    MonitorOnly = (kind == "screen" || kind == "playlist") && (_monitorOnly.Checked
+                        || kind == "playlist" && _playlists.Any(row => row.Id == playlistId && row.MonitorOnly))
                 },
                 Display = new DesktopDisplay
                 {

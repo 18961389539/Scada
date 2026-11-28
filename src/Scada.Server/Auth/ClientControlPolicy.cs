@@ -30,9 +30,9 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
     public static bool IsMonitorOnly(HttpContext http) =>
         string.Equals(http.Request.Headers[MonitorOnlyHeader].FirstOrDefault(), "1", StringComparison.Ordinal);
 
-    // 会改变现场的写路径：写值、画面动作、审批/驳回、顺控启停、配方下发/中止/上载、生产批次开始/中止、挂牌、就地/远方、光字牌试验/消音、单条报警确认/备注、正式停机确认/产量修正、质量检验与工单写入、追溯扫码、采集重连、设备采集路径切换、设备连通测试与未保存设备试连、仿真强制/故障/复位、已发布脚本调用。
+    // 会改变现场的写路径：写值、画面动作、审批/驳回、顺控启停、配方下发/中止/上载、生产批次开始/中止、挂牌、就地/远方、光字牌试验/消音、单条报警确认/备注、正式停机确认/产量修正、质量检验与工单写入、追溯扫码、采集重连、设备采集路径切换与恢复自动回切、设备连通测试与未保存设备试连、仿真强制/故障/复位、已发布脚本调用。
     // 就地/远方是 PUT /api/control/modes/{id}；清除仿真故障是 DELETE /api/simulation/{id}/fault。因此策略匹配 POST、PUT 与 DELETE。
-    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/(approve|reject)|control/sequences/\d+/start|control/runs/\d+/abort|control/lockouts|control/lockouts/\d+/remove|control/modes/\d+|recipes/\d+/download|recipes/downloads/\d+/abort|annunciators/\d+/(silence|clear-silence|test)|annunciators/(silence-visible|ack-visible)|alarm-rules/\d+/(shelve|unshelve|out-of-service)|traceability/jobs/\d+/scan|devices/\d+/diagnostics/reconnect|devices/\d+/acquisition-path|devices/\d+/test|devices/test-draft|simulation/\d+/(force|release|fault|reset)|calc-jobs/\d+/(invoke|reset|maintenance-done|acknowledge-writes)|alarms/\d+/(ack|notes)|oee/downtimes|oee/downtimes/\d+|oee/downtimes/\d+/confirm|oee/corrections|quality/inspections|quality/inspections/\d+|quality/inspections/\d+/delete|work-orders|work-orders/\d+|work-orders/\d+/status|work-orders/\d+/parts|recipes/upload|production-batches|production-batches/\d+/abort)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^/api/(commands|screens/\d+/actions/[^/]+|control/requests/[^/]+/(approve|reject)|control/sequences/\d+/start|control/runs/\d+/abort|control/lockouts|control/lockouts/\d+/remove|control/modes/\d+|recipes/\d+/download|recipes/downloads/\d+/abort|annunciators/\d+/(silence|clear-silence|test)|annunciators/(silence-visible|ack-visible)|alarm-rules/\d+/(shelve|unshelve|out-of-service)|traceability/jobs/\d+/scan|devices/\d+/diagnostics/reconnect|devices/\d+/acquisition-path(/auto)?|devices/\d+/test|devices/test-draft|simulation/\d+/(force|release|fault|reset)|calc-jobs/\d+/(invoke|reset|maintenance-done|acknowledge-writes)|alarms/\d+/(ack|notes)|oee/downtimes|oee/downtimes/\d+|oee/downtimes/\d+/confirm|oee/corrections|quality/inspections|quality/inspections/\d+|quality/inspections/\d+/delete|work-orders|work-orders/\d+|work-orders/\d+/status|work-orders/\d+/parts|recipes/upload|production-batches|production-batches/\d+/abort)$", RegexOptions.IgnoreCase)]
     public static partial Regex ControlPath();
 
     public static bool IsControlRequest(HttpContext http)
@@ -42,7 +42,7 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
         return ControlPath().IsMatch(http.Request.Path.Value ?? "");
     }
 
-    public async Task InvokeAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, Microsoft.Extensions.Options.IOptionsMonitor<MobileOptions> mobile)
+    public async Task InvokeAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, Microsoft.Extensions.Options.IOptionsMonitor<MobileOptions> mobile, KioskMonitorSessionStore kioskMonitors)
     {
         if (IsControlRequest(http) && IsMobile(http) && !mobile.CurrentValue.Permits(http.User))
         {
@@ -53,6 +53,12 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
         if (IsControlRequest(http) && IsMonitorOnly(http))
         {
             var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", "本客户端处于监视模式，不能下发控制");
+            await result.ExecuteAsync(http);
+            return;
+        }
+        if (IsControlRequest(http) && kioskMonitors.IsLocked(http.User.GetUserId()))
+        {
+            var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", "正在播放监视专用 Kiosk 列表，不能下发控制");
             await result.ExecuteAsync(http);
             return;
         }

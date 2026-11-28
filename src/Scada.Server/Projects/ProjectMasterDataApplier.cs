@@ -102,6 +102,12 @@ internal sealed class ProjectMasterDataApplier(ProjectApplyContext context) : Pr
                     continue;
                 }
             }
+            var standbyChannelIssues = await DeviceCommandService.ApplyStandbyChannelEndpointIssuesAsync(Db, incoming, ct);
+            if (standbyChannelIssues.Count > 0)
+            {
+                Error(entry, string.Join("；", standbyChannelIssues.Select(x => x.Message)));
+                continue;
+            }
             // 更新项必须先带上本机编号，否则站号/串口检查会把自己当成冲突对象。
             if (existing is not null) incoming.Id = existing.Id;
             // 通道绑定完成后走与 REST/MCP 同一套 InspectIssuesAsync（本机采集隔离、站号、串口、重名）。

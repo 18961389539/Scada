@@ -121,6 +121,7 @@ export interface DeviceAcquisitionInfo {
   activeHost: string | null
   activePort: number | null
   hasStandby: boolean
+  manualLock: boolean
   reason?: string | null
   changedBy?: string | null
   changedTs: number

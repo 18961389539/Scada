@@ -1,5 +1,11 @@
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Scada.Core.Acquisition;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
+using Scada.Core.Interfaces;
+using Scada.Core.Models;
 using Scada.Engine.Acquisition;
 
 namespace Scada.Engine.Tests;
@@ -65,5 +71,130 @@ public sealed class DeviceAcquisitionPathTests
         Assert.NotNull(back);
         Assert.Equal(AcquisitionPathKind.Primary, back!.Value.Path);
         Assert.Contains("自动切回", back.Value.Reason);
+    }
+    [Fact]
+    public void ManualLockSuppressesAutomaticSwitchbackUntilResumed()
+    {
+        var device = Device();
+        var state = new DeviceAcquisitionState
+        {
+            DeviceId = 1, ActivePath = AcquisitionPathKind.Standby, ManualLock = true, PrimaryHealthySince = 20_000
+        };
+        Assert.Null(DeviceAcquisitionPathService.Evaluate(device, state, activeHealthy: true, primaryHealthy: true, now: 60_000));
+
+        state.ManualLock = false;
+        state.PrimaryHealthySince = null;
+        Assert.Null(DeviceAcquisitionPathService.Evaluate(device, state, activeHealthy: true, primaryHealthy: true, now: 70_000));
+        Assert.Equal(70_000, state.PrimaryHealthySince);
+        Assert.Null(DeviceAcquisitionPathService.Evaluate(device, state, activeHealthy: true, primaryHealthy: true, now: 99_000));
+        var back = DeviceAcquisitionPathService.Evaluate(device, state, activeHealthy: true, primaryHealthy: true, now: 100_000);
+        Assert.NotNull(back);
+        Assert.Equal(AcquisitionPathKind.Primary, back!.Value.Path);
+    }
+
+    [Fact]
+    public void StandbyChannelEndpointIsAuthoritativeOnApply()
+    {
+        var device = new Device
+        {
+            Id = 1, Name = "总线", Protocol = ProtocolType.ModbusRtu,
+            ChannelId = 1, SerialPort = "COM1", BaudRate = 9600, DataBits = 8, TimeoutMs = 3000,
+            StandbyChannelId = 2, FailoverHoldMs = 10_000, SwitchbackHoldMs = 30_000, Enabled = true
+        };
+        var before = DeviceAcquisitionRules.Apply(device, DeviceAcquisitionRules.StandbyOf(device));
+        Assert.Equal("COM1", before.SerialPort);
+        Assert.Equal(3000, before.TimeoutMs);
+
+        var standby = new AcquisitionChannel
+        {
+            Id = 2, Name = "备总线", Protocol = ProtocolType.ModbusRtu,
+            SerialPort = "COM8", BaudRate = 19200, DataBits = 8, TimeoutMs = 800
+        };
+        DeviceAcquisitionRules.StampStandbyFromChannel(device, standby);
+        Assert.Null(DeviceAcquisitionRules.Validate(device));
+        Assert.Equal("COM8", device.StandbySerialPort);
+        Assert.Equal(19200, device.StandbyBaudRate);
+        Assert.Equal(800, device.StandbyTimeoutMs);
+
+        var applied = DeviceAcquisitionRules.Apply(device, DeviceAcquisitionRules.StandbyOf(device));
+        Assert.Equal(2, applied.ChannelId);
+        Assert.Equal("COM8", applied.SerialPort);
+        Assert.Equal(19200, applied.BaudRate);
+        Assert.Equal(800, applied.TimeoutMs);
+        Assert.Equal("COM1", device.SerialPort);
+        Assert.Equal(3000, device.TimeoutMs);
+    }
+
+    [Fact]
+    public async Task CurrentReloadsActivePathWhenRoleGenerationChanges()
+    {
+        using var connection = TestRuntime.Open();
+        var factory = TestRuntime.Factory(connection);
+        var role = new MutableRole();
+        var device = Device();
+        var snapshot = new PathSnapshot(device);
+        await using (var runtime = await factory.CreateDbContextAsync())
+        {
+            runtime.DeviceAcquisitionStates.Add(new DeviceAcquisitionState
+            {
+                DeviceId = device.Id, ActivePath = AcquisitionPathKind.Primary, ChangedTs = 1
+            });
+            await runtime.SaveChangesAsync();
+        }
+
+        var service = new DeviceAcquisitionPathService(factory, snapshot, new EmptyCache(), NullLogger<DeviceAcquisitionPathService>.Instance, role);
+        await service.LoadAsync(CancellationToken.None);
+        Assert.Equal(AcquisitionPathKind.Primary, service.Current(device.Id));
+
+        await using (var runtime = await factory.CreateDbContextAsync())
+        {
+            var state = await runtime.DeviceAcquisitionStates.SingleAsync();
+            state.ActivePath = AcquisitionPathKind.Standby;
+            await runtime.SaveChangesAsync();
+        }
+
+        Assert.Equal(AcquisitionPathKind.Primary, service.Current(device.Id));
+        role.Bump();
+        Assert.Equal(AcquisitionPathKind.Standby, service.Current(device.Id));
+    }
+
+    [Fact]
+    public void RouteHealthUsesMajorityGoodSamples()
+    {
+        Assert.False(DeviceAcquisitionPathService.IsSampleHealthy(0, 0));
+        Assert.False(DeviceAcquisitionPathService.IsSampleHealthy(4, 1));
+        Assert.True(DeviceAcquisitionPathService.IsSampleHealthy(4, 2));
+        Assert.True(DeviceAcquisitionPathService.IsSampleHealthy(1, 1));
+    }
+
+    private sealed class MutableRole : INodeRole
+    {
+        public bool IsActive => true;
+        public long Generation { get; private set; }
+        public void Bump() => Generation++;
+    }
+
+    private sealed class PathSnapshot(params Device[] devices) : IConfigSnapshot
+    {
+        public IReadOnlyList<Device> Devices { get; } = devices;
+        public IReadOnlyList<Tag> Tags { get; } = [];
+        public IReadOnlyList<AlarmRule> AlarmRules { get; } = [];
+        public int Version => 1;
+        public long LoadedAt => 0;
+        public Task ReloadAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public bool TryGetTag(int tagId, out Tag tag) { tag = null!; return false; }
+        public bool TryGetDevice(int deviceId, out Device device)
+        {
+            device = Devices.FirstOrDefault(x => x.Id == deviceId)!;
+            return device is not null;
+        }
+    }
+
+    private sealed class EmptyCache : IRealtimeCache
+    {
+        public void Set(TagValue value) { }
+        public TagValue? Get(int tagId) => null;
+        public IReadOnlyList<TagValue> GetMany(IEnumerable<int> tagIds) => [];
+        public IReadOnlyDictionary<int, TagValue> Snapshot() => new Dictionary<int, TagValue>();
     }
 }

@@ -61,6 +61,7 @@
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="form.monitorOnly" data-test="kiosk-playlist-monitor-only">{{ $t('kioskPlaylists.monitorOnly') }}</el-checkbox>
+          <p class="hint" data-test="kiosk-playlist-monitor-hint">{{ $t('kioskPlaylists.monitorOnlyHint') }}</p>
         </el-form-item>
       </el-form>
       <template #footer>

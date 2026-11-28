@@ -38,7 +38,7 @@ public sealed record DeviceRequest(
 public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
 public sealed record DeviceAcquisitionPathRequest(AcquisitionPathKind Path, string? Reason = null);
 public sealed record DeviceAcquisitionInfo(int DeviceId, string Name, int AreaId, AcquisitionPathKind ActivePath,
-    int? ActiveGatewayId, int? ActiveChannelId, string? ActiveHost, int? ActivePort, bool HasStandby, string? Reason, string? ChangedBy, long ChangedTs);
+    int? ActiveGatewayId, int? ActiveChannelId, string? ActiveHost, int? ActivePort, bool HasStandby, bool ManualLock, string? Reason, string? ChangedBy, long ChangedTs);
 
 
 public static class DeviceEndpoints
@@ -104,6 +104,25 @@ public static class DeviceEndpoints
             catch (InvalidOperationException ex)
             {
                 return EndpointHelpers.ValidationProblem([EndpointHelpers.Issue("device.acquisition.switch", "path", ex.Message)]);
+            }
+        }).RequireAuthorization(AccessPolicies.Control);
+
+        group.MapPost("/{id:int}/acquisition-path/auto", async (
+            int id,
+            HttpContext http,
+            DeviceAcquisitionPathService paths,
+            CancellationToken cancellationToken) =>
+        {
+            if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Control, $"恢复设备采集自动回切 #{id}") is { } denied) return denied;
+            try
+            {
+                var user = http.User.Identity?.Name ?? "user";
+                await paths.ResumeAutoAsync(id, user, cancellationToken);
+                return Results.Ok();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return EndpointHelpers.ValidationProblem([EndpointHelpers.Issue("device.acquisition.resume", "path", ex.Message)]);
             }
         }).RequireAuthorization(AccessPolicies.Control);
 
@@ -409,6 +428,9 @@ public static class DeviceEndpoints
             var channelIssues = await DeviceCommandService.ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
             if (channelIssues.Count > 0)
                 return EndpointHelpers.ValidationProblem(channelIssues.Select(issue => issue.ToApiIssue()).ToArray());
+            var standbyChannelIssues = await DeviceCommandService.ApplyStandbyChannelEndpointIssuesAsync(db, device, cancellationToken);
+            if (standbyChannelIssues.Count > 0)
+                return EndpointHelpers.ValidationProblem(standbyChannelIssues.Select(issue => issue.ToApiIssue()).ToArray());
 
             // 编辑时留空密码表示沿用已保存口令；试连也不要求用户重新输入。
             var usesCredentials = device.Protocol == ProtocolType.OpcUa
@@ -462,7 +484,7 @@ public static class DeviceEndpoints
         var route = paths.Resolve(device);
         return new DeviceAcquisitionInfo(
             device.Id, device.Name, device.AreaId, route.Path, route.GatewayId, route.ChannelId, route.Host, route.Port,
-            DeviceAcquisitionRules.HasStandby(device), state?.Reason, state?.ChangedBy, state?.ChangedTs ?? 0);
+            DeviceAcquisitionRules.HasStandby(device), state?.ManualLock == true, state?.Reason, state?.ChangedBy, state?.ChangedTs ?? 0);
     }
 
     internal static void ApplyStandbySettings(Device device, DeviceRequest request)

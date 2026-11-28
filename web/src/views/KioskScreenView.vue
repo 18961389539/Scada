@@ -73,8 +73,30 @@ const playlistIds = computed(() => {
 const id = computed(() => Number.isFinite(routeId.value) ? routeId.value : playlistIds.value[0] ?? Number.NaN)
 const invalidId = computed(() => !Number.isFinite(id.value) && !playlistLoadError.value)
 const monitorOnly = computed(() => savedPlaylist.value?.monitorOnly === true || route.query.monitorOnly === '1')
+const enteredMonitorSession = ref(false)
 watch(monitorOnly, value => { setMonitorOnlyClient(value) }, { immediate: true })
-onBeforeUnmount(() => { setMonitorOnlyClient(false) })
+async function enterMonitorSession(playlist: KioskPlaylist): Promise<void> {
+  if (!playlist.monitorOnly) {
+    if (enteredMonitorSession.value) {
+      try { await kioskPlaylistApi.leaveMonitor() } catch { /* 离开失败不阻断播放 */ }
+      enteredMonitorSession.value = false
+    }
+    return
+  }
+  try {
+    await kioskPlaylistApi.enterMonitor(playlist.id)
+    enteredMonitorSession.value = true
+  } catch { /* 服务端会话失败时仍靠请求头做客户端只读 */ }
+}
+async function leaveMonitorSession(): Promise<void> {
+  if (!enteredMonitorSession.value) return
+  try { await kioskPlaylistApi.leaveMonitor() } catch { /* 关闭窗口时尽力离开 */ }
+  enteredMonitorSession.value = false
+}
+onBeforeUnmount(() => {
+  setMonitorOnlyClient(false)
+  void leaveMonitorSession()
+})
 const intervalSec = computed(() => {
   if (savedPlaylist.value) return Math.max(2, Math.min(600, savedPlaylist.value.intervalSeconds))
   const value = Number(route.query.interval)
@@ -134,11 +156,12 @@ let disposeStatusReconnect: (() => void) | undefined
 async function loadSavedPlaylist(): Promise<void> {
   const raw = Number(route.params.id)
   const fromPlaylistRoute = route.path.startsWith('/kiosk/playlists/')
-  if (!fromPlaylistRoute || !Number.isSafeInteger(raw) || raw <= 0) { savedPlaylist.value = null; playlistLoadError.value = ''; return }
+  if (!fromPlaylistRoute || !Number.isSafeInteger(raw) || raw <= 0) { savedPlaylist.value = null; playlistLoadError.value = ''; void leaveMonitorSession(); return }
   try {
     savedPlaylist.value = await kioskPlaylistApi.get(raw)
     playlistLoadError.value = ''
     if (savedPlaylist.value.screenIds[0]) current.value = savedPlaylist.value.screenIds[0]
+    await enterMonitorSession(savedPlaylist.value)
   } catch (reason) {
     savedPlaylist.value = null
     playlistLoadError.value = errorMessage(reason, tr('kioskPlaylists.loadFailed'))

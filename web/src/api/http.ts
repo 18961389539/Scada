@@ -23,14 +23,24 @@ export const USER_KEY = 'scada_user'
 export const EXPIRES_KEY = 'scada_token_expires'
 export const MONITOR_ONLY_KEY = 'scada_monitor_only'
 
+let monitorOnlySession: boolean | null = null
+
 export function setMonitorOnlyClient(on: boolean): void {
+  monitorOnlySession = null
   try {
     if (on) localStorage.setItem(MONITOR_ONLY_KEY, '1')
     else localStorage.removeItem(MONITOR_ONLY_KEY)
   } catch { /* 私密模式或存储不可用时仍可走 URL 参数 */ }
 }
 
+/** 会话级覆盖：不写 localStorage。预览或临时只读用，离开时传 null 恢复。 */
+export function setMonitorOnlySession(on: boolean | null): void {
+  monitorOnlySession = on
+}
+
 export function isMonitorOnlyClient(): boolean {
+  if (monitorOnlySession === true) return true
+  if (monitorOnlySession === false) return false
   try {
     if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('monitorOnly') === '1') return true
     return localStorage.getItem(MONITOR_ONLY_KEY) === '1'

@@ -30,6 +30,22 @@ public static class KioskPlaylistEndpoints
             var row = await db.KioskPlaylists.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             return row is null ? Results.NotFound() : Results.Ok(View(row));
         });
+        group.MapPost("/{id:int}/enter-monitor", async (int id, HttpContext http, IDbContextFactory<ConfigDbContext> factory, KioskMonitorSessionStore sessions, CancellationToken ct) =>
+        {
+            if (http.User.GetUserId() is not int userId) return Results.Unauthorized();
+            await using var db = await factory.CreateDbContextAsync(ct);
+            var row = await db.KioskPlaylists.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
+            if (row is null) return Results.NotFound();
+            if (row.MonitorOnly) sessions.Enter(userId, row.Id);
+            else sessions.Leave(userId);
+            return Results.Ok(new { monitorOnly = row.MonitorOnly, entered = row.MonitorOnly });
+        });
+        group.MapPost("/leave-monitor", (HttpContext http, KioskMonitorSessionStore sessions) =>
+        {
+            if (http.User.GetUserId() is not int userId) return Results.Unauthorized();
+            sessions.Leave(userId);
+            return Results.NoContent();
+        });
         group.MapPost("", (KioskPlaylistRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
             SaveAsync(null, request, http, factory, runtimeFactory, ct)).RequireAuthorization(AccessPolicies.GlobalConfigure);
         group.MapPut("/{id:int}", (int id, KioskPlaylistRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>

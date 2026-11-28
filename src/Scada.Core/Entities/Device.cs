@@ -45,6 +45,12 @@ public class Device : IAuditedEntity
     public int? StandbyChannelId { get; set; }
     public string? StandbyHost { get; set; }
     public int? StandbyPort { get; set; }
+    public string? StandbySerialPort { get; set; }
+    public int? StandbyBaudRate { get; set; }
+    public int? StandbyDataBits { get; set; }
+    public SerialParity? StandbyParity { get; set; }
+    public SerialStopBits? StandbyStopBits { get; set; }
+    public int? StandbyTimeoutMs { get; set; }
     public int FailoverHoldMs { get; set; } = 10_000;
     public int SwitchbackHoldMs { get; set; } = 30_000;
     // 组态并发令牌。省略修订号的旧客户端仍可保存；带上则必须与当前值一致。
@@ -94,6 +100,12 @@ public class Device : IAuditedEntity
         StandbyChannelId = source.StandbyChannelId;
         StandbyHost = source.StandbyHost;
         StandbyPort = source.StandbyPort;
+        StandbySerialPort = source.StandbySerialPort;
+        StandbyBaudRate = source.StandbyBaudRate;
+        StandbyDataBits = source.StandbyDataBits;
+        StandbyParity = source.StandbyParity;
+        StandbyStopBits = source.StandbyStopBits;
+        StandbyTimeoutMs = source.StandbyTimeoutMs;
         FailoverHoldMs = source.FailoverHoldMs;
         SwitchbackHoldMs = source.SwitchbackHoldMs;
     }

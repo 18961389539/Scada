@@ -51,6 +51,9 @@ public sealed class DeviceCommandService(
         var channelIssues = await ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
         if (channelIssues.Count > 0)
             return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelIssues);
+        var standbyChannelIssues = await ApplyStandbyChannelEndpointIssuesAsync(db, device, cancellationToken);
+        if (standbyChannelIssues.Count > 0)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation, standbyChannelIssues);
 
         var issues = await InspectIssuesAsync(db, device, null, cancellationToken);
         if (issues.Count > 0)
@@ -87,6 +90,9 @@ public sealed class DeviceCommandService(
         var channelIssues = await ApplyChannelEndpointIssuesAsync(db, device, cancellationToken);
         if (channelIssues.Count > 0)
             return DeviceCommandResult.Failed(DeviceCommandError.Validation, channelIssues);
+        var standbyChannelIssues = await ApplyStandbyChannelEndpointIssuesAsync(db, device, cancellationToken);
+        if (standbyChannelIssues.Count > 0)
+            return DeviceCommandResult.Failed(DeviceCommandError.Validation, standbyChannelIssues);
 
         var issues = await InspectIssuesAsync(db, device, device.Id, cancellationToken);
         if (issues.Count > 0)
@@ -234,6 +240,8 @@ public sealed class DeviceCommandService(
     {
         var issues = ConfigurationValidator.DeviceIssues(device, settings, drivers);
         if (issues.Count > 0) return issues;
+        var standbyStamp = await ApplyStandbyChannelEndpointIssuesAsync(db, device, cancellationToken);
+        if (standbyStamp.Count > 0) return standbyStamp;
         if (settings is { LocalCollectionEnabled: false } && LocalCollection.IsUnassignedEnabled(device))
             return [new ValidationIssue("device.gateway.required", nameof(Device.GatewayId), LocalCollection.UnassignedDeviceMessage)];
         if (await ValidateChannelStationAsync(db, device, cancellationToken) is { } station) return [station];
@@ -288,6 +296,23 @@ public sealed class DeviceCommandService(
         }
         // 一条物理链路只有一个超时：成员设备的超时由通道统一决定。
         device.TimeoutMs = channel.TimeoutMs;
+        return [];
+    }
+
+    /// <summary>备用通道同样是端点权威：保存时把通道端点写入备用 Host/Port/串口字段，运行时叠加才不会连到主键地址。</summary>
+    public static async Task<IReadOnlyList<ValidationIssue>> ApplyStandbyChannelEndpointIssuesAsync(
+        ConfigDbContext db, Device device, CancellationToken ct)
+    {
+        if (device.StandbyChannelId is not int channelId)
+        {
+            DeviceAcquisitionRules.ClearStandbyChannelEndpoint(device);
+            return [];
+        }
+        if (await ValidateStandbyChannelAsync(db, device, ct) is { } issue) return [issue];
+        var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, ct);
+        if (channel is null)
+            return [new ValidationIssue("device.standby.channelNotFound", nameof(Device.StandbyChannelId), "备用通道不存在")];
+        DeviceAcquisitionRules.StampStandbyFromChannel(device, channel);
         return [];
     }
 

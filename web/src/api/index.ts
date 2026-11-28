@@ -122,6 +122,8 @@ export const deviceApi = {
   acquisition: async () => (await http.get<import('../types').DeviceAcquisitionInfo[]>('/devices/acquisition')).data,
   switchAcquisitionPath: async (id: number, path: 'Primary' | 'Standby', reason?: string) =>
     (await http.post(`/devices/${id}/acquisition-path`, { path, reason })).data,
+  resumeAcquisitionAuto: async (id: number) =>
+    (await http.post(`/devices/${id}/acquisition-path/auto`)).data,
   remove: async (id: number) => http.delete(`/devices/${id}`),
   test: async (id: number, area: string, address: number, dataType: string, dbNumber = 1, bitOffset = 0, nodeId = '', textLength = 0) =>
     (

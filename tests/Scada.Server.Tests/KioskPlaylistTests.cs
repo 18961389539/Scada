@@ -95,4 +95,40 @@ public sealed class KioskPlaylistTests(AuthorizationTests.Site site) : IClassFix
         using var forbidden = await op.PostAsJsonAsync("/api/kiosk-playlists", new { name = "操作员新建" + suffix, screenIds = new[] { published } });
         Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
     }
+    [Fact]
+    public async Task EnteringMonitorPlaylistBlocksControlUntilLeave()
+    {
+        var admin = await site.ClientAsync("admin");
+        var suffix = U();
+        var screen = await SeedPublishedScreenAsync("监视画面" + suffix);
+        var created = await Ok(await admin.PostAsJsonAsync("/api/kiosk-playlists", new
+        {
+            name = "监视列表" + suffix,
+            screenIds = new[] { screen },
+            intervalSeconds = 20,
+            monitorOnly = true
+        }));
+        var id = created.GetProperty("id").GetInt32();
+
+        try
+        {
+            using (var enter = await admin.PostAsJsonAsync($"/api/kiosk-playlists/{id}/enter-monitor", new { }))
+                Assert.True(enter.IsSuccessStatusCode, await enter.Content.ReadAsStringAsync());
+
+            using (var blocked = await admin.PostAsJsonAsync("/api/annunciators/silence-visible", new { }))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, blocked.StatusCode);
+                var body = await blocked.Content.ReadAsStringAsync();
+                Assert.Contains("监视专用", body);
+            }
+        }
+        finally
+        {
+            using var leave = await admin.PostAsync("/api/kiosk-playlists/leave-monitor", null);
+            Assert.True(leave.IsSuccessStatusCode, await leave.Content.ReadAsStringAsync());
+        }
+
+        using var after = await admin.PostAsJsonAsync("/api/annunciators/silence-visible", new { });
+        Assert.NotEqual(HttpStatusCode.Forbidden, after.StatusCode);
+    }
 }

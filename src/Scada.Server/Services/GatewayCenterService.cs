@@ -35,7 +35,7 @@ public sealed record GatewayAssignmentInfo(int DeviceId, string DeviceName, int?
     long DisabledSinceTs, bool CanMove, string? BlockReason);
 public sealed record GatewayManagedDevice(int Id, string Name, ProtocolType Protocol, bool Enabled, int TagCount, bool Online, string? Error, long LastPollTs);
 
-public sealed partial class GatewayCenterService : BackgroundService
+public sealed partial class GatewayCenterService : BackgroundService, IGatewaySessionHealth
 {
     private readonly IDbContextFactory<ConfigDbContext> _factory;
     private readonly IDbContextFactory<RuntimeDbContext> _runtime;
@@ -644,6 +644,9 @@ public sealed partial class GatewayCenterService : BackgroundService
         var gateway = await AuthorizedAsync(db, caller, ct);
         if (sessionId == Guid.Empty || gateway.SessionId != sessionId || gateway.LeaseUntilTs <= Now) throw new GatewayRequestException(409, "网关会话已失效，请重新握手", "session_expired"); return gateway;
     }
+    public bool IsHealthy(int gatewayId) =>
+        _leases.TryGetValue(gatewayId, out var lease) && lease.Enabled && lease.SessionId is not null && lease.Until > Now;
+
     private void Remember(AcquisitionGateway gateway) => _leases[gateway.Id] = (gateway.SessionId, gateway.LeaseUntilTs, gateway.Enabled, gateway.AppliedRevision);
     private static string Name(string? name) => name?.Trim() is string value && value.Length is > 0 and <= 100 ? value : throw new GatewayRequestException(400, "网关名称须为 1～100 个字符");
     private void Audit(RuntimeDbContext runtime, int id, string name, string action) => runtime.OperationLogs.Add(new() { UserId = id, UserName = name, Ts = Now, Action = action, Result = "成功" });

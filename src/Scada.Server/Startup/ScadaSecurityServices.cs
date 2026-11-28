@@ -153,6 +153,7 @@ internal static class ScadaSecurityServices
         builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, AuditingAuthorizationResultHandler>();
         builder.Services.AddSingleton<RealtimeSubscriptionStore>();
         builder.Services.AddSingleton<LoginThrottle>();
+        builder.Services.AddSingleton<KioskMonitorSessionStore>();
         builder.Services.AddSingleton<SessionRegistry>();
         builder.Services.AddHostedService<SessionReaper>();
 

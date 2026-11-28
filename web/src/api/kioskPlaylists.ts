@@ -24,5 +24,7 @@ export const kioskPlaylistApi = {
   get: async (id: number) => (await http.get<KioskPlaylist>(`/kiosk-playlists/${id}`)).data,
   create: async (request: KioskPlaylistRequest) => (await http.post<KioskPlaylist>('/kiosk-playlists', request)).data,
   save: async (id: number, request: KioskPlaylistRequest) => (await http.put<KioskPlaylist>(`/kiosk-playlists/${id}`, request)).data,
-  remove: async (id: number, revision: number) => http.delete(`/kiosk-playlists/${id}`, { params: { revision } })
+  remove: async (id: number, revision: number) => http.delete(`/kiosk-playlists/${id}`, { params: { revision } }),
+  enterMonitor: async (id: number) => (await http.post<{ monitorOnly: boolean; entered: boolean }>(`/kiosk-playlists/${id}/enter-monitor`)).data,
+  leaveMonitor: async () => { await http.post('/kiosk-playlists/leave-monitor') }
 }

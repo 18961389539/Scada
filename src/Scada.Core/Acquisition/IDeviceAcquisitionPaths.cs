@@ -85,6 +85,51 @@ public static class DeviceAcquisitionRules
         clone.ChannelId = route.ChannelId;
         if (route.Host is not null) clone.Host = route.Host;
         if (route.Port is int port) clone.Port = port;
+        if (route.Path == AcquisitionPathKind.Standby)
+        {
+            if (!string.IsNullOrWhiteSpace(device.StandbySerialPort))
+            {
+                clone.SerialPort = device.StandbySerialPort;
+                if (device.StandbyBaudRate is int baud) clone.BaudRate = baud;
+                if (device.StandbyDataBits is int bits) clone.DataBits = bits;
+                if (device.StandbyParity is { } parity) clone.Parity = parity;
+                if (device.StandbyStopBits is { } stop) clone.StopBits = stop;
+            }
+            if (device.StandbyTimeoutMs is int timeout) clone.TimeoutMs = timeout;
+        }
         return clone;
+    }
+
+    public static void ClearStandbyChannelEndpoint(Device device)
+    {
+        device.StandbySerialPort = null;
+        device.StandbyBaudRate = null;
+        device.StandbyDataBits = null;
+        device.StandbyParity = null;
+        device.StandbyStopBits = null;
+        device.StandbyTimeoutMs = null;
+    }
+
+    public static void StampStandbyFromChannel(Device device, AcquisitionChannel channel)
+    {
+        if (ChannelProtocols.UsesSerial(channel.Protocol))
+        {
+            device.StandbySerialPort = channel.SerialPort;
+            device.StandbyBaudRate = channel.BaudRate;
+            device.StandbyDataBits = channel.DataBits;
+            device.StandbyParity = channel.Parity;
+            device.StandbyStopBits = channel.StopBits;
+        }
+        else
+        {
+            device.StandbyHost = channel.Host;
+            device.StandbyPort = channel.Port;
+            device.StandbySerialPort = null;
+            device.StandbyBaudRate = null;
+            device.StandbyDataBits = null;
+            device.StandbyParity = null;
+            device.StandbyStopBits = null;
+        }
+        device.StandbyTimeoutMs = channel.TimeoutMs;
     }
 }

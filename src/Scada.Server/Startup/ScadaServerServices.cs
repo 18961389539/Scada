@@ -56,6 +56,7 @@ internal static class ScadaServerServices
                 && x.InboxRetryMaxMs >= x.InboxRetryBaseMs && x.InboxRetryMaxMs <= 3600000,
                 "网关租约须为 15～120 秒，收件箱限额至少 1024 字节，命令期限须为 100～120000 毫秒；离线延时须为 0～300000 毫秒，状态宽限须为 1000～300000 毫秒；收件箱最大尝试次数须为 1～100，重试基数须为 100～60000 毫秒且不高于重试上限（不超过 3600000 毫秒）").ValidateOnStart();
         builder.Services.AddSingleton<GatewayCenterService>();
+        builder.Services.AddSingleton<Scada.Core.Acquisition.IGatewaySessionHealth>(sp => sp.GetRequiredService<GatewayCenterService>());
         builder.Services.AddHostedService(sp => sp.GetRequiredService<GatewayCenterService>());
         builder.Services.AddSingleton<LocalCommandLedger>();
         builder.Services.AddHostedService<LocalCommandLedgerReconciler>();

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Scada.Core.Acquisition;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -175,8 +176,10 @@ public static class ChannelEndpoints
             if (await db.Channels.AnyAsync(x => x.Id != id && x.Name == channel.Name, cancellationToken)) return EndpointHelpers.BadRequest("通道名称已存在");
 
             var members = await db.Devices.Where(x => x.ChannelId == id).ToListAsync(cancellationToken);
+            var standbyMembers = await db.Devices.Where(x => x.StandbyChannelId == id).ToListAsync(cancellationToken);
             // 通道协议决定帧格式与端点类型，成员设备必须一致；否则先解绑再改。
-            var mismatched = members.FirstOrDefault(x => x.Protocol != channel.Protocol);
+            var mismatched = members.FirstOrDefault(x => x.Protocol != channel.Protocol)
+                ?? standbyMembers.FirstOrDefault(x => x.Protocol != channel.Protocol);
             if (mismatched is not null)
                 return EndpointHelpers.BadRequest($"通道上已有使用 {mismatched.Protocol} 的设备「{mismatched.Name}」，请先解除绑定或保持协议一致");
             error = await ValidateSerialOwnershipAsync(db, channel, serialProfiles, cancellationToken);
@@ -200,6 +203,8 @@ public static class ChannelEndpoints
                 }
                 member.TimeoutMs = channel.TimeoutMs;
             }
+            foreach (var member in standbyMembers)
+                DeviceAcquisitionRules.StampStandbyFromChannel(member, channel);
 
             runtime.OperationLogs.Add(Audit.Change(http, $"修改通道：{channel.Name}", "Channel", channel.Id, before, channel));
             try { await db.SaveChangesAsync(cancellationToken); }
@@ -224,7 +229,7 @@ public static class ChannelEndpoints
             var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
             if (channel is null) return Results.NotFound();
             // 不静默解绑：解绑会让设备退回"用自己那份端点字段直连"，端点可能早已过期。
-            var bound = await db.Devices.AsNoTracking().Where(x => x.ChannelId == id).Select(x => x.Name).Take(5).ToListAsync(cancellationToken);
+            var bound = await db.Devices.AsNoTracking().Where(x => x.ChannelId == id || x.StandbyChannelId == id).Select(x => x.Name).Take(5).ToListAsync(cancellationToken);
             if (bound.Count > 0)
             {
                 var names = string.Join("、", bound);

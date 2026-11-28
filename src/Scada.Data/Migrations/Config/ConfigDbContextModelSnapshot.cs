@@ -1215,7 +1215,13 @@ namespace Scada.Data.Migrations.Config
                         .HasColumnType("INTEGER")
                         .HasDefaultValue((short)1);
 
+                    b.Property<int?>("StandbyBaudRate")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("StandbyChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("StandbyDataBits")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("StandbyGatewayId")
@@ -1225,7 +1231,20 @@ namespace Scada.Data.Migrations.Config
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("StandbyParity")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("StandbyPort")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("StandbySerialPort")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StandbyStopBits")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("StandbyTimeoutMs")
                         .HasColumnType("INTEGER");
 
                     b.Property<byte>("StationNumber")

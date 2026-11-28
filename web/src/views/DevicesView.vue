@@ -64,12 +64,14 @@
         </template>
         <el-table-column type="selection" width="48" :selectable="canConfigureDevice" />
         <el-table-column v-if="showEngineering" prop="id" label="ID" width="60" sortable="custom" show-overflow-tooltip />
-        <el-table-column :label="$t('devicesView.activePath')" min-width="180" data-test="device-acquisition-path">
+        <el-table-column :label="$t('devicesView.activePath')" min-width="260" data-test="device-acquisition-path">
         <template #default="{ row }">
           <div v-if="acquisitionByDevice[row.id]?.hasStandby || acquisitionByDevice[row.id]?.activePath === 'Standby'">
             <el-tag size="small" :type="acquisitionByDevice[row.id]?.activePath === 'Standby' ? 'warning' : 'success'">{{ acquisitionByDevice[row.id]?.activePath === 'Standby' ? $t('devicesView.pathStandby') : $t('devicesView.pathPrimary') }}</el-tag>
+            <el-tag v-if="acquisitionByDevice[row.id]?.manualLock" size="small" type="danger" data-test="device-path-locked">{{ $t('devicesView.pathLocked') }}</el-tag>
             <el-button v-if="acquisitionByDevice[row.id]?.activePath === 'Standby'" link type="primary" :loading="switchingPath === row.id" data-test="device-switch-primary" @click="switchAcquisition(row, 'Primary')">{{ $t('devicesView.switchToPrimary') }}</el-button>
-            <el-button v-else link type="warning" :loading="switchingPath === row.id" data-test="device-switch-standby" @click="switchAcquisition(row, 'Standby')">{{ $t('devicesView.switchToStandby') }}</el-button>
+            <el-button v-if="acquisitionByDevice[row.id]?.activePath === 'Standby' && acquisitionByDevice[row.id]?.manualLock" link :loading="switchingPath === row.id" data-test="device-resume-auto" @click="resumeAcquisitionAuto(row)">{{ $t('devicesView.resumeAuto') }}</el-button>
+            <el-button v-if="acquisitionByDevice[row.id]?.activePath !== 'Standby'" link type="warning" :loading="switchingPath === row.id" data-test="device-switch-standby" @click="switchAcquisition(row, 'Standby')">{{ $t('devicesView.switchToStandby') }}</el-button>
           </div>
           <span v-else class="muted">—</span>
         </template>
@@ -256,6 +258,15 @@ async function switchAcquisition(device: Device, path: 'Primary' | 'Standby'): P
     await loadAcquisition()
   } catch (e) {
     ElMessage.error(errorMessage(e, tr('devicesView.switchFailed')))
+  } finally { switchingPath.value = null }
+}
+async function resumeAcquisitionAuto(device: Device): Promise<void> {
+  switchingPath.value = device.id
+  try {
+    await deviceApi.resumeAcquisitionAuto(device.id)
+    await loadAcquisition()
+  } catch (e) {
+    ElMessage.error(errorMessage(e, tr('devicesView.resumeAutoFailed')))
   } finally { switchingPath.value = null }
 }
 const loading = ref(false)

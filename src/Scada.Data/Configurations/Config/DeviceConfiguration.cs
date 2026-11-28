@@ -36,6 +36,7 @@ public sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         entity.HasIndex(x => x.StandbyGatewayId);
         entity.HasIndex(x => x.StandbyChannelId);
         entity.Property(x => x.StandbyHost).HasMaxLength(256);
+        entity.Property(x => x.StandbySerialPort).HasMaxLength(128);
         entity.Property(x => x.FailoverHoldMs).HasDefaultValue(10_000);
         entity.Property(x => x.SwitchbackHoldMs).HasDefaultValue(30_000);
         entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
