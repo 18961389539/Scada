@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Security;
 using Scada.Data;
 using Scada.Server.Auth;
@@ -73,6 +74,8 @@ public static class AccessEndpoints
         {
             var error = ValidateRole(request, out var name, out var permissions);
             if (error is not null) return EndpointHelpers.BadRequest(error);
+            if (UserAdministration.IsPrivileged(permissions) && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyGrantPrivileged);
             await using var db = await factory.CreateDbContextAsync(ct);
             if (await db.AccessRoles.AnyAsync(x => x.Name == name, ct)) return EndpointHelpers.BadRequest("角色名称已存在");
             var role = new AccessRole { Name = name, Description = Clean(request.Description), Permissions = permissions };
@@ -87,6 +90,9 @@ public static class AccessEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var role = await db.AccessRoles.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (role is null) return Results.NotFound();
+            if ((UserAdministration.IsPrivileged(permissions) || UserAdministration.IsPrivileged(role.Permissions))
+                && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyGrantPrivileged);
             if (await db.AccessRoles.AnyAsync(x => x.Id != id && x.Name == name, ct)) return EndpointHelpers.BadRequest("角色名称已存在");
             role.Name = name; role.Description = Clean(request.Description); role.Permissions = permissions;
             await db.SaveChangesAsync(ct);
@@ -117,13 +123,18 @@ public static class AccessEndpoints
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var user = await db.Users.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (user is null) return Results.NotFound();
+            if (user.Role == UserRole.Admin && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyManageAdmin);
             var items = (request.Assignments ?? []).Select(x => new AssignmentItem(x.RoleId, x.AreaId is > 0 ? x.AreaId : null)).Distinct().ToArray();
             if (items.Length > 200) return EndpointHelpers.BadRequest("单个用户最多 200 条授权");
             var roleIds = items.Select(x => x.RoleId).Distinct().ToArray();
             var areaIds = items.Where(x => x.AreaId is not null).Select(x => x.AreaId!.Value).Distinct().ToArray();
-            var knownRoles = await db.AccessRoles.Where(x => roleIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
+            var assignedRoles = await db.AccessRoles.Where(x => roleIds.Contains(x.Id)).ToListAsync(ct);
+            var knownRoles = assignedRoles.Select(x => x.Id).ToList();
             var missingRoles = roleIds.Except(knownRoles).ToArray();
             if (missingRoles.Length > 0) return EndpointHelpers.BadRequest($"角色不存在：{string.Join(",", missingRoles)}");
+            if (assignedRoles.Any(x => UserAdministration.IsPrivileged(x.Permissions)) && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyGrantPrivileged);
             var knownAreas = await db.Areas.Where(x => areaIds.Contains(x.Id)).Select(x => x.Id).ToListAsync(ct);
             var missingAreas = areaIds.Except(knownAreas).ToArray();
             if (missingAreas.Length > 0) return EndpointHelpers.BadRequest($"区域不存在：{string.Join(",", missingAreas)}");

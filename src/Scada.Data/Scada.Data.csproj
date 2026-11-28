@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Scada.Data.Tests" />
+    <InternalsVisibleTo Include="Scada.Server.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 演示/验收种子数据：随 Data 分发，Core 不再携带。 -->
     <EmbeddedResource Include="Demo/signals.json" LogicalName="Scada.Data.Demo.signals.json" />
     <EmbeddedResource Include="Demo/traceability.json" LogicalName="Scada.Data.Demo.traceability.json" />

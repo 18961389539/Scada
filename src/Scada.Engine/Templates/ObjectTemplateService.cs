@@ -427,7 +427,13 @@ public sealed class ObjectTemplateService(IDbContextFactory<ConfigDbContext> fac
             await db.SaveChangesAsync(ct);
             await ProcessScreenHistory.TrimAsync(db, screen.Id, ct);
         }
-        await db.Tags.Where(x => plan.DeleteTagIds.Contains(x.Id)).ExecuteDeleteAsync(ct);
+        if (plan.DeleteTagIds.Count > 0)
+        {
+            // 走 SaveChanges，让 LicenseQuotaInterceptor 按增量扣减缓存；ExecuteDelete 会绕过拦截器。
+            var doomed = await db.Tags.Where(x => plan.DeleteTagIds.Contains(x.Id)).ToListAsync(ct);
+            db.Tags.RemoveRange(doomed);
+            await db.SaveChangesAsync(ct);
+        }
         var instance = plan.Instance ?? new DeviceObjectInstance { TemplateId = plan.TemplateId, Name = plan.Parameters.Name, DeviceId = plan.Parameters.DeviceId, BaseAddress = plan.Origin.Number, StartAddress = plan.Origin.Text, ScreenId = screen.Id };
         if (plan.Instance is not null) db.ObjectInstances.Attach(instance);
         instance.BaseAddress = plan.Origin.Number;

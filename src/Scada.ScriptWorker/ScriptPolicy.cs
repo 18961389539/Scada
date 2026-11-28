@@ -4,9 +4,9 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Scada.ScriptWorker;
 
 /// <summary>
-/// 脚本编译期策略表。这是"防误用"而不是"安全边界"：它拦住会破坏宿主、破坏协议
-/// 或明显不受支持的写法，让人看懂为什么不行；它不负责隔离恶意代码，真正的隔离靠独立进程、
-/// Job Object 与文件系统权限。
+/// 脚本编译期策略表。这是"防误用"加上一条硬限制：文件与网络 API 默认禁止，
+/// 避免已授权的脚本读写配置库或外送数据。它仍不是完整沙箱；Worker 与服务器同账户运行，
+/// Windows 上的 Job Object 只限制内存和子进程，安装形态下不便再改运行账户。
 /// </summary>
 internal static class ScriptPolicy
 {
@@ -44,14 +44,25 @@ internal static class ScriptPolicy
     private static bool ForbiddenNamespace(string name) =>
         name is "System.Diagnostics" or "System.Security" or "System.Reflection" or "Microsoft.Win32"
             or "System.Runtime.CompilerServices" or "System.Runtime.InteropServices" or "System.Runtime.Loader"
+            or "System.Net" or "System.IO.Ports" or "System.IO.Pipes" or "System.IO.MemoryMappedFiles"
+            or "System.IO.IsolatedStorage"
         || name.StartsWith("System.Diagnostics.", StringComparison.Ordinal)
         || name.StartsWith("System.Reflection.", StringComparison.Ordinal)
         || name.StartsWith("System.Security.", StringComparison.Ordinal)
         || name.StartsWith("System.Runtime.InteropServices", StringComparison.Ordinal)
         || name.StartsWith("System.Runtime.Loader", StringComparison.Ordinal)
         || name.StartsWith("System.Runtime.CompilerServices", StringComparison.Ordinal)
-        || name.StartsWith("Microsoft.Win32.", StringComparison.Ordinal);
+        || name.StartsWith("Microsoft.Win32.", StringComparison.Ordinal)
+        || name.StartsWith("System.Net.", StringComparison.Ordinal)
+        || name.StartsWith("System.IO.Ports.", StringComparison.Ordinal)
+        || name.StartsWith("System.IO.Pipes.", StringComparison.Ordinal)
+        || name.StartsWith("System.IO.MemoryMappedFiles.", StringComparison.Ordinal)
+        || name.StartsWith("System.IO.IsolatedStorage.", StringComparison.Ordinal);
 
     // Console 能拿到原始标准流：即使协议已改走独立管道，也没必要让脚本阻塞在无人读取的 stdout 上。
-    private static bool ForbiddenType(string name) => name is "System.Console";
+    // System.IO 仍允许 MemoryStream / Path 等内存与路径字符串 API；禁止的是会碰磁盘的类型。
+    private static bool ForbiddenType(string name) => name is "System.Console"
+        or "System.IO.File" or "System.IO.Directory" or "System.IO.FileInfo" or "System.IO.DirectoryInfo"
+        or "System.IO.FileStream" or "System.IO.FileSystemWatcher" or "System.IO.DriveInfo"
+        or "System.IO.RandomAccess" or "System.IO.FileSystemAclExtensions";
 }

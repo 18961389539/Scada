@@ -4,7 +4,10 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Scada.Core.Security;
+using Scada.Data;
 
 namespace Scada.Server.Tests;
 
@@ -129,5 +132,26 @@ public sealed class PasswordChangeTests : IAsyncLifetime
         // 没有令牌不能续期。
         using var anonymous = Client();
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsync("/api/auth/refresh", null)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Legacy_Hash_Login_Issues_A_Token_Usable_Immediately()
+    {
+        await using (var db = await _factory.Services.GetRequiredService<IDbContextFactory<ConfigDbContext>>().CreateDbContextAsync())
+        {
+            var admin = await db.Users.SingleAsync(x => x.UserName == "admin");
+            admin.PasswordHash = PasswordHasher.Hash("admin123", PasswordHasher.MinIterations);
+            admin.MustChangePassword = false;
+            await db.SaveChangesAsync();
+        }
+
+        using var login = Client();
+        var session = await LoginAsync(login, "admin123");
+        var token = session.GetProperty("token").GetString()!;
+        Assert.False(string.IsNullOrEmpty(token));
+
+        using var client = Authorized(token);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/auth/me")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/tags")).StatusCode);
     }
 }

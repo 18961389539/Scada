@@ -37,6 +37,8 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/calc-jobs/8/reset")]
     [InlineData("/api/calc-jobs/8/maintenance-done")]
     [InlineData("/api/devices/12/diagnostics/reconnect")]
+    [InlineData("/api/devices/2/test")]
+    [InlineData("/api/devices/test-draft")]
     [InlineData("/api/alarms/9/ack")]
     [InlineData("/api/alarms/9/notes")]
     [InlineData("/api/oee/downtimes")]
@@ -60,9 +62,7 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/control/lockouts/4")]
     [InlineData("/api/annunciators")]
     [InlineData("/api/annunciators/2")]
-    [InlineData("/api/devices/2/test")]
     [InlineData("/api/devices/2/test-draft")]
-    [InlineData("/api/devices/test-draft")]
     [InlineData("/api/devices/2/diagnostics")]
     [InlineData("/api/recipes/5")]
     [InlineData("/api/control/sequences")]
@@ -112,6 +112,8 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/maintenance-done"),
             ("Endpoints/CalcJobEndpoints.cs", "/api/calc-jobs/1/acknowledge-writes"),
             ("Endpoints/CollectorDiagnosticEndpoints.cs", "/api/devices/1/diagnostics/reconnect"),
+            ("Endpoints/DeviceEndpoints.cs", "/api/devices/1/test"),
+            ("Endpoints/DeviceEndpoints.cs", "/api/devices/test-draft"),
             ("Endpoints/AlarmEndpoints.cs", "/api/alarms/1/ack"),
             ("Endpoints/AlarmEndpoints.cs", "/api/alarms/1/notes"),
             ("Endpoints/OeeEndpoints.cs", "/api/oee/downtimes"),
@@ -153,8 +155,10 @@ public sealed class ClientControlPolicyTests
     [InlineData("GET", "/api/calc-jobs/8/reset", false)]
     [InlineData("POST", "/api/devices/12/diagnostics/reconnect", true)]
     [InlineData("GET", "/api/devices/12/diagnostics/reconnect", false)]
-    [InlineData("POST", "/api/devices/12/test", false)]
-    [InlineData("POST", "/api/devices/test-draft", false)]
+    [InlineData("POST", "/api/devices/12/test", true)]
+    [InlineData("GET", "/api/devices/12/test", false)]
+    [InlineData("POST", "/api/devices/test-draft", true)]
+    [InlineData("GET", "/api/devices/test-draft", false)]
     [InlineData("POST", "/api/alarms/9/ack", true)]
     [InlineData("POST", "/api/alarms/9/notes", true)]
     [InlineData("GET", "/api/alarms/9/ack", false)]

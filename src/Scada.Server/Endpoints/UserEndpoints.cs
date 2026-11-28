@@ -55,6 +55,9 @@ public static class UserEndpoints
                 return EndpointHelpers.BadRequest("密码至少 6 个字符");
             }
 
+            if (request.Role == UserRole.Admin && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyPromoteAdmin);
+
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(cancellationToken);
             var userName = request.UserName.Trim();
@@ -105,6 +108,11 @@ public static class UserEndpoints
             {
                 return Results.NotFound();
             }
+
+            if (user.Role == UserRole.Admin && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyManageAdmin);
+            if (request.Role == UserRole.Admin && user.Role != UserRole.Admin && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyPromoteAdmin);
 
             var previousRole = user.Role;
             var previousEnabled = user.Enabled;
@@ -177,6 +185,9 @@ public static class UserEndpoints
                 return Results.NotFound();
             }
 
+            if (user.Role == UserRole.Admin && !UserAdministration.IsBuiltInAdmin(http.User))
+                return EndpointHelpers.BadRequest(UserAdministration.DenyManageAdmin);
+
             user.PasswordHash = PasswordHasher.Hash(request.Password);
             // 重置后的口令相当于临时口令，必须由本人在下次登录后换掉。
             user.MustChangePassword = settings.Value.RequirePasswordChangeOnFirstLogin;
@@ -213,11 +224,12 @@ public static class UserEndpoints
 
             if (user.Role == UserRole.Admin)
             {
-                var adminCount = await db.Users.CountAsync(x => x.Role == UserRole.Admin, cancellationToken);
-                if (adminCount <= 1)
-                {
-                    return EndpointHelpers.BadRequest("不能删除最后一个管理员");
-                }
+                if (!UserAdministration.IsBuiltInAdmin(http.User))
+                    return EndpointHelpers.BadRequest(UserAdministration.DenyManageAdmin);
+                var enabledAdmins = await db.Users.CountAsync(x => x.Role == UserRole.Admin && x.Enabled, cancellationToken);
+                var remainingEnabled = enabledAdmins - (user.Enabled ? 1 : 0);
+                if (remainingEnabled <= 0)
+                    return EndpointHelpers.BadRequest(UserAdministration.DenyDeleteLastEnabledAdmin);
             }
 
             db.Users.Remove(user);

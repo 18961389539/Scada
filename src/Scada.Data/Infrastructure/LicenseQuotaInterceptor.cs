@@ -54,14 +54,15 @@ public sealed class LicenseQuotaInterceptor(IServiceProvider services) : SaveCha
         return base.SavedChangesAsync(eventData, result, cancellationToken);
     }
 
-    // 同步路径：只读缓存。缓存未命中就跳过校验（授权是商业约束，不是安全边界），
-    // 由后续的异步保存建立缓存；这里做 I/O 会带来死锁与线程池饥饿。
+    // 同步路径：只读缓存。从未预热时跳过校验（启动路径会预热；授权是商业约束，不是安全边界）。
+    // TTL 过期仍用内存旧计数拦住超限，并在后台重算。这里做 I/O 会带来死锁与线程池饥饿。
     private Delta? Enforce(DbContext? context)
     {
         if (Measure(context) is not { } m) return null;
         if (m.AddDevices == 0 && m.AddTags == 0) return m.Delta;
         if (License is not { } license) return m.Delta;
-        if (Counter is not { } counter || !counter.TryGet(out var devices, out var tags)) return m.Delta;
+        if (Counter is not { } counter || !counter.TryGetCached(out var devices, out var tags)) return m.Delta;
+        if (!counter.IsFresh) counter.RequestRefresh();
         var message = LicenseQuota.Deny(license, devices, tags, m.AddDevices, m.AddTags);
         if (message is not null) throw new LicenseQuotaException(message);
         return m.Delta;

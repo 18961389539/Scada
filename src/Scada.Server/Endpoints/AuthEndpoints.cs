@@ -94,6 +94,8 @@ public static class AuthEndpoints
                 var upgraded = PasswordHasher.Hash(request.Password);
                 await db.Users.Where(x => x.Id == user.Id)
                     .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.PasswordHash, upgraded), cancellationToken);
+                // AsNoTracking 实体不会跟着 UPDATE 变：令牌里的凭据版本必须按新哈希计算，否则签发后立刻被判定失效。
+                user.PasswordHash = upgraded;
             }
             runtime.OperationLogs.Add(new OperationLog
             {

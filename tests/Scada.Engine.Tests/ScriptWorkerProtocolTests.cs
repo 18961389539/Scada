@@ -11,6 +11,8 @@ public sealed class ScriptWorkerProtocolTests
     [InlineData("context.Output(\"ok\", 1); System.Diagnostics.Process.GetCurrentProcess();", "outside the script sandbox")]
     [InlineData("context.Output(\"ok\", 1); System.Environment.Exit(0);", "outside the script sandbox")]
     [InlineData("context.Output(\"ok\", 1); System.Console.WriteLine(\"x\");", "outside the script sandbox")]
+    [InlineData("context.Output(\"ok\", 1); System.IO.File.ReadAllText(\"x\");", "outside the script sandbox")]
+    [InlineData("context.Output(\"ok\", 1); var client = new System.Net.Http.HttpClient();", "outside the script sandbox")]
     [InlineData("context.Output(\"ok\", 1); var loader = System.Runtime.Loader.AssemblyLoadContext.Default;", "outside the script sandbox")]
     [InlineData("unsafe { int* pointer = null; } context.Output(\"ok\", 1);", "unsafe code")]
     [InlineData("[System.Runtime.InteropServices.DllImport(\"user32.dll\")] static extern int MessageBoxW(int h, string t, string c, int u); context.Output(\"ok\", 1);", "DllImport")]
