@@ -14,6 +14,7 @@ export interface GatewayDevice {
 export interface GatewayAssignment {
   deviceId: number; deviceName: string; gatewayId: number | null; gatewayName: string | null
   enabled: boolean; disabledSinceTs: number; canMove: boolean; blockReason: string | null
+  activeGatewayId?: number | null; activeGatewayName?: string | null
 }
 export interface GatewayDeadLetterPreview {
   gatewayId: number; streamId: string; sequence: number

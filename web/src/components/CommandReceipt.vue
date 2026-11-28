@@ -4,12 +4,13 @@
     <p v-if="status">{{ labels[status.result?.outcome ?? status.state] ?? status.state }} · {{ status.result?.message ?? $t('commandReceipt.kfcd9eb') }}</p>
     <p v-if="status?.result?.readBack != null">{{ $t('commandReceipt.k2ed382', [status.result.readBack]) }}</p>
     <p v-if="error">{{ error }}</p>
-    <p v-if="status?.result?.outcome === 'Unknown'">{{ $t('commandReceipt.kd7b3ba') }}</p>
+    <p v-if="pathChanged">{{ $t('commandReceipt.pathChanged') }}</p>
+    <p v-else-if="status?.result?.outcome === 'Unknown'">{{ $t('commandReceipt.kd7b3ba') }}</p>
     <el-button size="small" :loading="loading" @click="load">{{ $t('commandReceipt.k07d7c2') }}</el-button>
   </el-alert>
 </template>
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { commandApi } from '../api'
 import { errorMessage } from '../api/http'
 import type { GatewayCommandStatus } from '../api/commandTypes'
@@ -17,6 +18,7 @@ import { tr } from '../i18n'
 const props = defineProps<{ id: string }>()
 const status = ref<GatewayCommandStatus | null>(null), error = ref(''), loading = ref(false)
 const labels: Record<string, string> = { Confirmed: tr('commandReceipt.k05aba6'), Failed: tr('commandReceipt.k9746cf'), NotSent: tr('commandReceipt.k5bf97e'), Unknown: tr('commandReceipt.k4835a7'), Queued: tr('commandReceipt.k550b34'), Reserved: tr('commandReceipt.k947a7b'), Authorized: tr('commandReceipt.k4c4042') }
+const pathChanged = computed(() => (status.value?.result?.message ?? '').includes('采集路径已变更') || /acquisition path (changed|change)/i.test(status.value?.result?.message ?? '')) // i18n-ignore: server settle message
 let controller: AbortController | undefined
 async function load(): Promise<void> {
   controller?.abort(); const current = controller = new AbortController(); loading.value = true; error.value = ''

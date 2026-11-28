@@ -32,7 +32,7 @@ public sealed record GatewayDeadLetterInfo(int GatewayId, Guid StreamId, long Se
     long ReceivedTs, long FailedTs, int Attempts, string? Error, int PayloadBytes, string? PayloadJson);
 public sealed record GatewayAssignmentCondition(int? GatewayId, long DisabledSinceTs);
 public sealed record GatewayAssignmentInfo(int DeviceId, string DeviceName, int? GatewayId, string? GatewayName, bool Enabled,
-    long DisabledSinceTs, bool CanMove, string? BlockReason);
+    long DisabledSinceTs, bool CanMove, string? BlockReason, int? ActiveGatewayId = null, string? ActiveGatewayName = null);
 public sealed record GatewayManagedDevice(int Id, string Name, ProtocolType Protocol, bool Enabled, int TagCount, bool Online, string? Error, long LastPollTs, bool ConfiguredStandby = false);
 
 public sealed partial class GatewayCenterService : BackgroundService, IGatewaySessionHealth
@@ -608,7 +608,7 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
         var applied = active.AppliedRevision is null ? null : await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == activeId && x.Revision == active.AppliedRevision, ct);
         var metadata = applied is null ? null : JsonSerializer.Deserialize<GatewayConfiguration>(applied.SnapshotJson, GatewayProtocol.Json);
         return active.LastSeenTs < device.DisabledSinceTs || metadata?.Devices.Any(x => x.Device.Id == device.Id && !x.Device.Enabled) != true
-            ? "当前活动采集网关尚未确认停用配置，暂不能迁移设备" : null;
+            ? $"当前活动采集网关尚未确认停用配置，暂不能迁移设备（网关 #{activeId} · {active.Name}）" : null;
     }
     public async Task<GatewayAssignmentInfo> AssignmentInfoAsync(int deviceId, CancellationToken ct)
     {
@@ -618,8 +618,12 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
             await using var db = await _factory.CreateDbContextAsync(ct);
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, ct) ?? throw new GatewayRequestException(404, "设备不存在");
             var name = device.GatewayId is int gatewayId ? await db.Gateways.Where(x => x.Id == gatewayId).Select(x => x.Name).SingleAsync(ct) : null;
+            var route = _paths.Resolve(device);
+            string? activeName = route.GatewayId is int activeId
+                ? activeId == device.GatewayId ? name : await db.Gateways.Where(x => x.Id == activeId).Select(x => x.Name).SingleOrDefaultAsync(ct)
+                : null;
             var reason = await AssignmentBlockAsync(db, device, ct);
-            return new(device.Id, device.Name, device.GatewayId, name, device.Enabled, device.DisabledSinceTs, reason is null, reason);
+            return new(device.Id, device.Name, device.GatewayId, name, device.Enabled, device.DisabledSinceTs, reason is null, reason, route.GatewayId, activeName);
         }
         finally { _mutations.Release(); }
     }

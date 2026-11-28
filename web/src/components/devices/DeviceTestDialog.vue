@@ -1,5 +1,6 @@
 <template>
   <el-dialog v-model="visible" :title="$t('devicesView.k0e247b')" width="480px">
+    <p v-if="targetText" class="tiny muted" data-test="device-test-target">{{ targetText }}</p>
     <el-form label-width="100px">
       <el-form-item :label="$t('devicesView.k17fc93')">
         <el-select v-model="form.area" style="width: 100%">
@@ -44,7 +45,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { deviceApi } from '../../api'
 import { errorMessage } from '../../api/http'
-import type { Device } from '../../types'
+import type { Device, DeviceAcquisitionInfo } from '../../types'
 import { dataTypeLabels, formatValue, protocolAreas } from '../../utils'
 import { protocolDef } from '../../protocols'
 import { tr } from '../../i18n'
@@ -68,6 +69,21 @@ const isOpc = computed(() => device.value?.protocol === 'OpcUa')
 const areas = computed(() => protocolAreas(device.value?.protocol))
 const good = computed(() => result.value?.connected && (!result.value.quality || result.value.quality === 'Good'))
 const canDiagnose = computed(() => !!device.value && can(auth.user, 'Configure', device.value.areaId))
+const acquisition = ref<DeviceAcquisitionInfo | undefined>()
+const targetText = computed(() => {
+  const row = device.value
+  if (!row) return ''
+  const acq = acquisition.value
+  const path = acq?.activePath === 'Standby' ? tr('devicesView.pathStandby') : tr('devicesView.pathPrimary')
+  const rtu = ['ModbusRtu', 'ModbusAscii'].includes(row.protocol)
+  const serial = acq?.activeSerialPort || row.serialPort
+  const host = acq?.activeHost || row.host
+  const port = acq?.activePort ?? row.port
+  const address = row.protocol === 'OpcUa' ? (row.opcEndpointUrl || '') : rtu ? `${serial} · ${row.baudRate}` : `${host}:${port}`
+  const gatewayId = acq?.activeGatewayId ?? row.activeGatewayId ?? row.gatewayId
+  const place = gatewayId != null ? tr('devicesView.k38b4cc', [gatewayId]) : tr('devicesView.k3963d7')
+  return tr('devicesView.testTarget', [path, address, place])
+})
 let version = 0
 watch([deviceId, visible, () => JSON.stringify(form)], () => {
   version++; result.value = null; testing.value = false
@@ -77,9 +93,10 @@ function diagnose(): void {
   if (device.value) emit('diagnose', device.value)
 }
 
-function open(row: Device): void {
+function open(row: Device, info?: DeviceAcquisitionInfo): void {
   device.value = row
   deviceId.value = row.id
+  acquisition.value = info
   Object.assign(form, { area: protocolDef(row.protocol) ? 'Address' : row.protocol === 'OpcUa' ? 'OpcNode' : row.protocol === 'SiemensS7' ? 'DataBlock' : 'HoldingRegister', address: 0, dataType: 'Float', dbNumber: 1, bitOffset: 0, nodeId: '' })
   result.value = null
   visible.value = true

@@ -5,7 +5,8 @@
       <template v-if="source">
         <el-descriptions :column="1" border>
           <el-descriptions-item :label="$t('gatewayAssignmentDialog.k01f2c1')">#{{ source.deviceId }} · {{ source.deviceName }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('gatewayAssignmentDialog.kb458ea')">{{ source.gatewayId === null ? $t('gatewayAssignmentDialog.k3963d7') : $t('gatewayAssignmentDialog.kc3a1fc', [source.gatewayId, source.gatewayName]) }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('gatewayAssignmentDialog.configuredPath')">{{ formatGateway(source.gatewayId, source.gatewayName) }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('gatewayAssignmentDialog.activePath')">{{ formatGateway(source.activeGatewayId === undefined ? source.gatewayId : source.activeGatewayId, source.activeGatewayName ?? (source.activeGatewayId === source.gatewayId ? source.gatewayName : null)) }}</el-descriptions-item>
         </el-descriptions>
         <el-alert :type="source.canMove ? 'info' : 'warning'" :closable="false" :title="source.blockReason ?? $t('gatewayAssignmentDialog.kcf1bd8')" />
         <el-form label-width="95px" style="margin-top: 20px" @submit.prevent><el-form-item :label="$t('gatewayAssignmentDialog.k1e85fb')">
@@ -36,6 +37,9 @@ const source = ref<GatewayAssignment | null>(null), gateways = ref<GatewayInfo[]
 const loading = ref(false), saving = ref(false), error = ref('')
 const fresh = ref(false), targetAllowed = computed(() => target.value === 0 || gateways.value.some(x => x.id === target.value && x.enabled))
 let generation = 0, controller: AbortController | undefined, alive = true
+function formatGateway(id: number | null | undefined, name: string | null | undefined): string {
+  return id == null ? tr('gatewayAssignmentDialog.k3963d7') : tr('gatewayAssignmentDialog.kc3a1fc', [id, name ?? ''])
+}
 watch([visible, () => props.deviceId], ([shown]) => { generation++; controller?.abort(); source.value = null; error.value = ''; if (shown) void load(true) }, { immediate: true })
 onBeforeUnmount(() => { alive = false; generation++; controller?.abort() })
 async function load(reset: boolean): Promise<void> {

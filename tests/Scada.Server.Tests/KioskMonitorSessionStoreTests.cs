@@ -93,6 +93,26 @@ public sealed class KioskMonitorSessionStoreTests
     }
 
     [Fact]
+    public async Task DenyReasonDistinguishesUntrustedReloadFromAnActiveKioskSession()
+    {
+        await using var connection = TestRuntime.Open();
+        var factory = TestRuntime.Factory(connection);
+        var role = new MutableRole();
+        var lag = new MutableReplication { Trusted = false };
+        var store = new KioskMonitorSessionStore(factory, role, replication: lag);
+        var session = Http(3, "wall", DateTimeOffset.UtcNow.AddHours(1));
+        var other = Http(4, "engineer", DateTimeOffset.UtcNow.AddHours(1));
+        store.Enter(session, 11);
+        role.Bump();
+        Assert.Equal("主备接管后监视会话尚未就绪，暂时不能下发，请稍后重试", store.DenyReason(session));
+        Assert.Equal("主备接管后监视会话尚未就绪，暂时不能下发，请稍后重试", store.DenyReason(other));
+
+        lag.Trusted = true;
+        Assert.Equal("正在播放监视专用 Kiosk 列表，不能下发控制", store.DenyReason(session));
+        Assert.Null(store.DenyReason(other));
+    }
+
+    [Fact]
     public async Task ReloadFailureDeniesControlUntilASuccessfulReload()
     {
         await using var connection = TestRuntime.Open();

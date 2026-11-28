@@ -127,6 +127,7 @@ export interface DeviceAcquisitionInfo {
   reason?: string | null
   changedBy?: string | null
   changedTs: number
+  activeSerialPort?: string | null
 }
 
 export type DeviceInput = Omit<Device, 'id' | 'protocol' | 'hasOpcPassword' | 'gatewayId'> & { protocol: string; opcPassword?: string | null; clearOpcPassword?: boolean }

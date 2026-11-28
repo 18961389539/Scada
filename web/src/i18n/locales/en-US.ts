@@ -405,6 +405,7 @@ export default {
     alarmUnlisted: 'Unknown',
     offlineDevices: 'Offline or faulted devices only', offlineDevicesFailed: 'Could not load offline device status',
     writeReferenceWarning: 'The reference value has bad quality or is unverified. Check its sample time; server-side checks still apply.',
+    pathSwitching: 'Switching acquisition path; values are temporarily uncertain',
     invalidWrite: 'Enter a valid value within the configured range. Integer points do not accept decimals.',
     connection: { connected: 'Push connected', connecting: 'Push connecting', reconnecting: 'Push reconnecting', disconnected: 'Push disconnected' }
   },
@@ -571,6 +572,7 @@ export default {
     conflictNeedChoice: 'Choose a side for every element both drafts changed.',
     openShortcuts: 'Shortcuts',
     unverifiedTags: '{0} tags have bad quality or stale data',
+    pathSwitching: 'Switching acquisition path; values are temporarily uncertain',
     closeDialog: 'Close this dialog',
     popupTitle: 'Popup screen',
     chooseMonitor: 'Choose another display'

@@ -56,9 +56,9 @@ public sealed partial class ClientControlPolicy(RequestDelegate next)
             await result.ExecuteAsync(http);
             return;
         }
-        if (IsControlRequest(http) && kioskMonitors.IsLocked(http))
+        if (IsControlRequest(http) && kioskMonitors.DenyReason(http) is string kioskDeny)
         {
-            var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", "正在播放监视专用 Kiosk 列表，不能下发控制");
+            var result = await Audit.ForbidAsync(http, $"控制请求 {http.Request.Path}", kioskDeny);
             await result.ExecuteAsync(http);
             return;
         }

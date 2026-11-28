@@ -37,6 +37,7 @@
       <p v-if="library.error && usesLibrary" class="runtime-status-item danger" data-test="runtime-library-error">{{ library.error }}</p>
       <p v-if="deviceError && needsDeviceCatalog" class="runtime-status-item danger" data-test="runtime-device-error">{{ deviceError }}</p>
       <p v-if="tagError" class="runtime-status-item danger" data-test="runtime-tag-error">{{ tagError }}</p>
+      <p v-if="pathSwitching" class="runtime-status-item warn" data-test="runtime-path-switching">{{ $t('screenUx.pathSwitching') }}</p>
       <p v-if="unverifiedCount" class="runtime-status-item warn" data-test="runtime-quality">{{ $t('screenUx.unverifiedTags', [unverifiedCount]) }}</p>
       <p v-if="sequenceError" class="runtime-status-item danger" data-test="runtime-sequence-error">{{ sequenceError }}</p>
       <p v-if="recipeError" class="runtime-status-item danger" data-test="runtime-recipe-error">{{ recipeError }}</p>
@@ -89,7 +90,7 @@ import ScreenTrendDialog from './ScreenTrendDialog.vue'
 import RecipeDownloadDialog from './RecipeDownloadDialog.vue'
 import { screenApi } from '../api/screens'
 import { annunciatorApi } from '../api/annunciators'
-import { realtimeApi, historyApi } from '../api'
+import { realtimeApi, historyApi, deviceApi } from '../api'
 import { recipeApi, type Recipe, type RecipeDownload } from '../api/recipes'
 
 import CommandReceipt from './CommandReceipt.vue'
@@ -114,6 +115,8 @@ import { useScreenCatalogs } from '../screens/useScreenCatalogs'
 import { useScreenAuxData } from '../screens/useScreenAuxData'
 import { tr } from '../i18n'
 import { formatTime } from '../utils'
+import { isAcquisitionPathSwitching } from '../composables/acquisitionPathHint'
+import type { DeviceAcquisitionInfo } from '../types'
 
 // 多个运行区域/弹窗共享发布版本查询，避免每个区域各自轮询画面目录。
 let publishedCache: { at: number; items: { id: number; publishedRevision: number | null }[] } | null = null
@@ -254,6 +257,29 @@ const unverifiedCount = computed(() => {
     if (sample.quality !== 'Good' || !Number.isFinite(sample.value) || referenceNow.value - sample.ts >= maxAge) count++
   }
   return count
+})
+const acquisitionByDevice = ref<Record<number, DeviceAcquisitionInfo>>({})
+let lastAcquisitionLoad = 0
+async function loadAcquisition(force = false): Promise<void> {
+  if (replayMode.value || isPreview.value) return
+  if (!force && Date.now() - lastAcquisitionLoad < 5000) return
+  try {
+    const rows = await deviceApi.acquisition()
+    if (disposed) return
+    acquisitionByDevice.value = Object.fromEntries(rows.map(row => [row.deviceId, row]))
+    lastAcquisitionLoad = Date.now()
+  } catch { /* 切源提示失败时仍显示普通质量文案 */ }
+}
+const pathSwitching = computed(() => {
+  if (replayMode.value || isPreview.value) return false
+  for (const id of boundIds.value) {
+    const tag = tagsById.value.get(id)
+    if (tag?.deviceId == null) continue
+    const sample = values[id]
+    if (sample?.quality === 'Good') continue
+    if (isAcquisitionPathSwitching(acquisitionByDevice.value[tag.deviceId], referenceNow.value)) return true
+  }
+  return false
 })
 // 历史、报警、OEE、配方与顺控按画面引用按需拉取；失败只影响对应图元/控件。
 const aux = useScreenAuxData({ isDisposed: () => disposed, generation: () => generation, runtimeNodes, replayAt: () => replayMode.value ? props.replayAt! : null })
@@ -508,6 +534,7 @@ async function poll(): Promise<void> {
       lastSnapshot = Date.now()
       valueError.value = ''
       samplesReady.value = true
+      void loadAcquisition()
     }
   } catch (e) {
     if (generation === currentGeneration && !disposed) valueError.value = errorMessage(e, tr('screenRuntime.valueReadFailed'))
@@ -581,13 +608,13 @@ async function load(retryCatalogs = false): Promise<void> {
   try {
     if (retryCatalogs) await Promise.all([draftPreview.value ? library.reload() : undefined, loadDevices(), loadTags()])
     if (disposed || generation !== currentGeneration) return
-    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags()]); return }
+    if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags(), loadAcquisition(true)]); return }
     if (!screenId) return
     const incoming = await screenApi.get(screenId, draftPreview.value && !isHistorical.value, isHistorical.value ? { asOf: props.asOfTs, revision: props.historicRevision } : undefined)
     if (generation !== currentGeneration || disposed) return
     if (incoming.requiresRepublish) { error.value = incoming.message ?? tr('screenRuntime.failedToLoadScreen'); reportRuntime('requiresRepublish', error.value); return }
     detail.value = incoming
-    await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags()])
+    await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags(), loadAcquisition(true)])
   }
   catch (e) {
     if (!disposed && generation === currentGeneration) {

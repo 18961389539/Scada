@@ -243,7 +243,9 @@ public partial class GatewayCenterTests
         var waiting = await rig.Service.AssignmentInfoAsync(rig.DeviceId, default);
         Assert.False(waiting.CanMove);
         Assert.Contains("当前活动采集网关", waiting.BlockReason!);
+        Assert.Contains($"网关 #{standbyCaller!.Id}", waiting.BlockReason!);
         Assert.Equal(rig.Caller.Id, waiting.GatewayId);
+        Assert.Equal(standbyCaller.Id, waiting.ActiveGatewayId);
 
         var primaryStopped = await rig.Service.ConfigurationAsync(rig.Caller, rig.Session.SessionId, default);
         await rig.Service.HeartbeatAsync(rig.Caller, rig.Session.SessionId, new(primaryStopped.Revision, 0, 0, null, null), default);

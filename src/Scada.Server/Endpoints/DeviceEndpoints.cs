@@ -38,7 +38,8 @@ public sealed record DeviceRequest(
 public sealed record DeviceDraftTestRequest(int? Id, DeviceRequest Device, DeviceProbeRequest? Probe = null);
 public sealed record DeviceAcquisitionPathRequest(AcquisitionPathKind Path, string? Reason = null);
 public sealed record DeviceAcquisitionInfo(int DeviceId, string Name, int AreaId, AcquisitionPathKind ActivePath,
-    int? ActiveGatewayId, int? ActiveChannelId, string? ActiveHost, int? ActivePort, bool HasStandby, bool ManualLock, string? Reason, string? ChangedBy, long ChangedTs);
+    int? ActiveGatewayId, int? ActiveChannelId, string? ActiveHost, int? ActivePort, bool HasStandby, bool ManualLock, string? Reason, string? ChangedBy, long ChangedTs,
+    string? ActiveSerialPort = null);
 
 
 public static class DeviceEndpoints
@@ -373,12 +374,14 @@ public static class DeviceEndpoints
             }
 
             if (await EndpointHelpers.RequireDeviceAsync(http, id, Permission.Control, $"设备连通测试 #{id}") is { } denied) return denied;
-            if ((http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance).Resolve(device).GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
+            var paths = http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance;
+            var live = paths.Apply(device);
+            if (paths.Resolve(device).GatewayId != null) return Results.Ok(await gateways.EngineerAsync<DeviceProbeResult>(id, GatewayEngineeringOperation.Probe, request ?? new DeviceProbeRequest(), http.User.GetUserId()!.Value, cancellationToken));
             if (Settings(http) is { LocalCollectionEnabled: false })
                 return Results.Conflict(new { message = LocalCollection.DisabledMessage });
             try
             {
-                return Results.Ok(await DeviceProbe.ReadAsync(device, request, driverFactory, planBuilder, cancellationToken, collector));
+                return Results.Ok(await DeviceProbe.ReadAsync(live, request, driverFactory, planBuilder, cancellationToken, collector));
             }
             catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
         })).Produces<DeviceProbeResult>(StatusCodes.Status200OK).RequireAuthorization(AccessPolicies.Control);
@@ -516,9 +519,11 @@ public static class DeviceEndpoints
     private static DeviceAcquisitionInfo ToAcquisitionInfo(Device device, IDeviceAcquisitionPaths paths, DeviceAcquisitionState? state)
     {
         var route = paths.Resolve(device);
+        var applied = paths.Apply(device);
         return new DeviceAcquisitionInfo(
             device.Id, device.Name, device.AreaId, route.Path, route.GatewayId, route.ChannelId, route.Host, route.Port,
-            DeviceAcquisitionRules.HasStandby(device), state?.ManualLock == true, state?.Reason, state?.ChangedBy, state?.ChangedTs ?? 0);
+            DeviceAcquisitionRules.HasStandby(device), state?.ManualLock == true, state?.Reason, state?.ChangedBy, state?.ChangedTs ?? 0,
+            string.IsNullOrWhiteSpace(applied.SerialPort) ? null : applied.SerialPort);
     }
 
     internal static void ApplyStandbySettings(Device device, DeviceRequest request)

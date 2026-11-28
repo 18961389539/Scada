@@ -128,6 +128,14 @@ public sealed class KioskMonitorSessionStore
         return true;
     }
 
+    public string? DenyReason(HttpContext http)
+    {
+        if (!IsLocked(http)) return null;
+        return IsReady()
+            ? "正在播放监视专用 Kiosk 列表，不能下发控制"
+            : "主备接管后监视会话尚未就绪，暂时不能下发，请稍后重试";
+    }
+
     public int? PlaylistId(HttpContext http)
     {
         EnsureFresh();

@@ -118,7 +118,8 @@
             · {{ $t('realtimeView.writeCurrent', [writeCurrentValue, writeTag?.unit ?? '']) }}
           </div>
         </el-form-item>
-        <el-alert v-if="writeTag && !unread(writeTag.id) && (sampleStale(writeTag) || qualityOf(writeTag.id) !== 'Good')" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.writeReferenceWarning')" data-test="write-reference-warning" />
+        <el-alert v-if="writeTag && !unread(writeTag.id) && tagPathSwitching(writeTag)" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.pathSwitching')" data-test="write-path-switching" />
+        <el-alert v-else-if="writeTag && !unread(writeTag.id) && (sampleStale(writeTag) || qualityOf(writeTag.id) !== 'Good')" type="warning" :closable="false" show-icon :title="$t('realtimeMonitor.writeReferenceWarning')" data-test="write-reference-warning" />
         <el-alert type="warning" :closable="false" show-icon :title="writeRequestId ? $t('realtimeView.ke50c4d') : $t('realtimeView.k7868f7')" />
         <el-alert v-if="writeError" type="error" :closable="false" show-icon :title="writeError" style="margin-top: 8px" data-test="realtime-write-error" />
         <CommandReceipt v-if="receiptId && writeVisible" :id="receiptId" />
@@ -165,6 +166,7 @@ import {
 import { tr } from '../i18n'
 import { usePolling } from '../composables/usePolling'
 import { useNowTicker } from '../composables/useNowTicker'
+import { isAcquisitionPathSwitching } from '../composables/acquisitionPathHint'
 import { visibleNavItems } from '../nav/catalog'
 import { positiveQueryId } from '../nav/query'
 
@@ -191,6 +193,17 @@ const tags = ref<Tag[]>([])
 const totalCount = ref(0)
 const abnormalTotal = ref(0)
 const deviceIndex = computed(() => new Map(devices.value.map(device => [device.id, device])))
+const acquisitionByDevice = ref<Record<number, import('../types').DeviceAcquisitionInfo>>({})
+async function loadAcquisition(): Promise<void> {
+  try {
+    const rows = await deviceApi.acquisition()
+    acquisitionByDevice.value = Object.fromEntries(rows.map(row => [row.deviceId, row]))
+  } catch { /* 切源提示失败时仍显示普通质量 */ }
+}
+function tagPathSwitching(tag: Tag): boolean {
+  if (tag.deviceId == null) return false
+  return isAcquisitionPathSwitching(acquisitionByDevice.value[tag.deviceId], now.value)
+}
 const loadError = ref('')
 const configError = ref('')
 const snapshotError = ref('')
@@ -308,6 +321,7 @@ function sampleStale(tag: Tag): boolean {
   return !!interval && now.value - value.ts > Math.max(30_000, interval * 3)
 }
 function qualityText(tag: Tag): string {
+  if (qualityOf(tag.id) !== 'Good' && tagPathSwitching(tag)) return tr('realtimeMonitor.pathSwitching')
   const quality = qualityOf(tag.id)
   const label = quality === 'Good' ? tr('realtimeMonitor.good') : qualityLabels[quality]
   return withSimulationLabel(label, values[tag.id]?.simulated)
@@ -620,6 +634,7 @@ async function refreshData(): Promise<void> {
       try { devices.value = await deviceApi.list() }
       catch (error) { handleConfigFailure(error, first, tr('realtimeView.k9060ce')); return }
     }
+    await loadAcquisition()
     await loadAttention()
     if (disposed || frozen.value) return
     if (deviceState.value === 'offline' && !attentionReady.value) return

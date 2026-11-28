@@ -69,6 +69,7 @@
           <div v-if="acquisitionByDevice[row.id]?.hasStandby || acquisitionByDevice[row.id]?.activePath === 'Standby'">
             <el-tag size="small" :type="acquisitionByDevice[row.id]?.activePath === 'Standby' ? 'warning' : 'success'">{{ acquisitionByDevice[row.id]?.activePath === 'Standby' ? $t('devicesView.pathStandby') : $t('devicesView.pathPrimary') }}</el-tag>
             <el-tag v-if="acquisitionByDevice[row.id]?.manualLock" size="small" type="danger" data-test="device-path-locked">{{ $t('devicesView.pathLocked') }}</el-tag>
+            <div v-if="pathChangeText(row)" class="tiny muted" data-test="device-path-reason">{{ pathChangeText(row) }}</div>
             <el-button v-if="acquisitionByDevice[row.id]?.activePath === 'Standby'" link type="primary" :loading="switchingPath === row.id" data-test="device-switch-primary" @click="switchAcquisition(row, 'Primary')">{{ $t('devicesView.switchToPrimary') }}</el-button>
             <el-button v-if="acquisitionByDevice[row.id]?.activePath === 'Standby' && acquisitionByDevice[row.id]?.manualLock" link :loading="switchingPath === row.id" data-test="device-resume-auto" @click="resumeAcquisitionAuto(row)">{{ $t('devicesView.resumeAuto') }}</el-button>
             <el-button v-if="acquisitionByDevice[row.id]?.activePath !== 'Standby'" link type="warning" :loading="switchingPath === row.id" data-test="device-switch-standby" @click="switchAcquisition(row, 'Standby')">{{ $t('devicesView.switchToStandby') }}</el-button>
@@ -84,12 +85,12 @@
         </el-table-column>
         <el-table-column :label="$t('devicesView.k17fc93')" width="110" show-overflow-tooltip><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.kb0c431')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
-        <el-table-column v-if="showEngineering" :label="$t('devicesView.k5dfe3e')" width="160" show-overflow-tooltip><template #default="{ row }">
+        <el-table-column :label="$t('devicesView.k5dfe3e')" width="180" show-overflow-tooltip data-test="device-active-gateway"><template #default="{ row }">
           <router-link v-if="displayGatewayId(row) !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(displayGatewayId(row)) } }">{{ $t('devicesView.k38b4cc', [displayGatewayId(row)]) }}</router-link><span v-else-if="displayGatewayId(row) !== null">{{ $t('devicesView.k38b4cc', [displayGatewayId(row)]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
           <el-tag v-if="row.configuredStandby || isConfiguredStandby(row)" size="small" type="warning" style="margin-left: 4px">{{ $t('devicesView.configuredStandby') }}</el-tag>
         </template></el-table-column>
         <el-table-column :label="$t('devicesView.k67d2d7')" min-width="190" show-overflow-tooltip>
-          <template #default="{ row }">{{ endpointText(row) }}</template>
+          <template #default="{ row }">{{ activeEndpointText(row) }}</template>
         </el-table-column>
         <el-table-column v-if="showEngineering" prop="stationNumber" :label="$t('devicesView.k60aa5c')" width="70" sortable="custom" show-overflow-tooltip />
         <el-table-column v-if="showEngineering" prop="byteOrder" :label="$t('devicesView.ka15ac8')" width="90" show-overflow-tooltip />
@@ -260,20 +261,67 @@ async function loadAcquisition(): Promise<void> {
     acquisitionByDevice.value = Object.fromEntries(rows.map(r => [r.deviceId, r]))
   } catch { /* 列表页仍可显示设备本身 */ }
 }
+function sharesBusWith(left: Device, right: Device): boolean {
+  if (left.id === right.id) return false
+  if (left.channelId != null && left.channelId === right.channelId) return true
+  return left.standbyChannelId != null && left.standbyChannelId === right.standbyChannelId
+}
+async function busPeerNames(device: Device): Promise<string[]> {
+  let catalog = devices.value
+  try { catalog = await deviceApi.list() } catch { /* 确认框仍可用当前页已加载的设备 */ }
+  return catalog.filter(item => item.enabled && sharesBusWith(device, item)).map(item => item.name)
+}
+async function confirmPathChange(device: Device, path: 'Primary' | 'Standby' | 'auto'): Promise<boolean> {
+  const peers = await busPeerNames(device)
+  const lines: string[] = []
+  if (path === 'Standby') lines.push(tr('devicesView.switchStandbyConfirm'))
+  else if (path === 'Primary') lines.push(tr('devicesView.switchPrimaryConfirm'))
+  else lines.push(tr('devicesView.resumeAutoConfirm'))
+  if (peers.length) lines.push(tr('devicesView.switchSharedBusConfirm', [peers.join('、')]))
+  try {
+    await ElMessageBox.confirm(lines.join('\n\n'), tr('devicesView.switchConfirmTitle', [device.name]), {
+      type: 'warning',
+      confirmButtonText: path === 'auto' ? tr('devicesView.resumeAuto') : path === 'Standby' ? tr('devicesView.switchToStandby') : tr('devicesView.switchToPrimary'),
+      cancelButtonText: tr('devicesView.k4d0b46')
+    })
+    return true
+  } catch { return false }
+}
+function pathChangeText(device: Device): string {
+  const acq = acquisitionByDevice.value[device.id]
+  if (!acq) return ''
+  const parts = [acq.reason, acq.changedBy, acq.changedTs ? formatTime(acq.changedTs) : ''].filter(Boolean)
+  return parts.join(' · ')
+}
+function activeEndpointText(device: Device): string {
+  const acq = acquisitionByDevice.value[device.id]
+  if (!acq || (!acq.hasStandby && acq.activePath !== 'Standby')) return endpointText(device)
+  const rtu = ['ModbusRtu', 'ModbusAscii'].includes(device.protocol) || (softElementProtocol(device.protocol) && /"transport"\s*:\s*"Rtu"/i.test(device.protocolOptions ?? ''))
+  const serial = acq.activeSerialPort || device.serialPort
+  const host = acq.activeHost || device.host
+  const port = acq.activePort ?? device.port
+  const address = rtu ? `${serial} · ${device.baudRate}` : `${host}:${port}`
+  const path = acq.activePath === 'Standby' ? tr('devicesView.pathStandby') : tr('devicesView.pathPrimary')
+  return `${address}（${path}）`
+}
 async function switchAcquisition(device: Device, path: 'Primary' | 'Standby'): Promise<void> {
+  if (!await confirmPathChange(device, path)) return
   switchingPath.value = device.id
   try {
     await deviceApi.switchAcquisitionPath(device.id, path)
     await loadAcquisition()
+    ElMessage.success(path === 'Standby' ? tr('devicesView.switchSuccessStandby') : tr('devicesView.switchSuccessPrimary'))
   } catch (e) {
     ElMessage.error(errorMessage(e, tr('devicesView.switchFailed')))
   } finally { switchingPath.value = null }
 }
 async function resumeAcquisitionAuto(device: Device): Promise<void> {
+  if (!await confirmPathChange(device, 'auto')) return
   switchingPath.value = device.id
   try {
     await deviceApi.resumeAcquisitionAuto(device.id)
     await loadAcquisition()
+    ElMessage.success(tr('devicesView.resumeAutoSuccess'))
   } catch (e) {
     ElMessage.error(errorMessage(e, tr('devicesView.resumeAutoFailed')))
   } finally { switchingPath.value = null }
@@ -601,7 +649,7 @@ async function remove(device: Device): Promise<void> {
   }
 }
 
-function openTest(device: Device): void { testDialog.value?.open(device) }
+function openTest(device: Device): void { testDialog.value?.open(device, acquisitionByDevice.value[device.id]) }
 
 watch([() => route.query.diagnoseId, devices], () => { void openDiagnoseFromQuery() })
 async function openDiagnoseFromQuery(): Promise<void> {

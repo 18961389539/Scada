@@ -405,6 +405,7 @@ export default {
     alarmUnlisted: '未知',
     offlineDevices: '仅显示离线或通信异常的设备', offlineDevicesFailed: '离线设备状态读取失败',
     writeReferenceWarning: '参考值质量异常或尚未校验，请核对采样时间；下发仍需通过服务端检查。',
+    pathSwitching: '正在切换采集路径，数值暂不确定',
     invalidWrite: '请输入量程内的有效数值；整数测点不接受小数。',
     connection: { connected: '推送已连接', connecting: '推送连接中', reconnecting: '推送重连中', disconnected: '推送已断开' }
   },
@@ -571,6 +572,7 @@ export default {
     conflictNeedChoice: '双方都改过的图元需要选择保留哪一侧。',
     openShortcuts: '快捷键',
     unverifiedTags: '{0} 个测点质量异常或数据过期',
+    pathSwitching: '正在切换采集路径，数值暂不确定',
     closeDialog: '关闭此对话框',
     popupTitle: '弹出画面',
     chooseMonitor: '更换显示器'
