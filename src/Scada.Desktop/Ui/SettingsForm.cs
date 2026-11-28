@@ -105,6 +105,7 @@ internal sealed class SettingsForm : Form
     private ServerApiClient? _api;
     private string? _plainPassword;
     private bool _authenticated;
+    private bool _targetListsLoaded;
     private bool _busy;
     private bool _closing;
     private DateTime _loginCooldownUntil = DateTime.MinValue;
@@ -559,6 +560,7 @@ internal sealed class SettingsForm : Form
         _layoutMonitorPanel.Visible = kind == "layout";
         if (kind == "layout") _ = RefreshLayoutMonitorsAsync();
         UpdateAccountCopy();
+        if (_targetListsLoaded) ApplyTargetListLoadStatus();
     }
 
     private bool IsLocked(string field) =>
@@ -852,9 +854,8 @@ internal sealed class SettingsForm : Form
                 return new WorkstationOption(row.Id, row.Name, $"{row.Name}（{layoutText}）{(row.AllowControl ? string.Empty : "，只监视")}");
             }));
 
-            if (_screens.Count == 0) SetStatus("当前账号看不到已发布画面，请先在组态编辑器中发布画面。", true);
-            else if (_layouts.Count == 0 && _workstations.Count == 0) SetStatus("当前账号看不到已发布布局或工作站，可使用单个画面模式。", true);
-            else SetStatus($"已加载 {_screens.Count} 个画面、{_layouts.Count} 个布局、{_playlists.Count} 个播放列表、{_workstations.Count} 个工作站。", false);
+            _targetListsLoaded = true;
+            ApplyTargetListLoadStatus();
         }
         catch (ApiException exception)
         {
@@ -1090,6 +1091,13 @@ internal sealed class SettingsForm : Form
         _changePasswordButton.Enabled = !_busy && _mustChangePending && !_awaitingNewPassword;
         _openBrowserButton.Enabled = !_busy;
         _browserDoneButton.Enabled = !_busy && (_mustChangePending || _openedBrowser) && !_passwordChanged;
+    }
+
+    private void ApplyTargetListLoadStatus()
+    {
+        var status = DesktopSettingsCopy.DescribeTargetListLoad(
+            CurrentKind(), _screens.Count, _layouts.Count, _playlists.Count, _workstations.Count);
+        SetStatus(status.Message, status.IsError);
     }
 
     private void SetStatus(string message, bool error)

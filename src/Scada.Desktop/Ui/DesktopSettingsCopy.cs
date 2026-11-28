@@ -85,4 +85,19 @@ internal static class DesktopSettingsCopy
         if (string.Equals(currentPassword, newPassword, StringComparison.Ordinal)) return "新密码不能与当前密码相同";
         return null;
     }
+
+    public readonly record struct TargetListLoadStatus(string Message, bool IsError);
+
+    public static TargetListLoadStatus DescribeTargetListLoad(
+        string? kind, int screenCount, int layoutCount, int playlistCount, int workstationCount)
+    {
+        if (kind == "screen" && screenCount <= 0)
+            return new("当前项目还没有已发布的组态画面，请先在网页的组态编辑器中发布画面。", true);
+        if (kind == "layout" && layoutCount <= 0)
+            return new("当前项目还没有已发布的运行布局，请先在网页中创建并发布运行布局。", true);
+        if (kind == "workstation" && workstationCount <= 0)
+            return new("当前项目还没有工作站，请先在网页中配置工作站，并绑定已发布的运行布局。", true);
+
+        return new($"已加载 {screenCount} 个画面、{layoutCount} 个布局、{playlistCount} 个播放列表、{workstationCount} 个工作站。", false);
+    }
 }

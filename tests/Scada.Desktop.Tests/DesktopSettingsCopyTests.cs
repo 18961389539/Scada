@@ -105,4 +105,60 @@ public sealed class DesktopSettingsCopyTests
         Assert.False(DesktopSettingsCopy.ShouldOpenWithoutTopMost("用户名或密码错误"));
         Assert.False(DesktopSettingsCopy.ShouldOpenWithoutTopMost(null));
     }
+
+    [Fact]
+    public void TargetListLoadStatusIsSuccessWhenScreensExistAndKindDoesNotNeedLayouts()
+    {
+        foreach (var kind in new[] { "workspace", "screen", "playlist" })
+        {
+            var status = DesktopSettingsCopy.DescribeTargetListLoad(kind, 3, 0, 0, 0);
+            Assert.False(status.IsError);
+            Assert.Equal("已加载 3 个画面、0 个布局、0 个播放列表、0 个工作站。", status.Message);
+            Assert.DoesNotContain("当前账号看不到", status.Message);
+            Assert.DoesNotContain("可使用单个画面模式", status.Message);
+        }
+    }
+
+    [Fact]
+    public void TargetListLoadStatusErrorsOnlyWhenCurrentKindNeedsMissingLayoutsOrWorkstations()
+    {
+        var layout = DesktopSettingsCopy.DescribeTargetListLoad("layout", 3, 0, 0, 0);
+        Assert.True(layout.IsError);
+        Assert.Contains("还没有已发布的运行布局", layout.Message);
+        Assert.Contains("请先在网页中创建并发布", layout.Message);
+        Assert.DoesNotContain("当前账号看不到", layout.Message);
+
+        var station = DesktopSettingsCopy.DescribeTargetListLoad("workstation", 3, 0, 0, 0);
+        Assert.True(station.IsError);
+        Assert.Contains("还没有工作站", station.Message);
+        Assert.Contains("请先在网页中", station.Message);
+        Assert.DoesNotContain("当前账号看不到", station.Message);
+
+        var layoutOk = DesktopSettingsCopy.DescribeTargetListLoad("layout", 0, 2, 0, 0);
+        Assert.False(layoutOk.IsError);
+        Assert.Equal("已加载 0 个画面、2 个布局、0 个播放列表、0 个工作站。", layoutOk.Message);
+
+        var stationOk = DesktopSettingsCopy.DescribeTargetListLoad("workstation", 3, 1, 0, 2);
+        Assert.False(stationOk.IsError);
+    }
+
+    [Fact]
+    public void TargetListLoadStatusFollowsKindSwitchAndStillWarnsWhenScreenKindHasNoScreens()
+    {
+        var missingScreensOnWorkspace = DesktopSettingsCopy.DescribeTargetListLoad("workspace", 0, 0, 0, 0);
+        Assert.False(missingScreensOnWorkspace.IsError);
+        Assert.Equal("已加载 0 个画面、0 个布局、0 个播放列表、0 个工作站。", missingScreensOnWorkspace.Message);
+
+        var screen = DesktopSettingsCopy.DescribeTargetListLoad("screen", 0, 0, 0, 0);
+        Assert.True(screen.IsError);
+        Assert.Contains("还没有已发布的组态画面", screen.Message);
+        Assert.DoesNotContain("当前账号看不到", screen.Message);
+
+        var afterSwitch = DesktopSettingsCopy.DescribeTargetListLoad("screen", 3, 0, 0, 0);
+        Assert.False(afterSwitch.IsError);
+        var backToLayout = DesktopSettingsCopy.DescribeTargetListLoad("layout", 3, 0, 0, 0);
+        Assert.True(backToLayout.IsError);
+        var backToWorkspace = DesktopSettingsCopy.DescribeTargetListLoad("workspace", 3, 0, 0, 0);
+        Assert.False(backToWorkspace.IsError);
+    }
 }
