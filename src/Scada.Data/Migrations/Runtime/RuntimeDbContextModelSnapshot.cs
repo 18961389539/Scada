@@ -1005,14 +1005,6 @@ namespace Scada.Data.Migrations.Runtime
                     b.Property<int>("TagId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("UserId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("UserName")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("TEXT");
-
                     b.Property<int?>("TargetAddress")
                         .HasColumnType("INTEGER");
 
@@ -1043,6 +1035,14 @@ namespace Scada.Data.Migrations.Runtime
 
                     b.Property<double?>("TargetScale")
                         .HasColumnType("REAL");
+
+                    b.Property<int?>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("UserName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -1309,6 +1309,80 @@ namespace Scada.Data.Migrations.Runtime
                     b.HasIndex("Ts");
 
                     b.ToTable("OperationLog", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.ProductionBatch", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("AreaId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("BatchNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ControlSequenceRunId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("EndedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Message")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("RecipeDownloadId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RecipeId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RecipeName")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("RecipeVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("SequenceId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SequenceName")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("SequenceRequestId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StartedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("StartedByUserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("StartedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BatchNumber")
+                        .IsUnique();
+
+                    b.HasIndex("StartedTs");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("ProductionBatches", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.ProductionCountCorrection", b =>

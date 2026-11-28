@@ -350,6 +350,7 @@ function takeoverKindLabel(kind: string): string {
   if (kind === 'command') return tr('systemView.takeoverReviewKind_command')
   if (kind === 'sequence') return tr('systemView.takeoverReviewKind_sequence')
   if (kind === 'recipe') return tr('systemView.takeoverReviewKind_recipe')
+  if (kind === 'batch') return tr('systemView.takeoverReviewKind_batch')
   if (kind === 'history-spool') return tr('systemView.takeoverReviewKind_historySpool')
   if (kind === 'history-loss') return tr('systemView.takeoverReviewKind_historyLoss')
   return kind

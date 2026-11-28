@@ -1106,6 +1106,7 @@ export default {
     emptyLevel: 'None',
     kindCommand: 'Control command',
     kindRecipe: 'Recipe',
+    kindBatch: "Production batch",
     kindSequence: 'Sequence',
     attention: 'Handover checks',
     noAttention: 'No outstanding lockouts, local-mode devices, partial downloads, or unknown results for the incoming shift',

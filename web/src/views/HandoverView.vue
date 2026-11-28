@@ -197,6 +197,7 @@ const partialRecipes = ref<RecipeDownload[]>([])
 function kindLabel(kind: string): string {
   if (kind === 'command') return tr('dutyHandover.kindCommand')
   if (kind === 'recipe') return tr('dutyHandover.kindRecipe')
+  if (kind === 'batch') return tr('dutyHandover.kindBatch')
   if (kind === 'sequence') return tr('dutyHandover.kindSequence')
   return kind
 }

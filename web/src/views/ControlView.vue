@@ -90,8 +90,9 @@
           <el-table-column prop="name" :label="$t('controlView.k1be7ae')" min-width="160" show-overflow-tooltip />
           <el-table-column :label="$t('controlView.kd13bfa')" min-width="260" show-overflow-tooltip><template #default="{ row }"><span class="tiny">{{ stepsSummary(row.steps) }}</span></template></el-table-column>
           <el-table-column :label="$t('controlView.kb38c92')" width="80" show-overflow-tooltip><template #default="{ row }">{{ row.dualApproval ? $t('controlView.k1b5fdf') : '-' }}</template></el-table-column>
-          <el-table-column :label="$t('controlView.kf3ea6d')" width="230"><template #default="{ row }">
+          <el-table-column :label="$t('controlView.kf3ea6d')" width="300"><template #default="{ row }">
             <el-button v-if="canControlArea(row.areaId)" size="small" type="primary" :disabled="mobileBlocked" :loading="actionBusy.has('start:' + row.id)" :data-test="`sequence-start-${row.id}`" @click="startSequence(row)">{{ $t('controlView.k28febb') }}</el-button>
+            <el-button v-if="canControlArea(row.areaId)" size="small" :disabled="mobileBlocked" :data-test="`sequence-start-batch-${row.id}`" @click="startAsBatch(row)">{{ $t('productionBatches.startAsBatch') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" @click="editSequence(row)">{{ $t('controlView.ka7f814') }}</el-button>
             <el-button v-if="canConfigureArea(row.areaId)" size="small" type="danger" @click="removeSequence(row)">{{ $t('controlView.k3755f5') }}</el-button>
           </template></el-table-column>
@@ -533,6 +534,9 @@ function describeStep(s: ControlStep): string {
   }
 }
 function stepsSummary(steps: ControlStep[]): string { return steps.map(s => `${s.id}.${s.name}${s.type && s.type !== 'write' ? `[${stepTypeLabels[s.type] ?? s.type}]` : ''}`).join(' → ') }
+function startAsBatch(row: ControlSequence): void {
+  void router.push({ path: '/production/batches', query: { sequenceId: String(row.id) } })
+}
 async function startSequence(row: ControlSequence): Promise<void> {
   if (rejectMobileControl()) return
   const key = `start:${row.id}`

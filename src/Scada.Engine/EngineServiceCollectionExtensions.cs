@@ -77,6 +77,7 @@ public static partial class EngineServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<TraceabilityService>());
         services.AddHostedService(sp => sp.GetRequiredService<TraceabilityScannerHost>());
         services.AddHostedService(sp => sp.GetRequiredService<ControlWorkflowService>());
+        services.AddHostedService(sp => sp.GetRequiredService<ProductionBatchService>());
         services.AddHostedService(sp => sp.GetRequiredService<HistoryWriterService>());
         services.AddHostedService(sp => sp.GetRequiredService<AlarmEngine>());
         services.AddHostedService(sp => sp.GetRequiredService<CalculatedTagEngine>());

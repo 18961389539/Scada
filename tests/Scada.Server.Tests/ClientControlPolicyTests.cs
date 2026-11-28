@@ -52,6 +52,9 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/work-orders/4")]
     [InlineData("/api/work-orders/4/status")]
     [InlineData("/api/work-orders/4/parts")]
+    [InlineData("/api/recipes/upload")]
+    [InlineData("/api/production-batches")]
+    [InlineData("/api/production-batches/6/abort")]
     public void ControlPath_Includes_Field_Changing_Routes(string path)
     {
         Assert.Matches(ClientControlPolicy.ControlPath(), path);
@@ -74,6 +77,8 @@ public sealed class ClientControlPolicyTests
     [InlineData("/api/oee/analytics")]
     [InlineData("/api/quality/defect-codes")]
     [InlineData("/api/quality/inspections/templates")]
+    [InlineData("/api/production-batches/check")]
+    [InlineData("/api/production-batches/6")]
     public void ControlPath_Ignores_Configuration_Or_Read_Routes(string path)
     {
         Assert.DoesNotMatch(ClientControlPolicy.ControlPath(), path);
@@ -127,6 +132,9 @@ public sealed class ClientControlPolicyTests
             ("Endpoints/AssetEndpoints.cs", "/api/work-orders/1"),
             ("Endpoints/AssetEndpoints.cs", "/api/work-orders/1/status"),
             ("Endpoints/AssetEndpoints.cs", "/api/work-orders/1/parts"),
+            ("Endpoints/RecipeEndpoints.cs", "/api/recipes/upload"),
+            ("Endpoints/ProductionBatchEndpoints.cs", "/api/production-batches"),
+            ("Endpoints/ProductionBatchEndpoints.cs", "/api/production-batches/1/abort"),
         };
         var missing = new List<string>();
         foreach (var (file, sample) in required)
@@ -179,6 +187,12 @@ public sealed class ClientControlPolicyTests
     [InlineData("POST", "/api/work-orders/4/status", true)]
     [InlineData("POST", "/api/work-orders/4/parts", true)]
     [InlineData("GET", "/api/work-orders", false)]
+    [InlineData("POST", "/api/recipes/upload", true)]
+    [InlineData("GET", "/api/recipes/upload", false)]
+    [InlineData("POST", "/api/production-batches", true)]
+    [InlineData("POST", "/api/production-batches/4/abort", true)]
+    [InlineData("POST", "/api/production-batches/check", false)]
+    [InlineData("GET", "/api/production-batches", false)]
     public void IsControlRequest_IncludesDeleteFaultAndCalcReset(string method, string path, bool expected)
     {
         var http = new Microsoft.AspNetCore.Http.DefaultHttpContext();

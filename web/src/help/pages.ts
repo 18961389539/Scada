@@ -14,6 +14,7 @@ const EXACT: Record<string, string> = {
   '/report-center': 'reportCenter',
   '/calc-jobs': 'calcJobs',
   '/recipes': 'recipes',
+  '/production/batches': 'recipes',
   '/traceability': 'traceability',
   '/control': 'control',
   '/screens': 'screens',

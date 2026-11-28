@@ -76,6 +76,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'console', path: '/console', titleKey: 'workbench.navTitle', keywordsKey: 'nav.kw.console', icon: Grid, group: 'monitoring' },
   { id: 'control', path: '/control', titleKey: 'navMenu.k4eb87f', keywordsKey: 'nav.kw.control', icon: Operation, group: 'monitoring', policy: 'any-control', quick: true },
   { id: 'recipes', path: '/recipes', titleKey: 'navMenu.k4b435b', keywordsKey: 'nav.kw.recipes', icon: Tickets, group: 'production', policy: 'any-view' },
+  { id: 'production-batches', path: '/production/batches', titleKey: 'productionBatches.title', keywordsKey: 'nav.kw.productionBatches', icon: Tickets, group: 'production', policy: 'any-view' },
   { id: 'traceability', path: '/traceability', titleKey: 'traceability.title', keywordsKey: 'traceability.keywords', icon: Aim, group: 'production', policy: 'any-view' },
   { id: 'trends', path: '/trends', titleKey: 'navMenu.k402be4', keywordsKey: 'nav.kw.trends', icon: TrendCharts, group: 'monitoring' },
   { id: 'alarms', path: '/alarms', titleKey: 'navMenu.k9f45b3', keywordsKey: 'nav.kw.alarms', icon: Bell, group: 'monitoring', quick: true },

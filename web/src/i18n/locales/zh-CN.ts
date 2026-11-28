@@ -1106,6 +1106,7 @@ export default {
     emptyLevel: '无',
     kindCommand: '控制命令',
     kindRecipe: '配方',
+    kindBatch: "生产批次",
     kindSequence: '顺控',
     attention: '交班核对',
     noAttention: '没有需要下一班特别核对的挂牌、就地、部分下发或结果未知项',

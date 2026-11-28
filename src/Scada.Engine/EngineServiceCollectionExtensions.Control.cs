@@ -16,6 +16,7 @@ public static partial class EngineServiceCollectionExtensions
         services.AddSingleton<TraceabilityService>();
         services.AddSingleton<TraceabilityScannerHost>();
         services.AddSingleton<ControlWorkflowService>();
+        services.AddSingleton<ProductionBatchService>();
         return services;
     }
 }

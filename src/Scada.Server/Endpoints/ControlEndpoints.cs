@@ -447,7 +447,7 @@ public static class ControlEndpoints
         sequence.AreaId.ToString(CultureInfo.InvariantCulture), sequence.DualApproval ? "1" : "0",
         sequence.Name, sequence.Description, sequence.StepsJson);
 
-    private static async Task<string?> CanRunAsync(HttpContext http, ControlSequence sequence)
+    public static async Task<string?> CanRunAsync(HttpContext http, ControlSequence sequence)
     {
         var access = await http.GetAccessAsync();
         if (!access.Has(Permission.Control, sequence.AreaId)) return "无该顺控所在区域的控制权限";

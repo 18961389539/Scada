@@ -39,6 +39,7 @@
                 <el-dropdown-item v-if="canConfigureTemplate(row.templateId)" :data-test="`recipe-copy-${row.id}`" @click="copyRecipe(row)">{{ $t('recipesView.kd82462') }}</el-dropdown-item>
                 <el-dropdown-item :data-test="`recipe-versions-${row.id}`" @click="showVersions(row)">{{ $t('recipesView.k989d1a') }}</el-dropdown-item>
                 <el-dropdown-item :data-test="`recipe-compare-live-${row.id}`" @click="compare(row, null, 'live', null)">{{ $t('recipesView.kaf8b2e') }}</el-dropdown-item>
+                <el-dropdown-item v-if="canControlArea(row.areaId)" :data-test="`recipe-start-batch-${row.id}`" @click="startAsBatch(row)">{{ $t('productionBatches.startAsBatch') }}</el-dropdown-item>
                 <el-dropdown-item v-if="canConfigureArea(row.areaId)" :data-test="`recipe-upload-${row.id}`" @click="upload(row)">{{ $t('recipesView.kb45fe4') }}</el-dropdown-item>
                 <el-dropdown-item v-if="canConfigureArea(row.areaId)" divided class="danger" :data-test="`recipe-delete-${row.id}`" @click="removeRecipe(row)">{{ $t('recipesView.k3755f5') }}</el-dropdown-item>
               </el-dropdown-menu></template>
@@ -171,7 +172,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { notifySubmittedForApproval } from '../composables/pendingApprovalToast'
 import { areaApi, deviceApi, realtimeApi, tagApi } from '../api'
@@ -188,6 +189,7 @@ import { tr } from '../i18n'
 import { controlBlockedOnMobile, loadClientPolicy } from '../mobile'
 
 interface NamedTag { id: number; name: string; deviceId: number | null; writable: boolean }
+const router = useRouter()
 const tab = ref('recipes')
 const loading = ref(false), downloadSection = ref<HTMLElement>(), lastSubmitted = ref<RecipeDownload | null>(null)
 let disposed = false, refreshSeq = 0, downloadsSeq = 0, checkSeq = 0
@@ -504,6 +506,9 @@ async function confirmDownload(): Promise<void> {
     if ((e as { response?: unknown }).response) downloadError.value = errorMessage(e, tr('recipesView.k2d0918'))
     else { downloadError.value = tr('commandUx.recipeOutcomeUnknown'); void loadDownloads() }
   } finally { if (!disposed) submitting.value = false }
+}
+function startAsBatch(row: Recipe): void {
+  void router.push({ path: '/production/batches', query: { recipeId: String(row.id), version: String(row.version) } })
 }
 async function abort(d: RecipeDownload): Promise<void> {
   if (controlBlockedOnMobile()) { actionError.value = tr('screenRuntime.mobileControlBlocked'); return }

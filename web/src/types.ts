@@ -639,6 +639,7 @@ export interface Health {
     unknownCommands: number
     interruptedSequences: number
     interruptedRecipes: number
+    interruptedBatches: number
     items: { kind: string; id: string; name: string; message: string; ts?: number | null }[]
     unreplayedSpool?: { segments: number; bytes: number; approxCount: number; from?: number | null; to?: number | null } | null
     lossWindows?: number

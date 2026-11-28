@@ -54,6 +54,7 @@ public static class RuntimeCleanupCatalog
         Must<DowntimeEvent>("ProductionLine", "删除产线时清掉停机事件。", "OeeEndpoints.DeleteLine"),
         Must<ProductionCountCorrection>("ProductionLine", "删除产线时清掉产量修正。", "OeeEndpoints.DeleteLine"),
         Retain<ControlSequenceRun>("顺控运行历史，接管核对仍要读取。"),
+        Retain<ProductionBatch>("生产批次记录，接管核对仍要读取。"),
         Retain<ControlRequest>("控制复核请求历史。"),
         Must<ControlLockout>("Tag", "Device", "删除测点或设备时解除仍有效的挂牌。", "ControlLockoutOnDelete"),
         Must<DeviceControlState>("Device", "删除设备时清掉控制状态。", "DeviceControlStateOnDelete"),

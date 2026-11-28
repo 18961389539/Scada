@@ -45,6 +45,7 @@ const router = createRouter({
           meta: { title: tr('index.k445294') }
         },
         { path: 'recipes', name: 'recipes', component: () => import('../views/RecipesView.vue'), meta: { title: tr('index.k4b435b'), policy: 'any-view' } },
+        { path: 'production/batches', name: 'production-batches', component: () => import('../views/ProductionBatchesView.vue'), meta: { title: tr('productionBatches.title'), policy: 'any-view' } },
         { path: 'traceability', name: 'traceability', component: () => import('../views/TraceabilityView.vue'), meta: { title: tr('traceability.title'), policy: 'any-view' } },
         { path: 'control', name: 'control', component: () => import('../views/ControlView.vue'), meta: { title: tr('index.k4eb87f'), policy: 'any-control' } },
         { path: 'trends', name: 'trends', component: () => import('../views/TrendsView.vue'), meta: { title: tr('index.k402be4') } },

@@ -44,6 +44,7 @@ public static class EndpointRegistration
         app.MapCommandEndpoints();
         app.MapControlEndpoints();
         app.MapRecipeEndpoints();
+        app.MapProductionBatchEndpoints();
         app.MapTraceabilityEndpoints();
         app.MapReportEndpoints();
         app.MapLogEndpoints();
