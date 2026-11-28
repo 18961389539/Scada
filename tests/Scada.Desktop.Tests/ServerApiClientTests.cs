@@ -52,6 +52,45 @@ public sealed class ServerApiClientTests
 
         var result = await client.LoginAsync("kiosk01", "secret");
         Assert.Equal(LoginStatus.MustChangePassword, result.Status);
+        Assert.NotNull(result.Session);
+        Assert.Equal("t1", result.Session!.Token);
+        Assert.True(result.Session.MustChangePassword);
+        Assert.Equal(LoginResult.MustChangePasswordMessage, result.Message);
+    }
+
+    [Fact]
+    public async Task ChangePasswordReturnsNewSession()
+    {
+        HttpRequestMessage? captured = null;
+        string? body = null;
+        using var client = Client(request =>
+        {
+            captured = request;
+            body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return Json(HttpStatusCode.OK,
+                """{"token":"t2","expiresAt":"2026-11-15T20:00:00+08:00","user":{"id":1,"userName":"admin","mustChangePassword":false}}""");
+        });
+
+        var result = await client.ChangePasswordAsync("t1", "admin123", "newpass");
+        Assert.Equal(LoginStatus.Success, result.Status);
+        Assert.Equal("t2", result.Session!.Token);
+        Assert.False(result.Session.MustChangePassword);
+        Assert.Equal(HttpMethod.Post, captured!.Method);
+        Assert.Equal("/api/auth/password", captured.RequestUri!.AbsolutePath);
+        Assert.Equal("Bearer", captured.Headers.Authorization!.Scheme);
+        Assert.Equal("t1", captured.Headers.Authorization.Parameter);
+        Assert.Contains("admin123", body);
+        Assert.Contains("newpass", body);
+    }
+
+    [Fact]
+    public async Task ChangePasswordMapsValidationMessage()
+    {
+        using var client = Client(_ => Json(HttpStatusCode.BadRequest, """{"message":"新密码不能与当前密码相同"}"""));
+        var result = await client.ChangePasswordAsync("t1", "admin123", "admin123");
+        Assert.Equal(LoginStatus.Protocol, result.Status);
+        Assert.Equal("新密码不能与当前密码相同", result.Message);
+        Assert.Null(result.Session);
     }
 
     [Fact]

@@ -67,9 +67,11 @@ internal enum LoginStatus
 
 internal sealed record LoginResult(LoginStatus Status, SessionData? Session, string Message, TimeSpan? RetryAfter = null, string? PrimaryUrl = null)
 {
+    public const string MustChangePasswordMessage = "账号已验证，需要先修改初始密码后才能继续。可在下方改密，或打开浏览器登录页完成改密。";
+
     public static LoginResult Success(SessionData session) =>
         session.MustChangePassword
-            ? new LoginResult(LoginStatus.MustChangePassword, session, "该账号需要先修改初始密码，请先用浏览器登录并完成改密")
+            ? new LoginResult(LoginStatus.MustChangePassword, session, LoginResult.MustChangePasswordMessage)
             : new LoginResult(LoginStatus.Success, session, string.Empty);
 }
 

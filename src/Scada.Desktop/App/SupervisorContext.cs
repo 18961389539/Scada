@@ -141,7 +141,7 @@ internal sealed class SupervisorContext : ApplicationContext
             var restart = _restartAfterStop;
             _settingsAfterStop = false;
             _restartAfterStop = false;
-            if (openSettings) ShowSettings(restartAfter: true);
+            if (openSettings) ShowSettings(restartAfter: true, DesktopLaunchError.Read(_paths));
             else if (restart) StartClient();
             return;
         }
@@ -156,13 +156,14 @@ internal sealed class SupervisorContext : ApplicationContext
         if (code == ExitCodes.Configuration)
         {
             StopClient(restartAfter: false, settingsAfter: false);
+            var launchError = DesktopLaunchError.Read(_paths);
             var result = MessageBox.Show(
-                "自动登录或配置校验失败，画面未启动。\n\n是否打开设置更新账号或显示目标？",
+                DesktopLaunchError.SupervisorPrompt(launchError),
                 "SCADA 桌面客户端",
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
                 MessageBoxDefaultButton.Button1);
-            if (result == DialogResult.Yes) ShowSettings(restartAfter: true);
+            if (result == DialogResult.Yes) ShowSettings(restartAfter: true, launchError);
             else Balloon("自动登录失败，可在托盘中打开设置或重新启动画面。", ToolTipIcon.Warning);
             return;
         }
@@ -255,7 +256,7 @@ internal sealed class SupervisorContext : ApplicationContext
             StopClient(restartAfter: false, settingsAfter: true);
             return;
         }
-        ShowSettings(restartAfter: true);
+        ShowSettings(restartAfter: true, DesktopLaunchError.Read(_paths));
     }
 
     private void StopClient(bool restartAfter, bool settingsAfter)
@@ -282,20 +283,22 @@ internal sealed class SupervisorContext : ApplicationContext
         }
     }
 
-    private void ShowSettings(bool restartAfter)
+    private void ShowSettings(bool restartAfter, string? launchError = null)
     {
         var loaded = _store.Load(out var userError);
         var machine = new MachineSettingsStore(_paths.MachineSettingsFile).Load(out var machineError);
         var managedAutostart = InstallManifestStore.IsManagedAutostart(_paths);
         var resolved = DesktopConfigResolver.Resolve(loaded, machine, managedAutostart);
         var baseline = resolved?.Settings ?? _settings;
-        using var form = new SettingsForm(_paths, _store, baseline, resolved?.Error ?? userError ?? machineError, machine);
+        var initialError = resolved?.Error ?? userError ?? machineError ?? launchError ?? DesktopLaunchError.Read(_paths);
+        using var form = new SettingsForm(_paths, _store, baseline, initialError, machine);
         var result = form.ShowDialog();
         if (result == DialogResult.OK && form.SavedSettings is not null)
         {
             _settings = form.SavedSettings;
             ClientIdentity.Ensure(_settings, _store);
             _restartPolicy.Reset();
+            DesktopLaunchError.Clear(_paths);
             DesktopLogger.Info("设置已保存");
         }
         if (restartAfter || result == DialogResult.OK) StartClient();

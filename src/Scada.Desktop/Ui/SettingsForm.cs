@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Linq;
 using Scada.Desktop.Api;
 using Scada.Desktop.Configuration;
@@ -55,6 +56,49 @@ internal sealed class SettingsForm : Form
     private readonly Button _cancelButton = new() { Text = "取消", AutoSize = true };
     private readonly Button _logsButton = new() { Text = "打开日志目录", AutoSize = true };
     private readonly Label _passwordHint = new() { AutoSize = true, ForeColor = Color.FromArgb(110, 125, 140) };
+    private readonly Label _notice = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(660, 0),
+        ForeColor = Color.FromArgb(80, 100, 120)
+    };
+    private readonly Label _demoNotice = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(660, 0),
+        ForeColor = Color.FromArgb(80, 100, 120),
+        Visible = false
+    };
+    private readonly Label _accountHint = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(620, 0),
+        ForeColor = Color.FromArgb(110, 125, 140)
+    };
+    private readonly Label _loginStatus = new() { AutoSize = true, MaximumSize = new Size(620, 0) };
+    private readonly TextBox _currentPassword = new() { UseSystemPasswordChar = true };
+    private readonly TextBox _newPassword = new() { UseSystemPasswordChar = true };
+    private readonly TextBox _confirmPassword = new() { UseSystemPasswordChar = true };
+    private readonly Button _changePasswordButton = new() { Text = "修改密码并继续", AutoSize = true };
+    private readonly Button _openBrowserButton = new() { Text = "打开浏览器登录页", AutoSize = true };
+    private readonly Label _browserHint = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(620, 0),
+        ForeColor = Color.FromArgb(110, 125, 140)
+    };
+    private readonly Label _workspaceHint = new()
+    {
+        AutoSize = true,
+        MaximumSize = new Size(620, 0),
+        ForeColor = Color.FromArgb(80, 100, 120),
+        Text = DesktopSettingsCopy.WorkspaceHint,
+        Visible = false
+    };
+    private readonly Label _screenLabel = NewLabel("组态画面");
+    private readonly Label _layoutLabel = NewLabel("运行布局");
+    private readonly Label _playlistLabel = NewLabel("播放列表");
+    private readonly Label _workstationLabel = NewLabel("工作站");
     private readonly System.Windows.Forms.Timer _cooldownTimer = new() { Interval = 1000 };
 
     private ServerApiClient? _api;
@@ -69,6 +113,11 @@ internal sealed class SettingsForm : Form
     private IReadOnlyList<PlaylistSummary> _playlists = [];
     private IReadOnlyList<WorkstationSummary> _workstations = [];
     private string[]? _layoutMonitorDevices;
+    private readonly string? _initialError;
+    private bool _mustChangePending;
+    private bool _savedCipherStale;
+    private bool _passwordChanged;
+    private SessionData? _pendingSession;
 
     public SettingsForm(DesktopPaths paths, SettingsStore store, DesktopSettings? existing, string? initialError, MachineSettings? machine = null)
     {
@@ -88,6 +137,10 @@ internal sealed class SettingsForm : Form
         _originalWorkstationId = existing?.Target.WorkstationId;
         _layoutMonitorDevices = existing?.Target.LayoutMonitorDeviceNames;
 
+        _initialError = initialError;
+        _mustChangePending = DesktopLaunchError.IsMustChangePassword(initialError);
+        _savedCipherStale = _mustChangePending;
+
         Text = existing is null ? "SCADA 桌面客户端 - 首次配置" : "SCADA 桌面客户端 - 设置";
         Font = new Font("Microsoft YaHei UI", 9F);
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -97,18 +150,24 @@ internal sealed class SettingsForm : Form
         MinimizeBox = false;
         ShowInTaskbar = true;
         TopMost = true;
+        AutoScroll = true;
         ClientSize = new Size(760, 930);
 
         BuildUi(existing, initialError);
         PopulateMonitors(existing?.Display.MonitorDeviceName);
         ApplyExistingTarget(existing);
-        _passwordHint.Text = string.IsNullOrWhiteSpace(_existingCipher)
-            ? "尚未保存密码"
-            : "已保存密码，留空表示沿用";
+        UpdatePasswordHint();
         _status.Text = string.Empty;
+        if (_mustChangePending)
+        {
+            SetLoginStatus(DesktopSettingsCopy.MustChangeLoginStatus, true);
+            _loginStatus.ForeColor = Color.FromArgb(170, 110, 20);
+        }
 
         _connectButton.Click += ConnectButton_Click;
         _loginButton.Click += LoginButton_Click;
+        _changePasswordButton.Click += ChangePasswordButton_Click;
+        _openBrowserButton.Click += OpenBrowserButton_Click;
         _saveButton.Click += SaveButton_Click;
         _cancelButton.Click += (_, _) => { DialogResult = DialogResult.Cancel; Close(); };
         _logsButton.Click += (_, _) => OpenLogsDirectory();
@@ -128,6 +187,8 @@ internal sealed class SettingsForm : Form
         UpdateTargetControls();
         UpdateButtons();
         ApplyLocks();
+        UpdatePasswordChangeUi();
+        _ = ProbeSiteInfoAsync();
     }
 
     public DesktopSettings? SavedSettings { get; private set; }
@@ -180,14 +241,9 @@ internal sealed class SettingsForm : Form
             Dock = DockStyle.Fill,
             Margin = new Padding(0, 0, 0, 8)
         };
-        var hint = new Label
-        {
-            AutoSize = true,
-            MaximumSize = new Size(660, 0),
-            ForeColor = Color.FromArgb(80, 100, 120),
-            Text = "自动登录使用专用账号，建议只授予查看权限。密码只以 Windows DPAPI 加密保存在本机，不会写入日志。"
-        };
-        panel.Controls.Add(hint);
+        _notice.Text = DesktopSettingsCopy.Notice(null, false);
+        panel.Controls.Add(_notice);
+        panel.Controls.Add(_demoNotice);
         if (_lockedFields.Length > 0 || _managedAutostart)
         {
             panel.Controls.Add(new Label
@@ -232,21 +288,57 @@ internal sealed class SettingsForm : Form
 
     private Control BuildAccountGroup()
     {
-        var group = NewGroup("专用账号");
+        var group = NewGroup("登录账号");
         var table = NewGrid(3);
-        table.Controls.Add(NewLabel("用户名"), 0, 0);
-        table.Controls.Add(_userName, 1, 0);
+        table.Controls.Add(_accountHint, 0, 0);
+        table.SetColumnSpan(_accountHint, 3);
+        table.Controls.Add(NewLabel("用户名"), 0, 1);
+        table.Controls.Add(_userName, 1, 1);
         _userName.Dock = DockStyle.Fill;
-        table.Controls.Add(NewLabel("密码"), 0, 1);
-        table.Controls.Add(_password, 1, 1);
+        table.Controls.Add(NewLabel("密码"), 0, 2);
+        table.Controls.Add(_password, 1, 2);
         _password.Dock = DockStyle.Fill;
-        table.Controls.Add(_savePassword, 1, 2);
+        table.Controls.Add(_loginButton, 2, 2);
+        table.Controls.Add(_savePassword, 1, 3);
         table.SetColumnSpan(_savePassword, 2);
-        table.Controls.Add(_passwordHint, 1, 3);
+        table.Controls.Add(_passwordHint, 1, 4);
         table.SetColumnSpan(_passwordHint, 2);
-        table.Controls.Add(_loginButton, 2, 1);
+        table.Controls.Add(_loginStatus, 1, 5);
+        table.SetColumnSpan(_loginStatus, 2);
+        var changePanel = BuildPasswordChangePanel();
+        table.Controls.Add(changePanel, 0, 6);
+        table.SetColumnSpan(changePanel, 3);
         group.Controls.Add(table);
         return group;
+    }
+
+    private Control BuildPasswordChangePanel()
+    {
+        var table = new TableLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            ColumnCount = 3,
+            Margin = new Padding(0, 8, 0, 0)
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110F));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150F));
+        table.Controls.Add(NewLabel("当前密码"), 0, 0);
+        table.Controls.Add(_currentPassword, 1, 0);
+        _currentPassword.Dock = DockStyle.Fill;
+        table.Controls.Add(NewLabel("新密码"), 0, 1);
+        table.Controls.Add(_newPassword, 1, 1);
+        _newPassword.Dock = DockStyle.Fill;
+        table.Controls.Add(NewLabel("确认新密码"), 0, 2);
+        table.Controls.Add(_confirmPassword, 1, 2);
+        _confirmPassword.Dock = DockStyle.Fill;
+        table.Controls.Add(_changePasswordButton, 2, 2);
+        table.Controls.Add(_openBrowserButton, 1, 3);
+        table.Controls.Add(_browserHint, 1, 4);
+        table.SetColumnSpan(_browserHint, 2);
+        table.Name = "passwordChangePanel";
+        return table;
     }
 
     private Control BuildTargetGroup()
@@ -262,17 +354,19 @@ internal sealed class SettingsForm : Form
         table.Controls.Add(kinds, 0, 0);
         table.SetColumnSpan(kinds, 3);
 
-        table.Controls.Add(NewLabel("组态画面"), 0, 1);
-        table.Controls.Add(_screenCombo, 1, 1);
-        table.Controls.Add(NewLabel("运行布局"), 0, 2);
-        table.Controls.Add(_layoutCombo, 1, 2);
-        table.Controls.Add(NewLabel("播放列表"), 0, 3);
-        table.Controls.Add(_playlistCombo, 1, 3);
-        table.Controls.Add(NewLabel("工作站"), 0, 4);
-        table.Controls.Add(_workstationCombo, 1, 4);
-        table.Controls.Add(_monitorOnly, 1, 5);
+        table.Controls.Add(_workspaceHint, 0, 1);
+        table.SetColumnSpan(_workspaceHint, 3);
+        table.Controls.Add(_screenLabel, 0, 2);
+        table.Controls.Add(_screenCombo, 1, 2);
+        table.Controls.Add(_layoutLabel, 0, 3);
+        table.Controls.Add(_layoutCombo, 1, 3);
+        table.Controls.Add(_playlistLabel, 0, 4);
+        table.Controls.Add(_playlistCombo, 1, 4);
+        table.Controls.Add(_workstationLabel, 0, 5);
+        table.Controls.Add(_workstationCombo, 1, 5);
+        table.Controls.Add(_monitorOnly, 1, 6);
         table.SetColumnSpan(_monitorOnly, 2);
-        table.Controls.Add(_layoutMonitorPanel, 1, 6);
+        table.Controls.Add(_layoutMonitorPanel, 1, 7);
         table.SetColumnSpan(_layoutMonitorPanel, 2);
         group.Controls.Add(table);
         return group;
@@ -416,6 +510,17 @@ internal sealed class SettingsForm : Form
     {
         var kind = CurrentKind();
         var locked = IsLocked("target");
+        var workspace = kind == "workspace";
+        _workspaceHint.Visible = workspace;
+        _screenLabel.Visible = !workspace;
+        _screenCombo.Visible = !workspace;
+        _layoutLabel.Visible = !workspace;
+        _layoutCombo.Visible = !workspace;
+        _playlistLabel.Visible = !workspace;
+        _playlistCombo.Visible = !workspace;
+        _workstationLabel.Visible = !workspace;
+        _workstationCombo.Visible = !workspace;
+        _monitorOnly.Visible = !workspace;
         _screenCombo.Enabled = !locked && kind == "screen";
         _monitorOnly.Enabled = !locked && (kind == "screen" || kind == "playlist");
         _layoutCombo.Enabled = !locked && kind == "layout";
@@ -423,6 +528,7 @@ internal sealed class SettingsForm : Form
         _workstationCombo.Enabled = !locked && (kind == "workstation" || kind == "screen" && _monitorOnly.Checked);
         _layoutMonitorPanel.Visible = kind == "layout";
         if (kind == "layout") _ = RefreshLayoutMonitorsAsync();
+        UpdateAccountCopy();
     }
 
     private bool IsLocked(string field) =>
@@ -563,7 +669,7 @@ internal sealed class SettingsForm : Form
             using var probe = new ServerApiClient(url);
             var info = await probe.GetSiteInfoAsync();
             if (_closing || IsDisposed) return;
-            _siteInfo.Text = $"已连接：{info.SiteName}{(info.DemoMode ? "（演示模式）" : string.Empty)}";
+            ApplySiteInfo(info);
             SetStatus("服务器连接正常，请继续登录。", false);
         }
         catch (ApiException exception)
@@ -624,12 +730,15 @@ internal sealed class SettingsForm : Form
                 case LoginStatus.Success:
                     _plainPassword = password;
                     _authenticated = true;
+                    _mustChangePending = false;
+                    _pendingSession = result.Session;
                     SetStatus($"登录成功：{userName}", false);
+                    SetLoginStatus($"登录成功：{userName}", false);
                     await LoadTargetListsAsync(result.Session!.Token);
+                    UpdatePasswordChangeUi();
                     break;
                 case LoginStatus.MustChangePassword:
-                    _authenticated = false;
-                    SetStatus(result.Message, true);
+                    EnterMustChangePassword(result.Session, password);
                     break;
                 case LoginStatus.InvalidCredentials:
                     _authenticated = false;
@@ -720,6 +829,12 @@ internal sealed class SettingsForm : Form
         if (_busy) return;
         try
         {
+            if (_mustChangePending)
+            {
+                SetStatus(DesktopSettingsCopy.MustChangeLoginStatus, true);
+                SetLoginStatus(DesktopSettingsCopy.MustChangeLoginStatus, true);
+                return;
+            }
             if (!SettingsValidator.TryNormalizeServerUrl(_serverUrl.Text, out var url, out var error))
             {
                 SetStatus(error, true);
@@ -785,14 +900,24 @@ internal sealed class SettingsForm : Form
                     break;
             }
 
+            if (_password.Text.Length > 0) _plainPassword = _password.Text;
+            if ((_savedCipherStale || _passwordChanged) && string.IsNullOrEmpty(_plainPassword))
+            {
+                SetStatus(DesktopSettingsCopy.SavedCipherStaleHint, true);
+                SetLoginStatus(DesktopSettingsCopy.SavedCipherStaleHint, true);
+                return;
+            }
+            var passwordCipher = !_savePassword.Checked
+                ? null
+                : (_savedCipherStale || _passwordChanged)
+                    ? PasswordProtector.Protect(_plainPassword!)
+                    : string.IsNullOrEmpty(_plainPassword) ? _existingCipher : PasswordProtector.Protect(_plainPassword);
             var settings = new DesktopSettings
             {
                 ServerUrl = url,
                 UserName = userName,
                 SavePassword = _savePassword.Checked,
-                PasswordCipher = _savePassword.Checked
-                    ? string.IsNullOrEmpty(_plainPassword) ? _existingCipher : PasswordProtector.Protect(_plainPassword)
-                    : null,
+                PasswordCipher = passwordCipher,
                 Target = new DesktopTarget
                 {
                     Kind = kind,
@@ -886,6 +1011,9 @@ internal sealed class SettingsForm : Form
         _userName.Enabled = !busy && !IsLocked("userName");
         _password.Enabled = !busy;
         _savePassword.Enabled = !busy;
+        _currentPassword.Enabled = !busy;
+        _newPassword.Enabled = !busy;
+        _confirmPassword.Enabled = !busy;
         UpdateButtons();
     }
 
@@ -894,7 +1022,9 @@ internal sealed class SettingsForm : Form
         if (_closing || IsDisposed) return;
         _connectButton.Enabled = !_busy;
         _loginButton.Enabled = !_busy && DateTime.UtcNow >= _loginCooldownUntil;
-        _saveButton.Enabled = !_busy;
+        _saveButton.Enabled = !_busy && !_mustChangePending;
+        _changePasswordButton.Enabled = !_busy && _mustChangePending;
+        _openBrowserButton.Enabled = !_busy;
     }
 
     private void SetStatus(string message, bool error)
@@ -902,6 +1032,202 @@ internal sealed class SettingsForm : Form
         if (_closing || IsDisposed) return;
         _status.Text = message;
         _status.ForeColor = error ? Color.FromArgb(180, 60, 60) : Color.FromArgb(50, 120, 80);
+        SetLoginStatus(message, error);
+    }
+
+    private void SetLoginStatus(string message, bool error)
+    {
+        if (_closing || IsDisposed) return;
+        _loginStatus.Text = message;
+        _loginStatus.ForeColor = error ? Color.FromArgb(180, 60, 60) : Color.FromArgb(50, 120, 80);
+    }
+
+    private async Task ProbeSiteInfoAsync()
+    {
+        if (!SettingsValidator.TryNormalizeServerUrl(_serverUrl.Text, out var url, out _)) return;
+        try
+        {
+            using var probe = new ServerApiClient(url);
+            var info = await probe.GetSiteInfoAsync();
+            if (_closing || IsDisposed) return;
+            ApplySiteInfo(info);
+        }
+        catch
+        {
+            // 打开时探测失败不打断设置；操作员仍可点“测试连接”。
+        }
+    }
+
+    private void ApplySiteInfo(SiteInfo info)
+    {
+        _siteInfo.Text = $"已连接：{info.SiteName}{(info.DemoMode ? "（演示模式）" : string.Empty)}";
+        _notice.Text = DesktopSettingsCopy.Notice(info.SiteName, info.DemoMode);
+        _demoNotice.Text = DesktopSettingsCopy.DemoPasswordHint;
+        _demoNotice.Visible = info.DemoMode;
+        UpdateAccountCopy();
+    }
+
+    private void UpdateAccountCopy()
+    {
+        _accountHint.Text = DesktopSettingsCopy.AccountHint(CurrentKind());
+        UpdatePasswordHint();
+        UpdatePasswordChangeUi();
+    }
+
+    private void UpdatePasswordHint()
+    {
+        _passwordHint.Text = DesktopSettingsCopy.PasswordHint(
+            !string.IsNullOrWhiteSpace(_existingCipher),
+            _savedCipherStale,
+            _mustChangePending,
+            _passwordChanged);
+    }
+
+    private void UpdatePasswordChangeUi()
+    {
+        var showFields = _mustChangePending;
+        _currentPassword.Visible = showFields;
+        _newPassword.Visible = showFields;
+        _confirmPassword.Visible = showFields;
+        _changePasswordButton.Visible = showFields;
+        if (_currentPassword.Parent is { } changeParent)
+        {
+            foreach (Control child in changeParent.Controls)
+            {
+                if (child is Label label && (label.Text == "当前密码" || label.Text == "新密码" || label.Text == "确认新密码"))
+                    label.Visible = showFields;
+            }
+        }
+        if (showFields && _currentPassword.Text.Length == 0)
+        {
+            var current = ResolveCurrentPassword(allowSaved: !_savedCipherStale);
+            if (!string.IsNullOrEmpty(current)) _currentPassword.Text = current;
+            else if (_password.Text.Length > 0) _currentPassword.Text = _password.Text;
+        }
+        UpdateButtons();
+        UpdatePasswordHint();
+    }
+
+    private void EnterMustChangePassword(SessionData? session, string password)
+    {
+        _authenticated = false;
+        _mustChangePending = true;
+        _savedCipherStale = true;
+        _passwordChanged = false;
+        _pendingSession = session;
+        if (session is not null) _lastToken = session.Token;
+        _plainPassword = password;
+        if (_password.Text.Length == 0) _password.Text = password;
+        _currentPassword.Text = password;
+        TopMost = false;
+        SetStatus(DesktopSettingsCopy.MustChangeLoginStatus, true);
+        _status.ForeColor = Color.FromArgb(170, 110, 20);
+        _loginStatus.ForeColor = Color.FromArgb(170, 110, 20);
+        UpdatePasswordChangeUi();
+    }
+
+    private string ResolveCurrentPassword(bool allowSaved)
+    {
+        if (_currentPassword.Text.Length > 0) return _currentPassword.Text;
+        if (_password.Text.Length > 0) return _password.Text;
+        if (!string.IsNullOrEmpty(_plainPassword)) return _plainPassword;
+        if (allowSaved && string.Equals(_userName.Text.Trim(), _originalUserName ?? string.Empty, StringComparison.Ordinal))
+            return PasswordProtector.Unprotect(_existingCipher) ?? string.Empty;
+        return string.Empty;
+    }
+
+    private void OpenBrowserButton_Click(object? sender, EventArgs e)
+    {
+        if (!SettingsValidator.TryNormalizeServerUrl(_serverUrl.Text, out var url, out var error))
+        {
+            SetStatus(error, true);
+            return;
+        }
+        var loginUrl = DesktopSettingsCopy.LoginPageUrl(url);
+        TopMost = false;
+        try
+        {
+            Process.Start(new ProcessStartInfo { FileName = loginUrl, UseShellExecute = true });
+            _browserHint.Text = DesktopSettingsCopy.BrowserHint(loginUrl);
+            SetLoginStatus(DesktopSettingsCopy.BrowserHint(loginUrl), false);
+        }
+        catch (Exception exception)
+        {
+            _browserHint.Text = $"无法打开浏览器：{exception.Message}。请手动访问 {loginUrl}，改密后回到本窗口输入新密码再登录。";
+            SetStatus(_browserHint.Text, true);
+        }
+    }
+
+    private async void ChangePasswordButton_Click(object? sender, EventArgs e)
+    {
+        if (!SettingsValidator.TryNormalizeServerUrl(_serverUrl.Text, out var url, out var error))
+        {
+            SetStatus(error, true);
+            return;
+        }
+        var userName = _userName.Text.Trim();
+        if (userName.Length == 0)
+        {
+            SetStatus("请填写用户名", true);
+            return;
+        }
+        var current = ResolveCurrentPassword(allowSaved: false);
+        var validation = DesktopSettingsCopy.ValidateNewPassword(current, _newPassword.Text, _confirmPassword.Text);
+        if (validation is not null)
+        {
+            SetStatus(validation, true);
+            return;
+        }
+
+        SetBusy(true);
+        try
+        {
+            _api?.Dispose();
+            _api = new ServerApiClient(url);
+            var token = _pendingSession?.Token ?? _lastToken;
+            if (string.IsNullOrEmpty(token))
+            {
+                var login = await _api.LoginAsync(userName, current);
+                if (_closing || IsDisposed) return;
+                if (login.Status is not (LoginStatus.Success or LoginStatus.MustChangePassword) || login.Session is null)
+                {
+                    SetStatus(login.Message, true);
+                    if (login.Status == LoginStatus.InvalidCredentials) StartLoginCooldown(TimeSpan.FromSeconds(5));
+                    if (login.Status == LoginStatus.RateLimited) StartLoginCooldown(login.RetryAfter ?? TimeSpan.FromMinutes(1));
+                    return;
+                }
+                _pendingSession = login.Session;
+                token = login.Session.Token;
+            }
+
+            var result = await _api.ChangePasswordAsync(token, current, _newPassword.Text);
+            if (_closing || IsDisposed) return;
+            if (result.Status != LoginStatus.Success || result.Session is null)
+            {
+                SetStatus(result.Message, true);
+                return;
+            }
+
+            _pendingSession = result.Session;
+            _lastToken = result.Session.Token;
+            _plainPassword = _newPassword.Text;
+            _password.Text = _newPassword.Text;
+            _mustChangePending = false;
+            _savedCipherStale = true;
+            _passwordChanged = true;
+            _authenticated = true;
+            SetStatus("密码已修改，正在加载列表。", false);
+            await LoadTargetListsAsync(result.Session.Token);
+            UpdatePasswordChangeUi();
+        }
+        catch (Exception exception)
+        {
+            SetStatus("修改密码失败：" + exception.Message, true);
+        }
+        finally
+        {
+            SetBusy(false);
+        }
     }
 
     private void OpenLogsDirectory()

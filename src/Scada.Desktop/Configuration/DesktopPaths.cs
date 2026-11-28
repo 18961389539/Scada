@@ -15,6 +15,7 @@ internal sealed class DesktopPaths
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Scada", "Desktop")
             : Path.GetFullPath(machineRoot);
         SettingsFile = Path.Combine(Root, "settings.json");
+        LastLaunchErrorFile = Path.Combine(Root, DesktopLaunchError.FileName);
         LogsDirectory = Path.Combine(Root, "logs");
         WebViewDirectory = Path.Combine(Root, "WebView2");
         MachineSettingsFile = Path.Combine(MachineRoot, "client.json");
@@ -27,6 +28,8 @@ internal sealed class DesktopPaths
     public string MachineRoot { get; }
 
     public string SettingsFile { get; }
+
+    public string LastLaunchErrorFile { get; }
 
     public string MachineSettingsFile { get; }
 

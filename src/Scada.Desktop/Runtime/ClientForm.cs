@@ -54,6 +54,7 @@ internal sealed class ClientForm : Form
     private bool _reloginInProgress;
     private bool _switching;
     private bool _webViewRecovered;
+    private string? _fatalMessage;
 
     public ClientForm(DesktopSettings settings, DesktopPaths paths, SettingsStore userStore, int parentProcessId)
     {
@@ -261,6 +262,7 @@ internal sealed class ClientForm : Form
                 RequestExit(ExitCodes.Configuration);
                 return;
             }
+            DesktopLaunchError.Clear(_paths);
             _session = session;
 
             _heartbeat = new ClientHeartbeat(() => _api, () => _session, BuildHeartbeatPayload);
@@ -773,6 +775,8 @@ internal sealed class ClientForm : Form
     {
         if (_shuttingDown) return;
         _shuttingDown = true;
+        if (code == ExitCodes.Configuration && !string.IsNullOrWhiteSpace(_fatalMessage))
+            DesktopLaunchError.Write(_paths, _fatalMessage);
         ResultCode = code;
         _allowClose = true;
         try { Close(); } catch { /* 关闭阶段忽略异常 */ }
@@ -875,6 +879,7 @@ internal sealed class ClientForm : Form
 
     private void ShowFatal(string message)
     {
+        _fatalMessage = message;
         DesktopLogger.Error("客户端致命错误：" + message);
         try
         {

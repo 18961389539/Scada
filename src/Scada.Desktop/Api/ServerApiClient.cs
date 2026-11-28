@@ -8,7 +8,7 @@ using System.Text.Json.Serialization;
 namespace Scada.Desktop.Api;
 
 /// <summary>
-/// 桌面客户端只调用现有只读接口：站点信息、登录、已发布画面/布局、工作站。
+/// 桌面客户端调用站点信息、登录、自助改密，以及已发布画面/布局、工作站等只读接口。
 /// 所有错误都转换成中文可操作提示，不把原始 HTML 或堆栈抛到界面上。
 /// </summary>
 internal sealed class ServerApiClient : IHeartbeatClient, IDisposable
@@ -94,6 +94,35 @@ internal sealed class ServerApiClient : IHeartbeatClient, IDisposable
         catch (JsonException)
         {
             return new LoginResult(LoginStatus.Protocol, null, "登录响应格式无法识别");
+        }
+    }
+
+    public async Task<LoginResult> ChangePasswordAsync(string token, string currentPassword, string newPassword, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "api/auth/password")
+            {
+                Content = JsonContent.Create(new PasswordChangeRequest(currentPassword, newPassword), options: Json)
+            };
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.Unauthorized)
+                return new LoginResult(LoginStatus.InvalidCredentials, null, ErrorMessage(body, "登录会话已失效，请重新登录"));
+            if (!response.IsSuccessStatusCode)
+                return new LoginResult(LoginStatus.Protocol, null, ErrorMessage(body, "修改密码失败"));
+            var session = SessionData.Parse(body);
+            if (session is null) return new LoginResult(LoginStatus.Protocol, null, "改密响应格式无法识别");
+            return LoginResult.Success(session);
+        }
+        catch (Exception exception) when (IsNetworkFailure(exception, cancellationToken))
+        {
+            return new LoginResult(LoginStatus.Network, null, DescribeNetworkFailure(exception));
+        }
+        catch (JsonException)
+        {
+            return new LoginResult(LoginStatus.Protocol, null, "改密响应格式无法识别");
         }
     }
 
@@ -280,4 +309,8 @@ internal sealed class ServerApiClient : IHeartbeatClient, IDisposable
     private sealed record LoginRequest(
         [property: JsonPropertyName("userName")] string UserName,
         [property: JsonPropertyName("password")] string Password);
+
+    private sealed record PasswordChangeRequest(
+        [property: JsonPropertyName("currentPassword")] string CurrentPassword,
+        [property: JsonPropertyName("newPassword")] string NewPassword);
 }
