@@ -186,12 +186,48 @@ internal sealed class ProjectContentApplier(ProjectApplyContext context) : Proje
                     layoutVersions.Add((layout, new HmiLayoutVersion
                     {
                         Revision = layout.Revision, Name = publishedName!, DocumentJson = publishedJson,
-                        PublishedTs = Now, PublishedBy = UserName, Note = "工程导入或快照恢复", Kind = "import"
+                        PublishedTs = Now, PublishedBy = UserName, Note = "工程导入或快照恢复", Kind = "import",
+                        ScreenRevisionsJson = await LayoutScreenRevisionCapture.CaptureAsync(Db, publishedJson, ct)
                     }));
             }
         }
         await SaveAsync(ct);
         foreach (var (layout, version) in layoutVersions) { version.LayoutId = layout.Id; Db.HmiLayoutVersions.Add(version); }
+        await SaveAsync(ct);
+    }
+
+    internal async Task ApplyKioskPlaylistsAsync(IReadOnlyList<PlanEntry> work, CancellationToken ct)
+    {
+        var deletedScreenNames = Deletes(work, "screens").Select(x => x.FinalKey).ToHashSet();
+        foreach (var entry in Upserts(work, "kioskPlaylists"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var data = entry.Data!;
+            var name = data["name"]?.GetValue<string>()?.Trim() ?? entry.FinalKey.Trim();
+            if (name.Length is 0 or > 100) { Error(entry, "名称须为 1～100 个字符"); continue; }
+            var refs = data["screenRefs"]?.AsArray().Select(x => x?.GetValue<string>() ?? "").Where(x => x.Length > 0).ToList() ?? [];
+            var ids = new List<int>();
+            var ok = true;
+            foreach (var key in refs)
+            {
+                if (deletedScreenNames.Contains(key) || !ScreenIdsByName.TryGetValue(key, out var id))
+                { Error(entry, $"引用的画面 {key} 不存在"); ok = false; continue; }
+                ids.Add(id);
+            }
+            if (!ok) continue;
+            if (ids.Count == 0) { Error(entry, "请至少选择一个已发布画面"); continue; }
+            var published = (await Db.ProcessScreens.AsNoTracking().Where(x => ids.Contains(x.Id) && x.PublishedJson != null).Select(x => x.Id).ToListAsync(ct)).ToHashSet();
+            if (ids.Any(item => !published.Contains(item))) { Error(entry, "播放列表只能包含已发布的画面"); continue; }
+            var interval = Scada.Core.Kiosk.KioskPlaylistRules.ClampInterval(data["intervalSeconds"]?.GetValue<int>() ?? 20);
+            var monitorOnly = data["monitorOnly"]?.GetValue<bool>() ?? false;
+            var row = entry.Action == "update" ? await Db.KioskPlaylists.SingleAsync(x => x.Name == entry.FinalKey, ct) : Db.KioskPlaylists.Add(new KioskPlaylist()).Entity;
+            row.Name = name;
+            row.ScreenIdsJson = Scada.Core.Kiosk.KioskPlaylistRules.SerializeScreenIds(ids);
+            row.IntervalSeconds = interval;
+            row.MonitorOnly = monitorOnly;
+            row.UpdatedTs = Now;
+            row.UpdatedBy = UserName;
+        }
         await SaveAsync(ct);
     }
 

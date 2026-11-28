@@ -17,6 +17,7 @@ public sealed class HmiLayoutVersionConfiguration : IEntityTypeConfiguration<Hmi
         entity.Property(x => x.PublishedBy).IsRequired().HasMaxLength(100);
         entity.Property(x => x.Note).IsRequired().HasMaxLength(500);
         entity.Property(x => x.Kind).IsRequired().HasMaxLength(20);
+        entity.Property(x => x.ScreenRevisionsJson).HasMaxLength(4000);
         entity.HasIndex(x => new { x.LayoutId, x.Revision }).IsUnique();
         entity.HasOne<HmiLayout>().WithMany().HasForeignKey(x => x.LayoutId).OnDelete(DeleteBehavior.Cascade);
     }

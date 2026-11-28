@@ -39,18 +39,18 @@ public sealed class ProjectPackage
 
 public static class ProjectFormat
 {
-    public static readonly string[] Sections = ["areas", "roles", "channels", "devices", "tags", "scriptLibraries", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons", "annunciatorPanels"];
+    public static readonly string[] Sections = ["areas", "roles", "channels", "devices", "tags", "scriptLibraries", "calcJobs", "alarmRules", "reportTemplates", "objectTemplates", "hmiLibrary", "screens", "hmiLayouts", "kioskPlaylists", "controlPoints", "controlSequences", "recipeTemplates", "productionLines", "productionProducts", "productionShifts", "downtimeReasons", "annunciatorPanels"];
     public static readonly Dictionary<string, string> SectionLabels = new()
     {
         ["areas"] = "区域", ["roles"] = "角色", ["channels"] = "采集通道", ["devices"] = "设备", ["tags"] = "测点", ["scriptLibraries"] = "脚本库", ["calcJobs"] = "计算任务", ["alarmRules"] = "报警规则",
-        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方", ["productionLines"] = "产线", ["productionProducts"] = "产品", ["productionShifts"] = "生产班次", ["downtimeReasons"] = "停机原因", ["annunciatorPanels"] = "声光面板"
+        ["reportTemplates"] = "报表模板", ["objectTemplates"] = "对象模板", ["hmiLibrary"] = "图库", ["screens"] = "画面", ["hmiLayouts"] = "运行布局", ["kioskPlaylists"] = "Kiosk 播放列表", ["controlPoints"] = "控制策略", ["controlSequences"] = "顺控", ["recipeTemplates"] = "配方", ["productionLines"] = "产线", ["productionProducts"] = "产品", ["productionShifts"] = "生产班次", ["downtimeReasons"] = "停机原因", ["annunciatorPanels"] = "声光面板"
     };
-    public static readonly HashSet<string> GlobalSections = ["areas", "roles", "scriptLibraries", "objectTemplates", "hmiLibrary", "hmiLayouts"];
+    public static readonly HashSet<string> GlobalSections = ["areas", "roles", "scriptLibraries", "objectTemplates", "hmiLibrary", "hmiLayouts", "kioskPlaylists"];
     // 引用字段 → 被引用的分区；null 表示环境对象（网关、通知通道），不随工程迁移，只按名称匹配。
     public static readonly Dictionary<string, string?> RefTargets = new()
     {
         ["areaRef"] = "areas", ["deviceRef"] = "devices", ["gatewayRef"] = null, ["emailChannelRef"] = null, ["jobRef"] = "calcJobs",
-        ["tagRef"] = "tags", ["tagRefs"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["publishedReadTagRefs"] = "tags", ["publishedWriteTagRefs"] = "tags", ["screenRef"] = "screens",
+        ["tagRef"] = "tags", ["tagRefs"] = "tags", ["alarmTagRef"] = "tags", ["inputTagRef"] = "tags", ["suppressTagRef"] = "tags", ["readTagRefs"] = "tags", ["writeTagRefs"] = "tags", ["publishedReadTagRefs"] = "tags", ["publishedWriteTagRefs"] = "tags", ["screenRef"] = "screens", ["screenRefs"] = "screens",
         ["stateTagRef"] = "tags", ["goodCountTagRef"] = "tags", ["rejectCountTagRef"] = "tags", ["totalCountTagRef"] = "tags", ["productRef"] = "productionProducts",
         ["acquisitionChannelRef"] = "channels", ["lineRef"] = "productionLines"
     };
@@ -116,7 +116,7 @@ public static class ProjectFormat
         var root = new JsonObject();
         foreach (var section in Sections)
             // 新增分区为空时不参与哈希，旧工程包/旧快照的内容哈希保持不变。
-            if (section is not ("hmiLibrary" or "hmiLayouts" or "productionLines" or "productionProducts" or "productionShifts" or "downtimeReasons" or "annunciatorPanels") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
+            if (section is not ("hmiLibrary" or "hmiLayouts" or "kioskPlaylists" or "productionLines" or "productionProducts" or "productionShifts" or "downtimeReasons" or "annunciatorPanels") || package.Section(section).Count > 0) root[section] = new JsonArray(package.Section(section).OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => (JsonNode)new JsonObject { ["key"] = x.Key, ["data"] = x.Data.DeepClone() }).ToArray());
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(root.ToJsonString())));
     }
 
@@ -318,6 +318,19 @@ public static class ProjectExporter
             {
                 ["name"] = layout.Name, ["draft"] = Doc(layout.DocumentJson),
                 ["published"] = Doc(layout.PublishedJson), ["publishedName"] = layout.PublishedName
+            });
+        }
+        var playlists = await db.KioskPlaylists.AsNoTracking().OrderBy(x => x.Name).ToListAsync(ct);
+        foreach (var playlist in playlists)
+        {
+            Scada.Core.Kiosk.KioskPlaylistRules.TryParseScreenIds(playlist.ScreenIdsJson, out var ids, out _);
+            var refs = new JsonArray(ids.Select(id => screenNames.GetValueOrDefault(id)).Where(name => !string.IsNullOrEmpty(name)).Select(name => (JsonNode)name!).ToArray());
+            Add("kioskPlaylists", playlist.Name, [], new JsonObject
+            {
+                ["name"] = playlist.Name,
+                ["screenRefs"] = refs,
+                ["intervalSeconds"] = playlist.IntervalSeconds,
+                ["monitorOnly"] = playlist.MonitorOnly
             });
         }
         // 控制策略与顺控是工程设计的一部分，入包；挂牌、就地/远程、复核请求与运行记录是运行状态，不入包。

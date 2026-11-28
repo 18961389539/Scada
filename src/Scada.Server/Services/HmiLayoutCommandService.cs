@@ -139,11 +139,12 @@ public sealed class HmiLayoutCommandService
         row.PublishedRevision = row.Revision;
         row.PublishedTs = now;
         row.PublishedBy = actorName;
+        var screenRevisions = await LayoutScreenRevisionCapture.CaptureAsync(db, documentJson, cancellationToken);
         db.HmiLayoutVersions.Add(new HmiLayoutVersion
         {
             LayoutId = row.Id, Revision = row.Revision, Name = name, DocumentJson = documentJson,
             PublishedTs = now, PublishedBy = actorName, Note = note,
-            RestoredFromRevision = targetRevision, Kind = kind
+            RestoredFromRevision = targetRevision, Kind = kind, ScreenRevisionsJson = screenRevisions
         });
         var action = targetRevision is int from
             ? $"回退运行布局 {name} r{from} → r{row.Revision}：{note}"

@@ -18,7 +18,7 @@ export interface HmiLayoutDocument { monitors: HmiMonitor[] }
 export interface HmiLayout { id: number; name: string; revision: number; updatedTs: number; updatedBy: string; document: HmiLayoutDocument; publishedRevision?: number | null; publishedName?: string | null; publishedTs?: number | null; publishedBy?: string | null; hasDraftChanges?: boolean }
 export interface HmiLayoutMeta { id: number; name: string | null; revision: number | null; publishedTs: number | null }
 export interface HmiLayoutVersionSummary { revision: number; name: string; publishedTs: number; publishedBy: string; note: string; restoredFromRevision?: number | null; kind: string }
-export interface HmiLayoutVersion extends HmiLayoutVersionSummary { document: HmiLayoutDocument }
+export interface HmiLayoutVersion extends HmiLayoutVersionSummary { document: HmiLayoutDocument; screenRevisions?: Record<number, number> | null }
 export interface HmiWorkstation { id: number; name: string; description: string | null; layoutId: number | null; allowControl: boolean; updatedTs: number; updatedBy: string }
 export const WORKSTATION_KEY = 'scada_workstation'
 export const WORKSTATION_ID_KEY = 'scada_workstation_id'

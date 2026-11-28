@@ -52,6 +52,7 @@ public static class EndpointRegistration
         app.MapScreenEndpoints();
         app.MapHmiLibraryEndpoints();
         app.MapHmiLayoutEndpoints();
+        app.MapKioskPlaylistEndpoints();
         app.MapDesktopClientEndpoints();
 
         // 客户端策略：前端据此在手机上隐藏/禁用控制入口（服务端中间件仍会强制拒绝）。

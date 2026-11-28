@@ -22,7 +22,7 @@ export interface ScreenThumbnail { width: number; height: number; background: st
 
 export const screenApi = {
   list: async (draft = false) => (await http.get<ScreenSummary[]>('/screens', { params: { draft } })).data,
-  get: async (id: number, draft = false) => (await http.get<ScreenDetail>(`/screens/${id}`, { params: { draft } })).data,
+  get: async (id: number, draft = false, opts?: { asOf?: number | null; revision?: number | null }) => (await http.get<ScreenDetail>(`/screens/${id}`, { params: { draft, asOf: opts?.asOf ?? undefined, revision: opts?.revision ?? undefined } })).data,
   thumbnail: async (id: number, draft = false) => (await http.get<ScreenThumbnail>(`/screens/${id}/thumbnail`, { params: { draft } })).data,
   versions: async (id: number, beforeRevision?: number, limit = 50) => (await http.get<ScreenVersionSummary[]>(`/screens/${id}/versions`, { params: { limit, beforeRevision } })).data,
   version: async (id: number, revision: number) => (await http.get<ScreenVersion>(`/screens/${id}/versions/${revision}`)).data,

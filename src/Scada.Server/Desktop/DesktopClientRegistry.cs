@@ -323,7 +323,7 @@ public sealed class DesktopClientRegistry(ILogger<DesktopClientRegistry> logger,
     private static string? NormalizeTargetKind(string? value)
     {
         var kind = Text(value, 20).ToLowerInvariant();
-        return kind is "screen" or "layout" or "workstation" or "workspace" ? kind : null;
+        return kind is "screen" or "layout" or "playlist" or "workstation" or "workspace" ? kind : null;
     }
 
     private static string? NormalizeScope(string? value)

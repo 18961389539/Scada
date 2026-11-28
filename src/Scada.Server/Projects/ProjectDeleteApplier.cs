@@ -94,6 +94,11 @@ internal sealed class ProjectDeleteApplier(ProjectApplyContext context) : Projec
     internal async Task DeleteHmiAsync(IReadOnlyList<PlanEntry> work, Dictionary<string, int> rules, CancellationToken ct)
     {
         // 删除（仅回滚/镜像）：按依赖逆序。
+        foreach (var entry in Deletes(work, "kioskPlaylists"))
+        {
+            NeedGlobal(Permission.Configure, entry);
+            var playlist = await Db.KioskPlaylists.SingleOrDefaultAsync(x => x.Name == entry.FinalKey, ct); if (playlist is not null) Db.KioskPlaylists.Remove(playlist);
+        }
         foreach (var entry in Deletes(work, "hmiLayouts"))
         {
             NeedGlobal(Permission.Configure, entry);

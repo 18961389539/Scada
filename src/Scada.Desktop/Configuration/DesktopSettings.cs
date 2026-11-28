@@ -52,12 +52,24 @@ internal sealed class DesktopSettings
 
 internal sealed class DesktopTarget
 {
-    /// <summary>screen / layout / workstation / workspace。</summary>
+    /// <summary>screen / layout / playlist / workstation / workspace。</summary>
     public string Kind { get; set; } = "screen";
 
     public int? ScreenId { get; set; }
 
     public int? LayoutId { get; set; }
+
+    public int? PlaylistId { get; set; }
+
+    /// <summary>已发布布局的逻辑显示器数量，供守护进程按屏拉起窗口。</summary>
+    public int? LayoutMonitorCount { get; set; }
+
+    /// <summary>逻辑显示器到物理屏 DeviceName 的映射，按下标对齐。</summary>
+    public string[]? LayoutMonitorDeviceNames { get; set; }
+
+    /// <summary>仅运行时使用：当前画面进程对应的逻辑显示器序号。</summary>
+    [JsonIgnore]
+    public int? LayoutMonitorIndex { get; set; }
 
     public int? WorkstationId { get; set; }
 

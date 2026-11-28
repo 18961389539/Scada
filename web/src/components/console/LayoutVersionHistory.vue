@@ -75,7 +75,7 @@
     <template #footer><el-button :disabled="submitting" @click="close()">{{ $t('layoutLifecycle.close') }}</el-button><WorkbenchTooltip v-if="mode === 'publish' || rollbackConfirm" :content="mode === 'publish' ? $t('workbenchTips.publishReview') : $t('workbenchTips.rollback')" :disabled-trigger="(!canSubmit) || (submitting)"><el-button type="primary" :loading="submitting" :disabled="!canSubmit" data-test="layout-lifecycle-submit" @click="submit">{{ $t(mode === 'publish' ? 'layoutLifecycle.confirmPublish' : 'layoutLifecycle.confirmRollback') }}</el-button></WorkbenchTooltip></template>
   </el-dialog>
   <el-dialog v-model="runtimePreviewVisible" :title="$t('layoutPreview.runtimePreview')" class="layout-runtime-dialog" append-to-body destroy-on-close>
-    <LayoutRuntimePreview v-if="runtimePreviewVisible && candidate" :document="candidate.document" :name="candidate.name" />
+    <LayoutRuntimePreview v-if="runtimePreviewVisible && candidate" :document="candidate.document" :name="candidate.name" :as-of="mode === 'history' ? candidate.publishedTs : null" :screen-revisions="mode === 'history' ? (candidate as any).screenRevisions ?? null : null" />
   </el-dialog>
 </template>
 

@@ -81,7 +81,7 @@ const actionTypes: Record<string, string> = { add: 'success', update: 'warning',
 const sectionLabels: Record<string, string> = {
   areas: tr('projectView.k17fc93'), roles: tr('projectView.k6b2669'), devices: tr('projectView.k01f2c1'), tags: tr('projectView.k8cff1c'),
   calcJobs: tr('projectView.k8efdcf'), alarmRules: tr('projectView.k1c7490'), reportTemplates: tr('projectView.ka34221'), objectTemplates: tr('projectView.k6cee79'),
-  hmiLibrary: tr('projectView.section.hmiLibrary'), hmiLayouts: tr('projectView.section.hmiLayouts'), screens: tr('projectView.kbfffd0'),
+  hmiLibrary: tr('projectView.section.hmiLibrary'), hmiLayouts: tr('projectView.section.hmiLayouts'), kioskPlaylists: tr('projectView.section.kioskPlaylists'), screens: tr('projectView.kbfffd0'),
   controlPoints: tr('projectView.k6a4d18'), controlSequences: tr('projectView.k31d7f3'), recipeTemplates: tr('projectView.k85ad5d'),
   productionLines: tr('projectView.section.productionLines'), productionProducts: tr('projectView.section.productionProducts'),
   productionShifts: tr('projectView.section.productionShifts'), downtimeReasons: tr('projectView.section.downtimeReasons'),

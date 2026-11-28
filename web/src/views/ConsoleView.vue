@@ -96,7 +96,7 @@
     <div class="grid" :class="{ 'is-focused': !!focusedRegionId }" :style="{ gridTemplateColumns: `repeat(${monitor.columns}, 1fr)`, gridTemplateRows: `repeat(${monitor.rows}, 1fr)` }">
       <section v-for="r in monitor.regions" v-show="!focusedRegionId || focusedRegionId === r.id" :key="`${layout?.id}-${monitorIndex}-${r.id}`" class="region" :class="{ 'is-active': r.kind === 'screen' && activeRegionId === r.id, 'is-focused': focusedRegionId === r.id }" :style="regionStyle(r)" @pointerdown.capture="r.kind === 'screen' && (activeRegionId = r.id)" @focusin="r.kind === 'screen' && (activeRegionId = r.id)">
         <span v-if="r.kind === 'screen' && activeRegionId === r.id" class="region-mark" data-test="region-active-name">{{ r.title || r.id }}</span>
-        <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :layout-id="layout?.id" :monitor-index="monitorIndex" :screen-name="screenName" :monitor-mode="monitorMode" :focused="focusedRegionId === r.id" @screen-change="setRegionScreen(r.id, $event)" @popup="openFaceplate" @detach="id => detach(id)" @focus="toggleRegionFocus(r.id)" />
+        <RegionScreen v-if="r.kind === 'screen' && r.screenId" :ref="el => setRegionRef(r.id, el)" :region="r" :layout-id="layout?.id" :monitor-index="monitorIndex" :screen-name="screenName" :monitor-mode="monitorMode" :as-of-ts="previewAsOf" :screen-revisions="previewScreenRevisions" :use-shared-replay="!!previewLayout" :shared-replay-at="previewReplayAt" :focused="focusedRegionId === r.id" @screen-change="setRegionScreen(r.id, $event)" @popup="openFaceplate" @detach="id => detach(id)" @focus="toggleRegionFocus(r.id)" />
         <div v-else-if="r.kind === 'alarmList'" class="alarm-list" data-test="alarm-list">
           <div class="region-head alarm-list-head">
             <strong :id="`alarm-heading-${r.id}`">{{ $t('layoutMonitor.alarmTitle') }}</strong>
@@ -225,7 +225,10 @@ import { collectScreenTags } from '../screens/screenTags'
 import { registerShortcuts } from '../shortcuts/registry'
 import { modalOpen } from '../ui/overlay'
 
-const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number }>()
+const props = defineProps<{ previewLayout?: HmiLayout; previewMonitor?: number; previewAsOf?: number | null; previewScreenRevisions?: Record<number, number> | null; previewReplayAt?: number | null }>()
+const previewAsOf = computed(() => props.previewAsOf ?? null)
+const previewScreenRevisions = computed(() => props.previewScreenRevisions ?? null)
+const previewReplayAt = computed(() => props.previewReplayAt ?? null)
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const { soundEnabled, missedCriticalNotice, dismissMissedCriticalNotice } = useAlarmSession()
 function openMissedCritical() {

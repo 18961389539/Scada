@@ -67,7 +67,7 @@ public static class HmiLayoutEndpoints
         {
             await using var db = await factory.CreateDbContextAsync(ct);
             var version = await db.HmiLayoutVersions.AsNoTracking().SingleOrDefaultAsync(x => x.LayoutId == id && x.Revision == revision, ct);
-            return version is null ? Results.NotFound() : Results.Ok(new { version.Revision, version.Name, version.PublishedTs, version.PublishedBy, version.Note, version.RestoredFromRevision, version.Kind, Document = JsonSerializer.Deserialize<HmiLayoutDocument>(version.DocumentJson, Json) });
+            return version is null ? Results.NotFound() : Results.Ok(new { version.Revision, version.Name, version.PublishedTs, version.PublishedBy, version.Note, version.RestoredFromRevision, version.Kind, ScreenRevisions = LayoutScreenRevisionCapture.Parse(version.ScreenRevisionsJson), Document = JsonSerializer.Deserialize<HmiLayoutDocument>(version.DocumentJson, Json) });
         }).RequireAuthorization(AccessPolicies.GlobalConfigure);
         layouts.MapDelete("/{id:int}", async (int id, int? revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {

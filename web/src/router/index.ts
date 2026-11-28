@@ -17,11 +17,13 @@ const router = createRouter({
     { path: '/console/:layoutId?', component: () => import('../views/ConsoleView.vue'), meta: { title: tr('workbench.navTitle') } },
     { path: '/config/layout-preview', component: () => import('../views/LayoutPreviewView.vue'), meta: { title: tr('layoutPreview.runtimePreview'), policy: 'global-configure', suppressAlarmSession: true } },
     { path: '/kiosk/screens/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
+    { path: '/kiosk/playlists/:id', component: () => import('../views/KioskScreenView.vue'), meta: { title: tr('common.kiosk') } },
     {
       path: '/',
       component: () => import('../layout/AppLayout.vue'),
       children: [
         { path: 'config/layouts', component: () => import('../views/LayoutsView.vue'), meta: { title: tr('workbench.configurationTitle'), policy: 'global-configure' } },
+        { path: 'config/kiosk-playlists', component: () => import('../views/KioskPlaylistsView.vue'), meta: { title: tr('kioskPlaylists.title'), policy: 'global-configure' } },
         { path: 'config/hmi-library', component: () => import('../views/HmiLibraryView.vue'), meta: { title: tr('index.k5e9dd6'), policy: 'global-configure' } },
         { path: 'config/object-templates', component: () => import('../views/ObjectTemplatesView.vue'), meta: { title: tr('index.k5c3e7d'), policy: 'global-configure' } },
         { path: 'config/gateways', component: () => import('../views/GatewaysView.vue'), meta: { title: tr('index.k626545'), policy: 'global-configure' } },

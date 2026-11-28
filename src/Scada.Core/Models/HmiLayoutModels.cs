@@ -3,6 +3,19 @@ namespace Scada.Core.Models;
 public sealed class HmiLayoutDocument
 {
     public List<HmiMonitor> Monitors { get; set; } = [];
+
+    public static IEnumerable<int> ReferencedScreenIds(HmiLayoutDocument? document)
+    {
+        if (document?.Monitors is null) yield break;
+        foreach (var monitor in document.Monitors)
+        {
+            foreach (var region in monitor.Regions ?? [])
+            {
+                if (region.ScreenId is > 0) yield return region.ScreenId.Value;
+                if (region.AlarmScreenId is > 0) yield return region.AlarmScreenId.Value;
+            }
+        }
+    }
 }
 
 public sealed class HmiMonitor

@@ -27,6 +27,21 @@ public sealed class TargetUrlTests
     }
 
     [Fact]
+    public void BuildsLayoutUrlWithMonitorIndex()
+    {
+        var settings = Settings("layout", layoutId: 3);
+        settings.Target.LayoutMonitorIndex = 1;
+        Assert.Equal("http://localhost:5080/console/3?monitor=1", TargetUrl.Build(settings));
+    }
+
+    [Fact]
+    public void BuildsPlaylistUrlWithMonitorMode()
+    {
+        var settings = Settings("playlist", playlistId: 9, monitorOnly: true);
+        Assert.Equal("http://localhost:5080/kiosk/playlists/9?monitorOnly=1", TargetUrl.Build(settings));
+    }
+
+    [Fact]
     public void BuildsWorkstationConsoleUrl()
     {
         var settings = Settings("workstation", workstationId: 5);
@@ -50,7 +65,7 @@ public sealed class TargetUrlTests
         Assert.Equal(expected, TargetUrl.IsLoginPage(new Uri("http://localhost:5080" + path)));
     }
 
-    private static DesktopSettings Settings(string kind, int? screenId = null, int? layoutId = null, int? workstationId = null, bool monitorOnly = false) =>
+    private static DesktopSettings Settings(string kind, int? screenId = null, int? layoutId = null, int? playlistId = null, int? workstationId = null, bool monitorOnly = false) =>
         new()
         {
             ServerUrl = "http://localhost:5080/",
@@ -59,6 +74,7 @@ public sealed class TargetUrlTests
                 Kind = kind,
                 ScreenId = screenId,
                 LayoutId = layoutId,
+                PlaylistId = playlistId,
                 WorkstationId = workstationId,
                 MonitorOnly = monitorOnly
             }

@@ -6,7 +6,7 @@ namespace Scada.Desktop.App;
 
 internal static class ClientLauncher
 {
-    public static Process Start(int supervisorProcessId)
+    public static Process Start(int supervisorProcessId, int? layoutMonitorIndex = null, string? monitorDeviceName = null)
     {
         var executable = Environment.ProcessPath
             ?? throw new InvalidOperationException("无法确定客户端程序路径");
@@ -28,6 +28,16 @@ internal static class ClientLauncher
         startInfo.ArgumentList.Add("--client");
         startInfo.ArgumentList.Add("--parent");
         startInfo.ArgumentList.Add(supervisorProcessId.ToString(CultureInfo.InvariantCulture));
+        if (layoutMonitorIndex is int index)
+        {
+            startInfo.ArgumentList.Add("--layout-monitor");
+            startInfo.ArgumentList.Add(index.ToString(CultureInfo.InvariantCulture));
+            if (!string.IsNullOrWhiteSpace(monitorDeviceName))
+            {
+                startInfo.ArgumentList.Add("--monitor-device");
+                startInfo.ArgumentList.Add(monitorDeviceName);
+            }
+        }
         return Process.Start(startInfo) ?? throw new InvalidOperationException("无法启动画面进程");
     }
 }

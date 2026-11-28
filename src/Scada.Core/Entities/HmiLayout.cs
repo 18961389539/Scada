@@ -31,6 +31,8 @@ public sealed class HmiLayoutVersion
     public string Note { get; set; } = "";
     public int? RestoredFromRevision { get; set; }
     public string Kind { get; set; } = "publish";
+    /// <summary>发布时记下的画面修订，JSON 对象如 {"12":3}。缺省时预览按发布时间查找。</summary>
+    public string? ScreenRevisionsJson { get; set; }
 }
 
 // 操作员工作站：浏览器在本机登记工作站名称后，自动打开分配给它的运行布局。属于现场环境，不随工程包迁移。

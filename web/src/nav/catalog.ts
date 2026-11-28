@@ -96,6 +96,7 @@ export const NAV_ITEMS: NavItemDef[] = [
   { id: 'serial-profiles', path: '/config/serial-profiles', titleKey: 'serialProfiles.title', keywordsKey: 'serialProfiles.keywords', icon: Link, group: 'config', policy: 'global-configure' },
   { id: 'hmi-library', path: '/config/hmi-library', titleKey: 'navMenu.k5e9dd6', keywordsKey: 'nav.kw.hmiLibrary', icon: Picture, group: 'config', policy: 'global-configure' },
   { id: 'layouts', path: '/config/layouts', titleKey: 'workbench.configurationTitle', keywordsKey: 'nav.kw.layouts', icon: Crop, group: 'config', policy: 'global-configure' },
+  { id: 'kiosk-playlists', path: '/config/kiosk-playlists', titleKey: 'kioskPlaylists.title', keywordsKey: 'nav.kw.kioskPlaylists', icon: Monitor, group: 'config', policy: 'global-configure' },
   { id: 'object-templates', path: '/config/object-templates', titleKey: 'navMenu.k5c3e7d', keywordsKey: 'nav.kw.objectTemplates', icon: CopyDocument, group: 'config', policy: 'global-configure' },
   { id: 'tags', path: '/config/tags', titleKey: 'navMenu.kb5c4a3', keywordsKey: 'nav.kw.tags', icon: PriceTag, group: 'config', policy: 'any-configure', quick: true },
   { id: 'project', path: '/config/project', titleKey: 'navMenu.k4d7ee6', keywordsKey: 'nav.kw.project', icon: FolderOpened, group: 'config', policy: 'any-configure' },

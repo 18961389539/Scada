@@ -1630,6 +1630,10 @@ namespace Scada.Data.Migrations.Config
                     b.Property<int>("Revision")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("ScreenRevisionsJson")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
 
                     b.HasIndex("LayoutId", "Revision")
@@ -1738,6 +1742,44 @@ namespace Scada.Data.Migrations.Config
                         .IsUnique();
 
                     b.ToTable("HmiWorkstation", (string)null);
+                });
+
+            modelBuilder.Entity("Scada.Core.Entities.KioskPlaylist", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("IntervalSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("MonitorOnly")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ScreenIdsJson")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("UpdatedTs")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .IsUnique();
+
+                    b.ToTable("KioskPlaylist", (string)null);
                 });
 
             modelBuilder.Entity("Scada.Core.Entities.MaintenanceWorkOrder", b =>

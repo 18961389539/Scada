@@ -26,6 +26,7 @@ const EXACT: Record<string, string> = {
   '/config/serial-profiles': 'serialProfiles',
   '/config/hmi-library': 'hmiLibrary',
   '/config/layouts': 'layouts',
+  '/config/kiosk-playlists': 'layouts',
   '/config/layout-preview': 'console',
   '/config/object-templates': 'objectTemplates',
   '/config/tags': 'tags',

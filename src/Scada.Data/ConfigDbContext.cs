@@ -43,6 +43,7 @@ public class ConfigDbContext : DbContext
     public DbSet<HmiLayout> HmiLayouts => Set<HmiLayout>();
     public DbSet<HmiLayoutVersion> HmiLayoutVersions => Set<HmiLayoutVersion>();
     public DbSet<HmiWorkstation> HmiWorkstations => Set<HmiWorkstation>();
+    public DbSet<KioskPlaylist> KioskPlaylists => Set<KioskPlaylist>();
     public DbSet<DeviceObjectTemplate> ObjectTemplates => Set<DeviceObjectTemplate>();
     public DbSet<DeviceObjectTemplateVersion> ObjectTemplateVersions => Set<DeviceObjectTemplateVersion>();
     public DbSet<DeviceObjectInstance> ObjectInstances => Set<DeviceObjectInstance>();

@@ -1,7 +1,8 @@
 <template>
   <div class="runtime-preview">
-    <p class="preview-description">{{ $t('layoutPreview.readOnlyHelp') }}</p>
+    <p class="preview-description">{{ $t(asOf ? 'layoutPreview.historicalHelp' : 'layoutPreview.readOnlyHelp') }}</p>
     <div class="preview-controls">
+      <ScreenReplayControls v-if="asOf" v-model="replayAt" data-test="layout-preview-replay" />
       <label>{{ $t('layoutPreview.monitor') }} <WorkbenchTooltip :content="$t('workbenchTips.previewMonitor')"><el-select v-model="monitorIndex" data-test="runtime-preview-monitor"><el-option v-for="(monitor, index) in document.monitors" :key="index" :value="index" :label="monitor.name || $t('layoutLifecycle.monitorLocation', [index + 1])" /></el-select></WorkbenchTooltip></label>
       <label>{{ $t('layoutPreview.viewport') }} <WorkbenchTooltip :content="$t('workbenchTips.previewResolution')"><el-select v-model="resolution" data-test="runtime-preview-resolution"><el-option v-for="size in sizes" :key="size" :value="size" :label="size" /></el-select></WorkbenchTooltip></label>
       <span data-test="runtime-preview-size">{{ width }} × {{ height }} · {{ Math.round(scale * 100) }}%</span>
@@ -18,9 +19,11 @@
 import WorkbenchTooltip from './WorkbenchTooltip.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { HmiLayoutDocument } from '../../api/hmiLayouts'
+import ScreenReplayControls from '../ScreenReplayControls.vue'
 import { previewSize } from './layoutGeometry'
 
-const props = withDefaults(defineProps<{ document: HmiLayoutDocument; name: string; initialMonitor?: number }>(), { initialMonitor: 0 })
+const props = withDefaults(defineProps<{ document: HmiLayoutDocument; name: string; initialMonitor?: number; asOf?: number | null; screenRevisions?: Record<number, number> | null }>(), { initialMonitor: 0, asOf: null, screenRevisions: null })
+const replayAt = ref<number | null>(props.asOf ?? null)
 const monitorIndex = ref(props.initialMonitor)
 const selected = computed(() => props.document.monitors[monitorIndex.value] ?? props.document.monitors[0])
 const target = computed(() => selected.value ? previewSize(selected.value) : { width: 1920, height: 1080 })
@@ -31,13 +34,13 @@ const container = ref<HTMLElement>(), frame = ref<HTMLIFrameElement>(), availabl
 const scale = computed(() => Math.min(1, Math.max(1, availableWidth.value) / width.value, 720 / height.value))
 let observer: ResizeObserver | undefined
 function sendSnapshot(): void {
-  frame.value?.contentWindow?.postMessage({ type: 'scada-layout-preview', monitor: monitorIndex.value, layout: { id: 0, name: props.name, revision: 0, updatedTs: 0, updatedBy: '', document: JSON.parse(JSON.stringify(props.document)) } }, window.location.origin)
+  frame.value?.contentWindow?.postMessage({ type: 'scada-layout-preview', monitor: monitorIndex.value, asOf: props.asOf, screenRevisions: props.screenRevisions, replayAt: replayAt.value, layout: { id: 0, name: props.name, revision: 0, updatedTs: 0, updatedBy: '', document: JSON.parse(JSON.stringify(props.document)) } }, window.location.origin)
 }
 function receive(event: MessageEvent): void {
   if (event.source === frame.value?.contentWindow && event.origin === window.location.origin && event.data?.type === 'scada-layout-preview-ready') sendSnapshot()
 }
 watch(target, size => { resolution.value = `${size.width}×${size.height}` })
-watch(() => [props.document, props.name, monitorIndex.value], sendSnapshot, { deep: true })
+watch(() => [props.document, props.name, monitorIndex.value, props.asOf, props.screenRevisions, replayAt.value], sendSnapshot, { deep: true })
 onMounted(() => {
   window.addEventListener('message', receive)
   observer = new ResizeObserver(entries => { availableWidth.value = entries[0]?.contentRect.width ?? 1 })

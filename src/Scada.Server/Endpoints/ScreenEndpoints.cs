@@ -86,13 +86,30 @@ public static class ScreenEndpoints
             }));
         });
 
-        group.MapGet("/{id:int}", async (int id, bool? draft, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
+        group.MapGet("/{id:int}", async (int id, bool? draft, long? asOf, int? revision, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>
         {
             var access = await http.GetAccessAsync();
             await using var db = await factory.CreateDbContextAsync(ct);
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var screen = await db.ProcessScreens.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-            if (screen is null || draft != true && screen.PublishedJson is null) return Results.NotFound();
+            if (screen is null) return Results.NotFound();
+            if (asOf is > 0 || revision is > 0)
+            {
+                var historical = await Screens.ScreenHistoricalLookup.FindAsync(db, id, asOf, revision, ct);
+                if (historical is null) return Results.NotFound();
+                var historicDocument = JsonSerializer.Deserialize<ScreenDocument>(historical.DocumentJson, Json)!;
+                var historicRepublish = Screens.ScreenPublication.RequiresRepublish(historicDocument);
+                return Results.Ok(new
+                {
+                    screen.Id, screen.AreaId, Name = historical.Name,
+                    Revision = historical.Revision,
+                    screen.PublishedRevision, screen.UpdatedTs, screen.UpdatedBy,
+                    Historical = true, historical.PublishedTs, historical.PublishedBy,
+                    Document = historicDocument, RequiresRepublish = historicRepublish,
+                    Message = historicRepublish ? Screens.ScreenPublication.RepublishMessage : null
+                });
+            }
+            if (draft != true && screen.PublishedJson is null) return Results.NotFound();
             if (draft == true && !Screens.ScreenAreaRules.CanEdit(access, screen.AreaId)) return Denied();
             var document = JsonSerializer.Deserialize<ScreenDocument>(draft == true ? screen.DraftJson : screen.PublishedJson!, Json)!;
             var requiresRepublish = draft != true && Screens.ScreenPublication.RequiresRepublish(document);

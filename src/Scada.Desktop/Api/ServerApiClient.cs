@@ -109,6 +109,16 @@ internal sealed class ServerApiClient : IHeartbeatClient, IDisposable
         return rows.Where(row => row.PublishedRevision is > 0).ToList();
     }
 
+    public async Task<LayoutDetail> GetLayoutAsync(int id, string token, CancellationToken cancellationToken = default)
+    {
+        return await GetAsync<LayoutDetail>($"api/hmi/layouts/{id}", token, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<PlaylistSummary>> GetPlaylistsAsync(string token, CancellationToken cancellationToken = default)
+    {
+        return await GetAsync<List<PlaylistSummary>>("api/kiosk-playlists", token, cancellationToken).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<WorkstationSummary>> GetWorkstationsAsync(string token, CancellationToken cancellationToken = default)
     {
         return await GetAsync<List<WorkstationSummary>>("api/hmi/workstations", token, cancellationToken).ConfigureAwait(false);

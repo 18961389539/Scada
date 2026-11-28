@@ -88,6 +88,7 @@ public sealed class ProjectApplier : ProjectSection
             await LoadAsync(ct);
             await content.ApplyScreensAsync(work, ct);
             await content.ApplyHmiLayoutsAsync(work, ct);
+            await content.ApplyKioskPlaylistsAsync(work, ct);
             await control.ApplyControlAsync(work, ct);
             await control.ApplyRecipesAsync(work, ct);
             await production.ApplyAnnunciatorsAsync(work, ct);

@@ -8,6 +8,14 @@ internal sealed record ScreenSummary(int Id, string? Name, int? PublishedRevisio
 
 internal sealed record LayoutSummary(int Id, string? Name, int? PublishedRevision);
 
+internal sealed record LayoutDetail(int Id, string? Name, int? PublishedRevision, LayoutDocument? Document);
+
+internal sealed record LayoutDocument(List<LayoutMonitorInfo>? Monitors);
+
+internal sealed record LayoutMonitorInfo(string? Name);
+
+internal sealed record PlaylistSummary(int Id, string? Name, int[]? ScreenIds, int IntervalSeconds, bool MonitorOnly);
+
 internal sealed record WorkstationSummary(int Id, string Name, int? LayoutId, bool AllowControl);
 
 internal sealed record ResolvedWorkstation(WorkstationSummary Workstation, LayoutSummary? Layout);

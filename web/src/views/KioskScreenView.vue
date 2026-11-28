@@ -2,7 +2,8 @@
   <div class="kiosk" role="main">
     <h1 class="kiosk-title">{{ $t('common.kiosk') }}</h1>
     <RuntimeBanners :health="health" />
-    <div v-if="invalidId" class="kiosk-error" role="alert" data-test="kiosk-invalid-id">
+    <div v-if="playlistLoadError" class="kiosk-error" role="alert" data-test="kiosk-playlist-error">{{ playlistLoadError }}</div>
+    <div v-else-if="invalidId" class="kiosk-error" role="alert" data-test="kiosk-invalid-id">
       {{ $t('screenUx.invalidScreen') }}
     </div>
     <ScreenRuntime v-else :key="current" :screen-id="current" :monitor-mode="monitorOnly" fill initial-zoom="fit" auto-refresh />
@@ -43,10 +44,13 @@ import ScreenRuntime from '../components/ScreenRuntime.vue'
 import RuntimeBanners from '../components/RuntimeBanners.vue'
 import { useAlarmSession } from '../composables/useAlarmSession'
 import { applyKioskAlarmEvent, emptyKioskAlarmPause, type KioskAlarmPauseState } from '../composables/kioskAlarmPause'
+import { kioskPlaylistApi, type KioskPlaylist } from '../api/kioskPlaylists'
 import { alarmApi } from '../api'
 import { setMonitorOnlyClient } from '../api/http'
 import { onHubEvent, onHubReconnected } from '../realtime/hub'
 import { useServiceStatus } from '../composables/useServiceStatus'
+import { errorMessage } from '../api/http'
+import { tr } from '../i18n'
 import { alarmMessage } from '../utils'
 import type { AlarmEvent } from '../types'
 
@@ -59,16 +63,20 @@ const routeId = computed(() => {
   return Number.isSafeInteger(value) && value > 0 ? value : Number.NaN
 })
 // playlist 为逗号分隔的画面编号；第一个画面仍由路由参数提供，便于保持现有单画面地址兼容。
+const savedPlaylist = ref<KioskPlaylist | null>(null)
+const playlistLoadError = ref('')
 const playlistIds = computed(() => {
+  if (savedPlaylist.value) return savedPlaylist.value.screenIds
   const raw = typeof route.query.playlist === 'string' ? route.query.playlist : ''
   return [...new Set(raw.split(',').map(value => Number(value.trim())).filter(value => Number.isSafeInteger(value) && value > 0))]
 })
 const id = computed(() => Number.isFinite(routeId.value) ? routeId.value : playlistIds.value[0] ?? Number.NaN)
-const invalidId = computed(() => !Number.isFinite(id.value))
-const monitorOnly = computed(() => route.query.monitorOnly === '1')
+const invalidId = computed(() => !Number.isFinite(id.value) && !playlistLoadError.value)
+const monitorOnly = computed(() => savedPlaylist.value?.monitorOnly === true || route.query.monitorOnly === '1')
 watch(monitorOnly, value => { setMonitorOnlyClient(value) }, { immediate: true })
 onBeforeUnmount(() => { setMonitorOnlyClient(false) })
 const intervalSec = computed(() => {
+  if (savedPlaylist.value) return Math.max(2, Math.min(600, savedPlaylist.value.intervalSeconds))
   const value = Number(route.query.interval)
   return Number.isFinite(value) ? Math.max(2, Math.min(600, Math.round(value))) : 20
 })
@@ -84,6 +92,7 @@ let openAlarms = new Map<number, AlarmEvent>()
 let timer: number | undefined
 let disposeAlarm: (() => void) | undefined
 
+watch(() => route.fullPath, () => { void loadSavedPlaylist() })
 watch(id, value => { if (Number.isFinite(value)) current.value = value })
 watch(playlist, () => {
   if (playlist.value.length && !playlist.value.includes(current.value)) current.value = playlist.value[0]!
@@ -122,7 +131,21 @@ async function hydrateActiveAlarms(): Promise<void> {
   }
 }
 let disposeStatusReconnect: (() => void) | undefined
+async function loadSavedPlaylist(): Promise<void> {
+  const raw = Number(route.params.id)
+  const fromPlaylistRoute = route.path.startsWith('/kiosk/playlists/')
+  if (!fromPlaylistRoute || !Number.isSafeInteger(raw) || raw <= 0) { savedPlaylist.value = null; playlistLoadError.value = ''; return }
+  try {
+    savedPlaylist.value = await kioskPlaylistApi.get(raw)
+    playlistLoadError.value = ''
+    if (savedPlaylist.value.screenIds[0]) current.value = savedPlaylist.value.screenIds[0]
+  } catch (reason) {
+    savedPlaylist.value = null
+    playlistLoadError.value = errorMessage(reason, tr('kioskPlaylists.loadFailed'))
+  }
+}
 onMounted(() => {
+  void loadSavedPlaylist()
   startTimer()
   void refreshHealth()
   disposeStatusReconnect = onHubReconnected(() => { void refreshHealth() })

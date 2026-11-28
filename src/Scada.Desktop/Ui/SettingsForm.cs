@@ -21,6 +21,7 @@ internal sealed class SettingsForm : Form
     private readonly string _originalKind;
     private readonly int? _originalScreenId;
     private readonly int? _originalLayoutId;
+    private readonly int? _originalPlaylistId;
     private readonly int? _originalWorkstationId;
 
     private readonly TextBox _serverUrl = new();
@@ -33,10 +34,13 @@ internal sealed class SettingsForm : Form
     private readonly Label _status = new() { AutoSize = true, MaximumSize = new Size(620, 0) };
     private readonly RadioButton _kindScreen = new() { Text = "单个组态画面", AutoSize = true, Checked = true };
     private readonly RadioButton _kindLayout = new() { Text = "运行布局", AutoSize = true };
+    private readonly RadioButton _kindPlaylist = new() { Text = "Kiosk 播放列表", AutoSize = true };
     private readonly RadioButton _kindWorkstation = new() { Text = "按工作站自动加载", AutoSize = true };
     private readonly RadioButton _kindWorkspace = new() { Text = "多页面工作台", AutoSize = true };
     private readonly ComboBox _screenCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly ComboBox _layoutCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
+    private readonly ComboBox _playlistCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
+    private readonly Panel _layoutMonitorPanel = new() { AutoSize = true, Dock = DockStyle.Fill };
     private readonly ComboBox _workstationCombo = new() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 420 };
     private readonly CheckBox _monitorOnly = new() { Text = "监视模式（只读，不显示操作控件）", AutoSize = true, Checked = true };
     private readonly CheckBox _fullScreen = new() { Text = "全屏运行", AutoSize = true, Checked = true };
@@ -58,9 +62,12 @@ internal sealed class SettingsForm : Form
     private bool _busy;
     private bool _closing;
     private DateTime _loginCooldownUntil = DateTime.MinValue;
+    private string? _lastToken;
     private IReadOnlyList<ScreenSummary> _screens = [];
     private IReadOnlyList<LayoutSummary> _layouts = [];
+    private IReadOnlyList<PlaylistSummary> _playlists = [];
     private IReadOnlyList<WorkstationSummary> _workstations = [];
+    private string[]? _layoutMonitorDevices;
 
     public SettingsForm(DesktopPaths paths, SettingsStore store, DesktopSettings? existing, string? initialError, MachineSettings? machine = null)
     {
@@ -76,7 +83,9 @@ internal sealed class SettingsForm : Form
         _originalKind = existing?.Target.Kind ?? "screen";
         _originalScreenId = existing?.Target.ScreenId;
         _originalLayoutId = existing?.Target.LayoutId;
+        _originalPlaylistId = existing?.Target.PlaylistId;
         _originalWorkstationId = existing?.Target.WorkstationId;
+        _layoutMonitorDevices = existing?.Target.LayoutMonitorDeviceNames;
 
         Text = existing is null ? "SCADA 桌面客户端 - 首次配置" : "SCADA 桌面客户端 - 设置";
         Font = new Font("Microsoft YaHei UI", 9F);
@@ -105,7 +114,9 @@ internal sealed class SettingsForm : Form
         _browseDirectory.Click += (_, _) => BrowseDownloadDirectory();
         _kindScreen.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindLayout.CheckedChanged += (_, _) => UpdateTargetControls();
+        _kindPlaylist.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindWorkstation.CheckedChanged += (_, _) => UpdateTargetControls();
+        _layoutCombo.SelectedIndexChanged += (_, _) => { if (CurrentKind() == "layout") _ = RefreshLayoutMonitorsAsync(); };
         _monitorOnly.CheckedChanged += (_, _) => UpdateTargetControls();
         _kindWorkspace.CheckedChanged += (_, _) => UpdateTargetControls();
         _serverUrl.TextChanged += (_, _) => MarkConnectionDirty();
@@ -244,6 +255,7 @@ internal sealed class SettingsForm : Form
         var kinds = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = false };
         kinds.Controls.Add(_kindScreen);
         kinds.Controls.Add(_kindLayout);
+        kinds.Controls.Add(_kindPlaylist);
         kinds.Controls.Add(_kindWorkstation);
         kinds.Controls.Add(_kindWorkspace);
         table.Controls.Add(kinds, 0, 0);
@@ -253,10 +265,14 @@ internal sealed class SettingsForm : Form
         table.Controls.Add(_screenCombo, 1, 1);
         table.Controls.Add(NewLabel("运行布局"), 0, 2);
         table.Controls.Add(_layoutCombo, 1, 2);
-        table.Controls.Add(NewLabel("工作站"), 0, 3);
-        table.Controls.Add(_workstationCombo, 1, 3);
-        table.Controls.Add(_monitorOnly, 1, 4);
+        table.Controls.Add(NewLabel("播放列表"), 0, 3);
+        table.Controls.Add(_playlistCombo, 1, 3);
+        table.Controls.Add(NewLabel("工作站"), 0, 4);
+        table.Controls.Add(_workstationCombo, 1, 4);
+        table.Controls.Add(_monitorOnly, 1, 5);
         table.SetColumnSpan(_monitorOnly, 2);
+        table.Controls.Add(_layoutMonitorPanel, 1, 6);
+        table.SetColumnSpan(_layoutMonitorPanel, 2);
         group.Controls.Add(table);
         return group;
     }
@@ -367,6 +383,7 @@ internal sealed class SettingsForm : Form
         switch (existing.Target.Kind)
         {
             case "layout": _kindLayout.Checked = true; break;
+            case "playlist": _kindPlaylist.Checked = true; break;
             case "workstation": _kindWorkstation.Checked = true; break;
             case "workspace": _kindWorkspace.Checked = true; break;
             default: _kindScreen.Checked = true; break;
@@ -383,12 +400,14 @@ internal sealed class SettingsForm : Form
 
         if (existing.Target.ScreenId is int screenId) _screenCombo.Items.Add(new ScreenOption(screenId, $"当前画面 #{screenId}（登录后刷新名称）"));
         if (existing.Target.LayoutId is int layoutId) _layoutCombo.Items.Add(new LayoutOption(layoutId, $"当前布局 #{layoutId}（登录后刷新名称）"));
+        if (existing.Target.PlaylistId is int playlistId) _playlistCombo.Items.Add(new PlaylistOption(playlistId, $"当前播放列表 #{playlistId}（登录后刷新名称）"));
         if (existing.Target.WorkstationId is int stationId)
         {
             _workstationCombo.Items.Add(new WorkstationOption(stationId, existing.Target.WorkstationName ?? $"工作站 #{stationId}", $"当前工作站 #{stationId}（登录后刷新名称）"));
         }
         _screenCombo.SelectedIndex = _screenCombo.Items.Count > 0 ? 0 : -1;
         _layoutCombo.SelectedIndex = _layoutCombo.Items.Count > 0 ? 0 : -1;
+        _playlistCombo.SelectedIndex = _playlistCombo.Items.Count > 0 ? 0 : -1;
         _workstationCombo.SelectedIndex = _workstationCombo.Items.Count > 0 ? 0 : -1;
     }
 
@@ -397,13 +416,84 @@ internal sealed class SettingsForm : Form
         var kind = CurrentKind();
         var locked = IsLocked("target");
         _screenCombo.Enabled = !locked && kind == "screen";
-        _monitorOnly.Enabled = !locked && kind == "screen";
+        _monitorOnly.Enabled = !locked && (kind == "screen" || kind == "playlist");
         _layoutCombo.Enabled = !locked && kind == "layout";
+        _playlistCombo.Enabled = !locked && kind == "playlist";
         _workstationCombo.Enabled = !locked && (kind == "workstation" || kind == "screen" && _monitorOnly.Checked);
+        _layoutMonitorPanel.Visible = kind == "layout";
+        if (kind == "layout") _ = RefreshLayoutMonitorsAsync();
     }
 
     private bool IsLocked(string field) =>
         _lockedFields.Contains(field, StringComparer.OrdinalIgnoreCase);
+
+    private async Task RefreshLayoutMonitorsAsync()
+    {
+        if (_api is null || CurrentKind() != "layout" || _layoutCombo.SelectedItem is not LayoutOption option)
+        {
+            RebuildLayoutMonitorRows(1, _layoutMonitorDevices);
+            return;
+        }
+        try
+        {
+            var session = TryCurrentToken();
+            if (session is null)
+            {
+                RebuildLayoutMonitorRows(_layoutMonitorDevices?.Length ?? 1, _layoutMonitorDevices);
+                return;
+            }
+            var detail = await _api.GetLayoutAsync(option.Id, session);
+            if (_closing || IsDisposed) return;
+            var count = Math.Max(1, detail.Document?.Monitors?.Count ?? _layoutMonitorDevices?.Length ?? 1);
+            RebuildLayoutMonitorRows(count, _layoutMonitorDevices);
+        }
+        catch
+        {
+            if (!_closing && !IsDisposed) RebuildLayoutMonitorRows(_layoutMonitorDevices?.Length ?? 1, _layoutMonitorDevices);
+        }
+    }
+
+    private string? TryCurrentToken()
+    {
+        // 登录成功后的 token 存在 ServerApiClient 会话中；设置窗通过最近一次登录列表即可。
+        return _lastToken;
+    }
+
+    private int LayoutMonitorCount() => Math.Max(1, _layoutMonitorPanel.Controls.OfType<ComboBox>().Count());
+
+    private string[] CurrentLayoutMonitorDevices()
+    {
+        return _layoutMonitorPanel.Controls.OfType<ComboBox>()
+            .Select(box => (box.SelectedItem as MonitorOption)?.DeviceName ?? "")
+            .ToArray();
+    }
+
+    private void RebuildLayoutMonitorRows(int count, string[]? selected)
+    {
+        _layoutMonitorPanel.Controls.Clear();
+        var table = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, Dock = DockStyle.Fill };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (var i = 0; i < count; i++)
+        {
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(new Label { Text = $"逻辑显示器 {i + 1}", AutoSize = true, Anchor = AnchorStyles.Left }, 0, i);
+            var combo = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 360, Tag = i };
+            combo.Items.Add(new MonitorOption("", "自动分配"));
+            foreach (var screen in Screen.AllScreens)
+            {
+                var index = combo.Items.Count;
+                combo.Items.Add(new MonitorOption(screen.DeviceName, $"{(screen.Primary ? "主显示器" : "显示器")} {screen.DeviceName}  {screen.Bounds.Width}×{screen.Bounds.Height}"));
+            }
+            var want = selected is not null && i < selected.Length ? selected[i] : null;
+            var match = combo.Items.Cast<MonitorOption>().ToList().FindIndex(item => !string.IsNullOrWhiteSpace(want) && string.Equals(item.DeviceName, want, StringComparison.OrdinalIgnoreCase));
+            combo.SelectedIndex = match >= 0 ? match : 0;
+            table.Controls.Add(combo, 1, i);
+        }
+        _layoutMonitorPanel.Controls.Add(table);
+        _layoutMonitorDevices = CurrentLayoutMonitorDevices();
+    }
+
 
     private void ApplyLocks()
     {
@@ -414,6 +504,7 @@ internal sealed class SettingsForm : Form
         {
             _kindScreen.Enabled = false;
             _kindLayout.Enabled = false;
+            _kindPlaylist.Enabled = false;
             _kindWorkstation.Enabled = false;
             _kindWorkspace.Enabled = false;
         }
@@ -444,7 +535,7 @@ internal sealed class SettingsForm : Form
     }
 
     private string CurrentKind() =>
-        _kindLayout.Checked ? "layout" : _kindWorkstation.Checked ? "workstation" : _kindWorkspace.Checked ? "workspace" : "screen";
+        _kindLayout.Checked ? "layout" : _kindPlaylist.Checked ? "playlist" : _kindWorkstation.Checked ? "workstation" : _kindWorkspace.Checked ? "workspace" : "screen";
 
     private void MarkConnectionDirty()
     {
@@ -569,19 +660,23 @@ internal sealed class SettingsForm : Form
     private async Task LoadTargetListsAsync(string token)
     {
         if (_api is null) return;
+        _lastToken = token;
         try
         {
             var screensTask = _api.GetScreensAsync(token);
             var layoutsTask = _api.GetLayoutsAsync(token);
+            var playlistsTask = _api.GetPlaylistsAsync(token);
             var stationsTask = _api.GetWorkstationsAsync(token);
-            await Task.WhenAll(screensTask, layoutsTask, stationsTask);
+            await Task.WhenAll(screensTask, layoutsTask, playlistsTask, stationsTask);
             if (_closing || IsDisposed) return;
             _screens = await screensTask;
             _layouts = await layoutsTask;
+            _playlists = await playlistsTask;
             _workstations = await stationsTask;
 
             FillCombo(_screenCombo, _screens.Select(row => new ScreenOption(row.Id, row.Name ?? $"画面 #{row.Id}")));
             FillCombo(_layoutCombo, _layouts.Select(row => new LayoutOption(row.Id, row.Name ?? $"布局 #{row.Id}")));
+            FillCombo(_playlistCombo, _playlists.Select(row => new PlaylistOption(row.Id, row.Name ?? $"播放列表 #{row.Id}")));
             FillCombo(_workstationCombo, _workstations.Select(row =>
             {
                 var layout = _layouts.FirstOrDefault(item => item.Id == row.LayoutId);
@@ -591,7 +686,7 @@ internal sealed class SettingsForm : Form
 
             if (_screens.Count == 0) SetStatus("当前账号看不到已发布画面，请先在组态编辑器中发布画面。", true);
             else if (_layouts.Count == 0 && _workstations.Count == 0) SetStatus("当前账号看不到已发布布局或工作站，可使用单个画面模式。", true);
-            else SetStatus($"已加载 {_screens.Count} 个画面、{_layouts.Count} 个布局、{_workstations.Count} 个工作站。", false);
+            else SetStatus($"已加载 {_screens.Count} 个画面、{_layouts.Count} 个布局、{_playlists.Count} 个播放列表、{_workstations.Count} 个工作站。", false);
         }
         catch (ApiException exception)
         {
@@ -638,6 +733,7 @@ internal sealed class SettingsForm : Form
             var kind = CurrentKind();
             var screenId = (_screenCombo.SelectedItem as ScreenOption)?.Id;
             var layoutId = (_layoutCombo.SelectedItem as LayoutOption)?.Id;
+            var playlistId = (_playlistCombo.SelectedItem as PlaylistOption)?.Id;
             var station = _workstationCombo.SelectedItem as WorkstationOption;
 
             var connectionChanged = !string.Equals(url, _originalServerUrl, StringComparison.OrdinalIgnoreCase)
@@ -656,6 +752,7 @@ internal sealed class SettingsForm : Form
             var targetChanged = kind != _originalKind
                 || kind == "screen" && screenId != _originalScreenId
                 || kind == "layout" && layoutId != _originalLayoutId
+                || kind == "playlist" && playlistId != _originalPlaylistId
                 || (kind == "workstation" || kind == "screen" && _monitorOnly.Checked) && station?.Id != _originalWorkstationId;
             if ((connectionChanged || targetChanged) && !_authenticated)
             {
@@ -670,6 +767,9 @@ internal sealed class SettingsForm : Form
                     return;
                 case "layout" when layoutId is not > 0:
                     SetStatus("请选择已发布的运行布局", true);
+                    return;
+                case "playlist" when playlistId is not > 0:
+                    SetStatus("请选择已保存的 Kiosk 播放列表", true);
                     return;
                 case "workstation" when station is null:
                     SetStatus("请选择工作站", true);
@@ -697,10 +797,13 @@ internal sealed class SettingsForm : Form
                     Kind = kind,
                     ScreenId = kind == "screen" ? screenId : null,
                     LayoutId = kind == "layout" ? layoutId : null,
+                    PlaylistId = kind == "playlist" ? playlistId : null,
+                    LayoutMonitorCount = kind == "layout" ? LayoutMonitorCount() : null,
+                    LayoutMonitorDeviceNames = kind == "layout" ? CurrentLayoutMonitorDevices() : null,
                     WorkstationId = kind == "workstation" || kind == "screen" && _monitorOnly.Checked ? station?.Id : null,
                     WorkstationName = kind == "workstation" || kind == "screen" && _monitorOnly.Checked ? station?.Name : null,
-                    TargetName = kind == "workspace" ? "多页面工作台" : null,
-                    MonitorOnly = kind == "screen" && _monitorOnly.Checked
+                    TargetName = kind == "playlist" ? (_playlistCombo.SelectedItem as PlaylistOption)?.Label : kind == "workspace" ? "多页面工作台" : null,
+                    MonitorOnly = (kind == "screen" || kind == "playlist") && _monitorOnly.Checked
                 },
                 Display = new DesktopDisplay
                 {
@@ -827,6 +930,11 @@ internal sealed class SettingsForm : Form
     }
 
     private sealed record ScreenOption(int Id, string Label) : IOption
+    {
+        public override string ToString() => Label;
+    }
+
+    private sealed record PlaylistOption(int Id, string Label) : IOption
     {
         public override string ToString() => Label;
     }

@@ -28,8 +28,7 @@ internal static class Program
         if (ProvisionCommand.IsRequested(args)) return ProvisionCommand.Run(args, paths);
 
         var isClient = args.Any(arg => string.Equals(arg, "--client", StringComparison.OrdinalIgnoreCase));
-        var parentProcessId = ParseParentProcessId(args);
-        return isClient ? RunClient(paths, parentProcessId) : RunSupervisor(paths);
+        return isClient ? RunClient(paths, args) : RunSupervisor(paths);
     }
 
     private static int RunSupervisor(DesktopPaths paths)
@@ -76,9 +75,10 @@ internal static class Program
         return context.ExitCode;
     }
 
-    private static int RunClient(DesktopPaths paths, int parentProcessId)
+    private static int RunClient(DesktopPaths paths, string[] args)
     {
-        using var single = new SingleInstance(@"Local\Scada.Desktop.Client");
+        var launch = ClientLaunchOptions.Parse(args);
+        using var single = new SingleInstance(launch.MutexName);
         if (!single.IsOwner) return ExitCodes.Success;
 
         var store = new SettingsStore(paths.SettingsFile);
@@ -95,10 +95,11 @@ internal static class Program
         }
         var settings = resolved.Settings;
         ClientIdentity.Ensure(settings, store);
+        launch.Apply(settings);
 
         try
         {
-            using var form = new ClientForm(settings, paths, store, parentProcessId);
+            using var form = new ClientForm(settings, paths, store, launch.ParentProcessId);
             Application.Run(form);
             return form.ResultCode;
         }
@@ -108,19 +109,6 @@ internal static class Program
             MessageBox.Show("画面进程启动失败：" + exception.Message, "SCADA 桌面客户端", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return ExitCodes.Configuration;
         }
-    }
-
-    private static int ParseParentProcessId(string[] args)
-    {
-        for (var i = 0; i < args.Length - 1; i++)
-        {
-            if (string.Equals(args[i], "--parent", StringComparison.OrdinalIgnoreCase)
-                && int.TryParse(args[i + 1], out var pid) && pid > 0)
-            {
-                return pid;
-            }
-        }
-        return 0;
     }
 
     private static void WireExceptionHandlers()

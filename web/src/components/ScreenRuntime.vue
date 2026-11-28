@@ -69,7 +69,7 @@
         <button type="button" class="runtime-popup-close" :aria-label="$t('screenUx.closeDialog')" @click="popupVisible = false">×</button>
       </div>
       <div class="runtime-popup-body">
-        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :depth="depth + 1" :monitor-mode="monitorMode" :replay-at="replayMode ? replayAt : null" toolbar-mode="embedded" :navigate-mode="navigateMode === 'tabs' ? 'tabs' : 'router'" @navigate="onPopupNavigate" @screen-loaded="onPopupLoaded" />
+        <ScreenRuntime v-if="popupId" :key="popupId" :screen-id="popupId" :preview="isPreview" :published-preview="publishedPreview" :as-of-ts="asOfTs" :historic-revision="null" :depth="depth + 1" :monitor-mode="monitorMode" :replay-at="replayMode ? replayAt : null" toolbar-mode="embedded" :navigate-mode="navigateMode === 'tabs' ? 'tabs' : 'router'" @navigate="onPopupNavigate" @screen-loaded="onPopupLoaded" />
       </div>
     </div>
     </Teleport>
@@ -131,13 +131,13 @@ async function publishedRevisions(): Promise<{ id: number; publishedRevision: nu
   }
   return publishedInflight
 }
-const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; publishedPreview?: boolean; depth?: number
+const props = withDefaults(defineProps<{ screenId?: number; previewDocument?: ScreenDocument; previewName?: string; preview?: boolean; publishedPreview?: boolean; asOfTs?: number | null; historicRevision?: number | null; depth?: number
   // emit：导航与弹窗交给外层（运行布局的区域历史与浮动面板窗口）处理。
   // tabs：导航交给外层标签页宿主，弹窗仍在本实例内处理。
   navigateMode?: 'router' | 'emit' | 'tabs'; compact?: boolean; fill?: boolean; initialZoom?: number | 'fit'; editReturnTo?: string
   toolbarMode?: 'default' | 'embedded'; monitorMode?: boolean; replayAt?: number | null; autoRefresh?: boolean
   // 多页面宿主切换到其他标签时置为 true，关闭当前实例的浮动弹窗，避免残留到其他页面。
-  suspended?: boolean; highlightTagIds?: number[] }>(), { depth: 0, preview: false, publishedPreview: false, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false, suspended: false, highlightTagIds: () => [] })
+  suspended?: boolean; highlightTagIds?: number[] }>(), { depth: 0, preview: false, publishedPreview: false, asOfTs: null, historicRevision: null, navigateMode: 'router', compact: false, fill: false, initialZoom: .75, toolbarMode: 'default', monitorMode: false, replayAt: null, autoRefresh: false, suspended: false, highlightTagIds: () => [] })
 const emit = defineEmits<{ navigate: [screenId: number]; popup: [screenId: number]; 'screen-loaded': [screen: { id: number; name: string; tagIds: number[] } | null] }>()
 const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const highlightTagIds = computed(() => props.highlightTagIds ?? [])
@@ -202,7 +202,8 @@ const hubState = realtimeHubState()
 const connected = computed(() => hubState.value === 'connected')
 const receiptId = ref<string | null>(null)
 const previewTargetId = ref<number>()
-const isPreview = computed(() => props.preview || props.publishedPreview || !!props.previewDocument)
+const isHistorical = computed(() => (props.asOfTs != null && Number.isFinite(props.asOfTs)) || (props.historicRevision != null && props.historicRevision > 0))
+const isPreview = computed(() => props.preview || props.publishedPreview || !!props.previewDocument || isHistorical.value)
 const replayMode = computed(() => props.replayAt != null && Number.isFinite(props.replayAt))
 const readOnly = computed(() => isPreview.value || props.monitorMode || replayMode.value || mobileReadOnly.value || newerRevision.value != null)
 const stalePublication = computed(() => newerRevision.value != null)
@@ -582,7 +583,7 @@ async function load(retryCatalogs = false): Promise<void> {
     if (disposed || generation !== currentGeneration) return
     if (props.previewDocument && !previewTargetId.value) { await Promise.all([poll(), resubscribe(), loadAux(retryCatalogs), loadTags()]); return }
     if (!screenId) return
-    const incoming = await screenApi.get(screenId, draftPreview.value)
+    const incoming = await screenApi.get(screenId, draftPreview.value && !isHistorical.value, isHistorical.value ? { asOf: props.asOfTs, revision: props.historicRevision } : undefined)
     if (generation !== currentGeneration || disposed) return
     if (incoming.requiresRepublish) { error.value = incoming.message ?? tr('screenRuntime.failedToLoadScreen'); reportRuntime('requiresRepublish', error.value); return }
     detail.value = incoming

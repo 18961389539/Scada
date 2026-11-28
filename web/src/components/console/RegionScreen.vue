@@ -1,6 +1,6 @@
 <template>
   <div class="region-screen" :data-test="`region-${region.id}`">
-    <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" :monitor-mode="monitorMode" :replay-at="replayAt" toolbar-mode="embedded" navigate-mode="emit" compact fill initial-zoom="fit" @screen-loaded="screenLoaded" @navigate="navigate" @popup="id => $emit('popup', id)">
+    <ScreenRuntime :key="current" :screen-id="current" :edit-return-to="editReturnTo" :monitor-mode="monitorMode" :as-of-ts="asOfTs" :historic-revision="historicRevision" :replay-at="effectiveReplayAt" toolbar-mode="embedded" navigate-mode="emit" compact fill initial-zoom="fit" @screen-loaded="screenLoaded" @navigate="navigate" @popup="id => $emit('popup', id)">
       <template #toolbar-start>
         <div class="region-nav">
           <el-button-group size="small">
@@ -11,7 +11,7 @@
           <strong class="region-title" :title="regionLabel" data-test="region-current-screen">{{ regionLabel }}</strong>
           <el-button size="small" link :data-test="`region-focus-${region.id}`" @click="$emit('focus')">{{ focused ? $t('consoleUx.focusExit') : $t('consoleUx.focusRegion') }}</el-button>
           <WorkbenchTooltip :content="$t('workbenchTips.detach')"><el-button size="small" link :data-test="`region-window-${region.id}`" @click="$emit('detach', current)">{{ $t('regionScreen.kad9ce6') }}</el-button></WorkbenchTooltip>
-          <div class="region-replay" data-test="console-replay">
+          <div v-if="!useSharedReplay" class="region-replay" data-test="console-replay">
             <ScreenReplayControls v-model="replayAt" size="small" />
           </div>
         </div>
@@ -28,7 +28,7 @@ import { ArrowLeft, ArrowRight, House } from '@element-plus/icons-vue'
 import ScreenRuntime from '../ScreenRuntime.vue'
 import ScreenReplayControls from '../ScreenReplayControls.vue'
 import type { HmiRegion } from '../../api/hmiLayouts'
-const props = withDefaults(defineProps<{ region: HmiRegion; screenName: (id: number) => string; monitorMode?: boolean; focused?: boolean; layoutId?: number | null; monitorIndex?: number }>(), { monitorMode: false, focused: false, layoutId: null, monitorIndex: 0 })
+const props = withDefaults(defineProps<{ region: HmiRegion; screenName: (id: number) => string; monitorMode?: boolean; focused?: boolean; layoutId?: number | null; monitorIndex?: number; asOfTs?: number | null; screenRevisions?: Record<number, number> | null; useSharedReplay?: boolean; sharedReplayAt?: number | null }>(), { monitorMode: false, focused: false, layoutId: null, monitorIndex: 0, asOfTs: null, screenRevisions: null, useSharedReplay: false, sharedReplayAt: null })
 const route = useRoute(), router = useRouter()
 const emit = defineEmits<{ popup: [id: number]; detach: [id: number]; 'screen-change': [screenId: number]; focus: [] }>()
 const HISTORY_LIMIT = 50
@@ -47,6 +47,9 @@ const stored = readHistory()
 const stack = ref<number[]>(stored?.stack ?? [props.region.screenId!]), index = ref(stored ? Math.max(0, Math.min(stored.stack.length - 1, stored.index)) : 0)
 const current = computed(() => stack.value[index.value]!)
 const replayAt = ref<number | null>(null)
+const useSharedReplay = computed(() => props.useSharedReplay)
+const effectiveReplayAt = computed(() => props.useSharedReplay ? props.sharedReplayAt ?? null : replayAt.value)
+const historicRevision = computed(() => props.screenRevisions?.[current.value] ?? null)
 const loadedScreen = ref<{ id: number; name: string } | null>(null)
 const currentName = computed(() => loadedScreen.value?.id === current.value ? loadedScreen.value.name : props.screenName(current.value))
 const regionLabel = computed(() => props.region.title ? `${props.region.title} · ${currentName.value}` : currentName.value)
