@@ -29,7 +29,10 @@ public sealed class DeviceAcquisitionPathService(
     private readonly SemaphoreSlim _probeGate = new(2, 2);
     private readonly object _loadLock = new();
     private long _loadedGeneration = long.MinValue;
+    private int _version;
+    public int Version => Volatile.Read(ref _version);
     public event Action<int, AcquisitionPathKind, string>? PathChanged;
+    private IRealtimeBus? Bus => services?.GetService(typeof(IRealtimeBus)) as IRealtimeBus;
 
     public AcquisitionPathKind Current(int deviceId)
     {
@@ -68,11 +71,13 @@ public sealed class DeviceAcquisitionPathService(
         {
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var rows = await runtime.DeviceAcquisitionStates.AsNoTracking().ToListAsync(ct);
+            List<(int DeviceId, AcquisitionPathKind Path, string Reason)> raised;
             lock (_loadLock)
             {
-                ApplyRows(rows);
+                raised = ApplyRows(rows);
                 _loadedGeneration = _role.Generation;
             }
+            NotifyPathChanges(raised);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -85,13 +90,14 @@ public sealed class DeviceAcquisitionPathService(
     {
         var generation = _role.Generation;
         if (generation == _loadedGeneration) return;
+        List<(int DeviceId, AcquisitionPathKind Path, string Reason)> raised = [];
         lock (_loadLock)
         {
             if (generation == _loadedGeneration) return;
             try
             {
                 using var runtime = runtimeFactory.CreateDbContext();
-                ApplyRows(runtime.DeviceAcquisitionStates.AsNoTracking().ToList());
+                raised = ApplyRows(runtime.DeviceAcquisitionStates.AsNoTracking().ToList());
                 _loadedGeneration = generation;
             }
             catch (Exception ex)
@@ -99,18 +105,46 @@ public sealed class DeviceAcquisitionPathService(
                 logger.LogError(ex, "角色切换后重载设备采集路径失败");
             }
         }
+        NotifyPathChanges(raised);
     }
 
-    private void ApplyRows(IReadOnlyList<DeviceAcquisitionState> rows)
+    private List<(int DeviceId, AcquisitionPathKind Path, string Reason)> ApplyRows(IReadOnlyList<DeviceAcquisitionState> rows)
     {
+        var raised = new List<(int DeviceId, AcquisitionPathKind Path, string Reason)>();
         var keep = new HashSet<int>();
         foreach (var row in rows)
         {
+            var had = _active.TryGetValue(row.DeviceId, out var previous);
             _active[row.DeviceId] = row.ActivePath;
             keep.Add(row.DeviceId);
+            if (had && previous != row.ActivePath)
+                raised.Add((row.DeviceId, row.ActivePath, row.Reason ?? "采集路径已与运行库对账"));
         }
         foreach (var key in _active.Keys)
             if (!keep.Contains(key)) _active.TryRemove(key, out _);
+        Interlocked.Increment(ref _version);
+        return raised;
+    }
+
+    private void NotifyPathChanges(IEnumerable<(int DeviceId, AcquisitionPathKind Path, string Reason)> changes)
+    {
+        foreach (var change in changes)
+        {
+            MarkOfficialUncertain(change.DeviceId, change.Reason);
+            PathChanged?.Invoke(change.DeviceId, change.Path, change.Reason);
+        }
+    }
+
+    private void MarkOfficialUncertain(int deviceId, string reason)
+    {
+        var now = ScadaTime.NowMs();
+        foreach (var tag in config.TagsOfDevice(deviceId))
+        {
+            var previous = cache.Get(tag.Id);
+            var value = new TagValue(tag.Id, previous?.Value ?? 0, TagQuality.Uncertain, now, previous?.SourceTs, reason, tag.CalculationRevision, previous?.Text, previous?.Simulated ?? false);
+            cache.Set(value);
+            Bus?.Publish(value);
+        }
     }
 
     internal async Task TickAsync(CancellationToken ct)
@@ -139,8 +173,8 @@ public sealed class DeviceAcquisitionPathService(
                     raised.Add((device.Id, next.Value.Path, next.Value.Reason));
             }
             await runtime.SaveChangesAsync(ct);
-            foreach (var change in raised)
-                PathChanged?.Invoke(change.DeviceId, change.Path, change.Reason);
+            Interlocked.Increment(ref _version);
+            NotifyPathChanges(raised);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -193,7 +227,10 @@ public sealed class DeviceAcquisitionPathService(
         var changed = Switch(runtime, device, state, path, string.IsNullOrWhiteSpace(reason) ? "人工切换" : reason, user, now);
         await runtime.SaveChangesAsync(ct);
         if (changed)
-            PathChanged?.Invoke(device.Id, path, state.Reason ?? reason);
+        {
+            Interlocked.Increment(ref _version);
+            NotifyPathChanges([(device.Id, path, state.Reason ?? reason)]);
+        }
     }
 
     public async Task ResumeAutoAsync(int deviceId, string user, CancellationToken ct)

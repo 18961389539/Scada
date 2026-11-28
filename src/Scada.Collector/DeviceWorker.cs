@@ -79,6 +79,7 @@ internal sealed class DeviceWorker
     private string? _summaryText;
     private string? _lastError;
     private bool _suppressOfflineAlarm;
+    private bool _pathChangeStop;
     private string? _stopReason;
     private long _lastPollTs;
     private double _lastCycleMs;
@@ -121,6 +122,16 @@ internal sealed class DeviceWorker
     public void SuppressOfflineAlarmOnStop(string reason = "本机已停采")
     {
         _suppressOfflineAlarm = true;
+        _stopReason = reason;
+    }
+
+    /// <summary>
+    /// 采集路径切换时调用：测点标成不确定，等待新路径首个样本，不按通信中断写官方历史断点，也不升起设备离线报警。
+    /// </summary>
+    public void SuppressPathChangeOnStop(string reason = "采集路径已切换")
+    {
+        _suppressOfflineAlarm = true;
+        _pathChangeStop = true;
         _stopReason = reason;
     }
 
@@ -671,8 +682,32 @@ internal sealed class DeviceWorker
     /// </summary>
     private async Task MarkStoppedAsync(string? error)
     {
+        if (_pathChangeStop)
+        {
+            PublishPathChange(error ?? _stopReason ?? "采集路径已切换");
+            return;
+        }
         try { await MarkOfflineAsync(error, CancellationToken.None); }
         catch (Exception ex) { _logger.LogDebug(ex, "设备 {Device} 停采时标记通讯中断失败", _device.Name); }
+    }
+
+    private void PublishPathChange(string? error)
+    {
+        _online = false;
+        var ts = ScadaTime.NowMs();
+        foreach (var tag in _tags)
+        {
+            var previous = _cache.Get(tag.Id);
+            if (previous?.Quality == TagQuality.Uncertain && previous.Error == error) continue;
+            var update = new TagValue(tag.Id, previous?.Value ?? 0, TagQuality.Uncertain, ts, previous?.SourceTs, error, tag.CalculationRevision, previous?.Text, _device.SimulationEnabled);
+            _cache.Set(update);
+            _diagnostics.Point(update, null);
+            if (!_lastPublished.TryGetValue(tag.Id, out var published) || published.Quality != TagQuality.Uncertain)
+            {
+                _bus.Publish(update);
+                _lastPublished[tag.Id] = update;
+            }
+        }
     }
 
     // 同步写入缓存并发布，供强制放弃等无法等待异步路径的场合使用。

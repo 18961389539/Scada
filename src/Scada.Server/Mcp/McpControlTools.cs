@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
 using Scada.Core;
+using Scada.Core.Acquisition;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.Server;
 using Scada.Core.Entities;
@@ -35,8 +36,11 @@ public sealed class McpControlTools(
     ControlWorkflowService workflow,
     RecipeService recipes,
     ICollectorDiagnostics diagnostics,
-    McpIdempotency idempotency)
+    McpIdempotency idempotency,
+    IDeviceAcquisitionPaths? paths = null)
 {
+    private readonly IDeviceAcquisitionPaths _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance;
+
     private const string AreaDenied = "MCP control user has no permission for this area.";
 
     private async Task<AccessContext> ControlAccessAsync(CancellationToken ct)
@@ -374,7 +378,7 @@ public sealed class McpControlTools(
             ?? throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
         if (!(await ControlAccessAsync(cancellationToken)).CanDevice(Permission.Control, deviceId))
             return new(deviceId, false, AreaDenied, ScadaTime.NowMs());
-        if (device.GatewayId is not null)
+        if (_paths.Resolve(device).GatewayId is not null)
             throw new McpToolException(McpErrorCodes.Unsupported,
                 "Remote gateway devices require a logged-in operator; MCP does not issue gateway engineering commands.");
         var snapshot = diagnostics.GetDiagnostics(deviceId)

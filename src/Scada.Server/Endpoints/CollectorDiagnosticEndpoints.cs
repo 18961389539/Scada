@@ -1,7 +1,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Scada.Core.Acquisition;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -22,7 +24,7 @@ public static class CollectorDiagnosticEndpoints
         {
             var query = new CollectorDiagnosticQuery(page ?? 1, pageSize ?? 100, search, quality, staleOnly ?? false);
             try { CollectorDiagnosticPaging.Validate(query); } catch (ArgumentException ex) { return EndpointHelpers.BadRequest(ex.Message); }
-            if (config.TryGetDevice(id, out var device) && device.GatewayId is int gatewayId)
+            if (config.TryGetDevice(id, out var device) && ActiveGatewayId(http, device) is int gatewayId)
             {
                 var result = await gateways.EngineerAsync<CollectorDiagnosticPage>(id, GatewayEngineeringOperation.Diagnostics, query, http.User.GetUserId()!.Value, ct);
                 Validate(result.Diagnostics, id, gatewayId); return Results.Ok(result);
@@ -32,14 +34,14 @@ public static class CollectorDiagnosticEndpoints
         group.MapGet("/export", (int id, ICollectorDiagnostics collector, IConfigSnapshot config, IOptions<JsonOptions> options, HttpContext http, GatewayCenterService gateways, CancellationToken ct) => GatewayEndpoints.Run(http, async () =>
         {
             CollectorDeviceDiagnostics? snapshot;
-            if (config.TryGetDevice(id, out var device) && device.GatewayId is int gatewayId)
+            if (config.TryGetDevice(id, out var device) && ActiveGatewayId(http, device) is int gatewayId)
             { snapshot = await gateways.EngineerAsync<CollectorDeviceDiagnostics>(id, GatewayEngineeringOperation.DiagnosticsExport, new { }, http.User.GetUserId()!.Value, ct); Validate(snapshot, id, gatewayId); }
             else snapshot = collector.GetDiagnostics(id);
             return snapshot is null ? Results.NotFound() : Results.File(JsonSerializer.SerializeToUtf8Bytes(snapshot, options.Value.SerializerOptions), "application/json", $"collector-{id}-{snapshot.CapturedTs}.json");
         }));
         group.MapPost("/reconnect", (int id, ICollectorDiagnostics collector, IConfigSnapshot config, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, HttpContext http, GatewayCenterService gateways, CancellationToken ct) => GatewayEndpoints.Run(http, async () =>
         {
-            if (config.TryGetDevice(id, out var device) && device.GatewayId is not null)
+            if (config.TryGetDevice(id, out var device) && ActiveGatewayId(http, device) is not null)
             {
                 var result = await gateways.EngineerAsync<JsonElement>(id, GatewayEngineeringOperation.Reconnect, new { }, http.User.GetUserId()!.Value, ct);
                 return Results.Accepted(value: result);
@@ -57,6 +59,9 @@ public static class CollectorDiagnosticEndpoints
                 : Results.Conflict(new { message = reconnect.Message });
         }));
     }
+    private static int? ActiveGatewayId(HttpContext http, Device device) =>
+        (http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance).Resolve(device).GatewayId;
+
     private static void Validate(CollectorDeviceDiagnostics? snapshot, int deviceId, int gatewayId)
     {
         if (snapshot is null || snapshot.DeviceId != deviceId || snapshot.GatewayId != gatewayId || !GatewayProtocol.IsRevision(snapshot.ConfigurationRevision)

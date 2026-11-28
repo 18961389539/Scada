@@ -922,6 +922,33 @@ namespace Scada.Data.Migrations.Runtime
                     b.ToTable("GatewayInbox", (string)null);
                 });
 
+            modelBuilder.Entity("Scada.Core.Entities.KioskMonitorSession", b =>
+                {
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("EnteredTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("ExpiresTs")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("PlaylistId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("SessionId");
+
+                    b.HasIndex("ExpiresTs");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("KioskMonitorSessions", (string)null);
+                });
+
             modelBuilder.Entity("Scada.Core.Entities.LocalControlCommand", b =>
                 {
                     b.Property<Guid>("Id")

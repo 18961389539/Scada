@@ -148,7 +148,7 @@ public sealed partial class GatewayCenterService
                 var allowed = ServiceImmediate(pending.Request)
                     ? ServiceStillAllowed(gateway)
                     : await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct);
-                if (pending.SessionId != session || Environment.TickCount64 >= pending.Deadline || pending.Request.ExpiresTs <= Now || device?.GatewayId != caller.Id
+                if (pending.SessionId != session || Environment.TickCount64 >= pending.Deadline || pending.Request.ExpiresTs <= Now || device is null || _paths.Resolve(device).GatewayId != caller.Id
                     || gateway.AppliedRevision != revision || pending.Request.ConfigurationRevision != revision || !allowed)
                 { pending.Completion.TrySetResult(new(pending.Request.Id, 409, null, "工程请求的会话、配置、权限或期限已变化；修改结果须核查")); continue; }
                 return new(Now, pending.Request);
@@ -171,7 +171,7 @@ public sealed partial class GatewayCenterService
             { pending.Completion.TrySetResult(new(reply.Id, 504, null, "工程回执超过期限；修改结果须核查")); return new(reply.Id); }
             var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == pending.Request.DeviceId, ct);
             var revision = (await BuildConfigurationAsync(db, caller.Id, ct, recordRevision: false)).Revision;
-            if (device?.GatewayId != caller.Id || revision != pending.Request.ConfigurationRevision)
+            if (device is null || _paths.Resolve(device).GatewayId != caller.Id || revision != pending.Request.ConfigurationRevision)
             { pending.Completion.TrySetResult(new(reply.Id, 409, null, "工程操作期间配置或采集位置变化；修改结果须核查")); return new(reply.Id); }
             var service = ServiceImmediate(pending.Request);
             var allowed = service ? ServiceStillAllowed(gateway) : await EngineeringPermissionAsync(db, pending.Request.UserId, pending.Request.DeviceId, pending.Request.Operation, ct);

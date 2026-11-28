@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Scada.Core.Acquisition;
 using Scada.Core.Entities;
+using Microsoft.Extensions.DependencyInjection;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Data;
@@ -36,13 +38,15 @@ public static class OpcEndpoints
             OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => ChangeTrust(sha256, false, http, service, collector, catalog, factory, runtimeFactory, ct));
         devices.MapGet("/certificates", (int id, int? gatewayId, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
         {
-            var device = await CertificateDeviceAsync(factory, runtimeFactory, id, gatewayId, ct); Scope(http, device);
-            return Results.Ok(device.GatewayId is null ? await local.ListAsync(ct) : await gateways.EngineerAsync<IReadOnlyList<OpcCertificateInfo>>(id, GatewayEngineeringOperation.OpcCertificates, new { }, http.User.GetUserId()!.Value, ct, device.GatewayId));
+            var device = await CertificateDeviceAsync(http, factory, runtimeFactory, id, gatewayId, ct); Scope(http, device);
+            var active = ActiveGatewayId(http, device);
+            return Results.Ok(active is null ? await local.ListAsync(ct) : await gateways.EngineerAsync<IReadOnlyList<OpcCertificateInfo>>(id, GatewayEngineeringOperation.OpcCertificates, new { }, http.User.GetUserId()!.Value, ct, active));
         }));
         devices.MapGet("/certificates/{sha256}/public", (int id, int? gatewayId, string sha256, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
         {
-            var device = await CertificateDeviceAsync(factory, runtimeFactory, id, gatewayId, ct); Scope(http, device);
-            var bytes = device.GatewayId is null ? await local.PublicCertificateAsync(sha256, ct) : await gateways.EngineerAsync<byte[]>(id, GatewayEngineeringOperation.OpcPublicCertificate, new { sha256 }, http.User.GetUserId()!.Value, ct, device.GatewayId);
+            var device = await CertificateDeviceAsync(http, factory, runtimeFactory, id, gatewayId, ct); Scope(http, device);
+            var active = ActiveGatewayId(http, device);
+            var bytes = active is null ? await local.PublicCertificateAsync(sha256, ct) : await gateways.EngineerAsync<byte[]>(id, GatewayEngineeringOperation.OpcPublicCertificate, new { sha256 }, http.User.GetUserId()!.Value, ct, active);
             return Results.File(bytes, "application/pkix-cert", "scada-client.der");
         }));
         devices.MapPost("/certificates/{sha256}/trust", (int id, int? gatewayId, string sha256, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways,
@@ -53,19 +57,23 @@ public static class OpcEndpoints
     private static Task<IResult> ScopedTrust(int id, int? expectedGateway, string sha256, bool trust, HttpContext http, IOpcCertificateService local, GatewayCenterService gateways,
         ICollectorControl collector, OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
     {
-        var device = await CertificateDeviceAsync(factory, runtimeFactory, id, expectedGateway, ct); Scope(http, device);
-        if (device.GatewayId is null) return await ChangeTrust(sha256, trust, http, local, collector, catalog, factory, runtimeFactory, ct);
-        await gateways.EngineerAsync<JsonElement>(id, trust ? GatewayEngineeringOperation.OpcTrust : GatewayEngineeringOperation.OpcUntrust, new { sha256 }, http.User.GetUserId()!.Value, ct, device.GatewayId);
-        await catalog.InvalidateAsync(device.GatewayId); return Results.Ok();
+        var device = await CertificateDeviceAsync(http, factory, runtimeFactory, id, expectedGateway, ct); Scope(http, device);
+        var active = ActiveGatewayId(http, device);
+        if (active is null) return await ChangeTrust(sha256, trust, http, local, collector, catalog, factory, runtimeFactory, ct);
+        await gateways.EngineerAsync<JsonElement>(id, trust ? GatewayEngineeringOperation.OpcTrust : GatewayEngineeringOperation.OpcUntrust, new { sha256 }, http.User.GetUserId()!.Value, ct, active);
+        await catalog.InvalidateAsync(active); return Results.Ok();
     });
-    private static async Task<Device> CertificateDeviceAsync(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, int id, int? expectedGateway, CancellationToken ct)
+    private static int? ActiveGatewayId(HttpContext http, Device device) =>
+        (http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance).Resolve(device).GatewayId;
+
+    private static async Task<Device> CertificateDeviceAsync(HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, int id, int? expectedGateway, CancellationToken ct)
     {
         await using var db = await factory.CreateDbContextAsync(ct); var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct) ?? throw new KeyNotFoundException($"设备不存在：{id}");
         if (device.Protocol != Scada.Core.Enums.ProtocolType.OpcUa) throw new ArgumentException("此设备不是 OPC UA 协议");
-        if (expectedGateway is not null && device.GatewayId != expectedGateway) throw new InvalidOperationException("设备采集位置已变化，请刷新并重新核对证书作用范围");
+        if (expectedGateway is not null && ActiveGatewayId(http, device) != expectedGateway) throw new InvalidOperationException("设备采集位置已变化，请刷新并重新核对证书作用范围");
         return device;
     }
-    private static void Scope(HttpContext http, Device device) => http.Response.Headers["X-Scada-Acquisition-Scope"] = device.GatewayId is int gateway ? $"gateway:{gateway}" : "centre";
+    private static void Scope(HttpContext http, Device device) => http.Response.Headers["X-Scada-Acquisition-Scope"] = ActiveGatewayId(http, device) is int gateway ? $"gateway:{gateway}" : "centre";
     private static Task<IResult> ChangeTrust(string sha256, bool trust, HttpContext http, IOpcCertificateService service, ICollectorControl collector,
         OpcCatalogService catalog, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) => Run(async () =>
     {

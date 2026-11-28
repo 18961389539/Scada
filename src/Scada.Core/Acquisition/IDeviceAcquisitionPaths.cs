@@ -21,6 +21,8 @@ public interface IDeviceAcquisitionPaths
     bool HasStandby(Device device);
     AcquisitionPathKind Current(int deviceId);
     event Action<int, AcquisitionPathKind, string>? PathChanged;
+    /// <summary>活动路径集合变化时增加，供历史书写器等在配置版本未变时重载成员。</summary>
+    int Version => 0;
 }
 
 public static class DeviceAcquisitionRules
@@ -70,13 +72,20 @@ public static class DeviceAcquisitionRules
 
     public static DeviceAcquisitionRoute StandbyOf(Device device)
     {
-        var movingGateway = device.StandbyGatewayId is int standbyGateway && standbyGateway != device.GatewayId;
-        var gateway = device.StandbyGatewayId ?? device.GatewayId;
+        // 备用网关未填、但填了备用通道或主机时，备路径由中心本机采集（主路径可以是网关）。
+        // 若备路径仍走某一网关，应显式填写 StandbyGatewayId（可与主网关相同、但端点不同）。
+        var gateway = device.StandbyGatewayId is int standbyGateway
+            ? standbyGateway
+            : device.GatewayId is not null && HasStandbyEndpoint(device) ? null : device.GatewayId;
+        var movingGateway = gateway != device.GatewayId;
         var channel = device.StandbyChannelId ?? (movingGateway ? null : device.ChannelId);
         var host = !string.IsNullOrWhiteSpace(device.StandbyHost) ? device.StandbyHost.Trim() : (movingGateway ? null : device.Host);
         var port = device.StandbyPort ?? (movingGateway ? null : device.Port);
         return new(AcquisitionPathKind.Standby, gateway, channel, host, port);
     }
+
+    private static bool HasStandbyEndpoint(Device device) =>
+        device.StandbyChannelId is not null || !string.IsNullOrWhiteSpace(device.StandbyHost) || device.StandbyPort is not null;
 
     public static Device Apply(Device device, DeviceAcquisitionRoute route)
     {
@@ -108,6 +117,31 @@ public static class DeviceAcquisitionRules
         device.StandbyParity = null;
         device.StandbyStopBits = null;
         device.StandbyTimeoutMs = null;
+    }
+
+    public static bool NeedsStandbyChannelStamp(Device device, AcquisitionChannel? channel)
+    {
+        if (device.StandbyChannelId is null || channel is null || channel.Id != device.StandbyChannelId) return false;
+        if (ChannelProtocols.UsesSerial(channel.Protocol))
+            return string.IsNullOrWhiteSpace(device.StandbySerialPort);
+        return string.IsNullOrWhiteSpace(device.StandbyHost) && device.StandbyPort is null;
+    }
+
+    public static bool TryStampUnstampedStandby(Device device, IReadOnlyDictionary<int, AcquisitionChannel> channels)
+    {
+        if (device.StandbyChannelId is not int channelId || !channels.TryGetValue(channelId, out var channel))
+            return false;
+        if (!NeedsStandbyChannelStamp(device, channel)) return false;
+        StampStandbyFromChannel(device, channel);
+        return true;
+    }
+
+    public static int StampUnstampedStandby(IEnumerable<Device> devices, IReadOnlyDictionary<int, AcquisitionChannel> channels)
+    {
+        var count = 0;
+        foreach (var device in devices)
+            if (TryStampUnstampedStandby(device, channels)) count++;
+        return count;
     }
 
     public static void StampStandbyFromChannel(Device device, AcquisitionChannel channel)

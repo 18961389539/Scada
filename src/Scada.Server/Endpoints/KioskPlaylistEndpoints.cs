@@ -36,14 +36,14 @@ public static class KioskPlaylistEndpoints
             await using var db = await factory.CreateDbContextAsync(ct);
             var row = await db.KioskPlaylists.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
             if (row is null) return Results.NotFound();
-            if (row.MonitorOnly) sessions.Enter(userId, row.Id);
-            else sessions.Leave(userId);
+            if (row.MonitorOnly) sessions.Enter(http, row.Id);
+            else sessions.Leave(http);
             return Results.Ok(new { monitorOnly = row.MonitorOnly, entered = row.MonitorOnly });
         });
         group.MapPost("/leave-monitor", (HttpContext http, KioskMonitorSessionStore sessions) =>
         {
             if (http.User.GetUserId() is not int userId) return Results.Unauthorized();
-            sessions.Leave(userId);
+            sessions.Leave(http);
             return Results.NoContent();
         });
         group.MapPost("", (KioskPlaylistRequest request, HttpContext http, IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, CancellationToken ct) =>

@@ -41,6 +41,8 @@ public sealed class ConfigSnapshot : IConfigSnapshot
         {
             await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
             var devices = await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
+            var channels = await db.Channels.AsNoTracking().ToDictionaryAsync(x => x.Id, cancellationToken);
+            Scada.Core.Acquisition.DeviceAcquisitionRules.StampUnstampedStandby(devices, channels);
             var tags = await db.Tags.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
             var areas = await db.Areas.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
             var rules = await db.AlarmRules.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);

@@ -39,6 +39,7 @@ public static class AuthEndpoints
             JwtTokenService tokenService,
             LoginThrottle throttle,
             TokenUserCache tokenCache,
+            KioskMonitorSessionStore kioskMonitors,
             Scada.Data.AccessModelProvider access,
             ILoggerFactory loggerFactory,
             CancellationToken cancellationToken) =>
@@ -111,6 +112,7 @@ public static class AuthEndpoints
             // 登录成功意味着账号刚通过密码校验：清掉校验缓存，避免"刚被管理员启用"的账号
             // 因为 5 秒窗口内还留着旧的停用状态而拿到一个立刻被判失效的令牌。
             tokenCache.Invalidate(user.Id);
+            kioskMonitors.LeaveUser(user.Id);
             var (token, expiresAt) = tokenService.Create(user);
             return Results.Ok(new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
                 user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken)))));
@@ -144,6 +146,7 @@ public static class AuthEndpoints
             HttpContext http,
             IDbContextFactory<ConfigDbContext> contextFactory,
             JwtTokenService tokenService,
+            KioskMonitorSessionStore kioskMonitors,
             Scada.Data.AccessModelProvider access,
             CancellationToken cancellationToken) =>
         {
@@ -152,9 +155,14 @@ public static class AuthEndpoints
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
             var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
             if (user is null || !user.Enabled) return Results.Unauthorized();
+            var previousSession = http.User.GetSessionId();
             var (token, expiresAt) = tokenService.Create(user);
-            return Results.Ok(new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
-                user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken)))));
+            var refreshed = new SessionResponse(token, expiresAt, new SessionUserView(user.Id, user.UserName, user.DisplayName,
+                user.Role.ToString(), user.Locale, user.MustChangePassword, AccessEndpoints.Describe(await access.ForUserAsync(user.Id, cancellationToken))));
+            var principal = new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(token);
+            http.User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(principal.Claims, "Bearer"));
+            kioskMonitors.Transfer(previousSession, http);
+            return Results.Ok(refreshed);
         }).Produces<SessionResponse>().RequireAuthorization();
 
         // 自助改密：首装管理员与管理员重置过口令的账号必须由本人换掉，换完立刻签发新令牌。
@@ -168,6 +176,7 @@ public static class AuthEndpoints
             Scada.Data.AccessModelProvider access,
             LoginThrottle throttle,
             TokenUserCache tokenCache,
+            KioskMonitorSessionStore kioskMonitors,
             CancellationToken cancellationToken) =>
         {
             var userId = http.User.GetUserId();
@@ -194,6 +203,7 @@ public static class AuthEndpoints
             await runtime.SaveChangesAsync(cancellationToken);
             // 密码变了，凭据版本随之改变：清掉令牌校验缓存，否则旧缓存会让刚签发的新令牌在 5 秒窗口内被判为失效。
             tokenCache.Invalidate(user.Id);
+            kioskMonitors.LeaveUser(user.Id);
             // 改密成功说明就是本人在操作，顺手解掉登录失败锁定，避免他刚解锁又被自己卡住。
             throttle.Reset(LoginThrottle.Key(user.UserName, http.Connection.RemoteIpAddress?.ToString()));
 

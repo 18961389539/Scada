@@ -29,6 +29,7 @@ public sealed class JwtTokenService
         var expires = DateTimeOffset.UtcNow.AddHours(Math.Max(_options.ExpireHours, 1));
         var claims = new List<Claim>
         {
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Name, user.UserName),
             new(ClaimTypes.Role, user.Role.ToString()),
@@ -65,4 +66,16 @@ public static class ClaimsPrincipalExtensions
 
     public static string GetUserName(this ClaimsPrincipal user) =>
         user.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+
+    public static string? GetSessionId(this ClaimsPrincipal user)
+    {
+        var jti = user.FindFirstValue(JwtRegisteredClaimNames.Jti);
+        return string.IsNullOrWhiteSpace(jti) ? null : jti;
+    }
+
+    public static long? GetTokenExpiresTs(this ClaimsPrincipal user)
+    {
+        var exp = user.FindFirstValue(JwtRegisteredClaimNames.Exp);
+        return long.TryParse(exp, out var seconds) ? seconds * 1000L : null;
+    }
 }

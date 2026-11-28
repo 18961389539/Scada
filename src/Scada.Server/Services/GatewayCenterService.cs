@@ -401,6 +401,9 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
         var working = stored.ToDictionary(x => x.Key, x => new ArchiveState(x.Value.Ts, x.Value.Value, x.Value.Quality, x.Value.Text));
         var history = new List<HistoryValue>();
         var planned = new Dictionary<int, PlannedCursor>();
+        var official = _config.TryGetDevice(packet.DeviceId, out var live) && live.Enabled && _paths.Resolve(live).GatewayId == batch.GatewayId;
+        if (official)
+        {
         foreach (var value in packet.Values)
         {
             var tag = tags[value.TagId];
@@ -414,6 +417,7 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
                 working[value.TagId] = new ArchiveState(value.Ts, value.Value, value.Quality, value.Text);
                 planned[value.TagId] = new PlannedCursor(value.TagId, value.Ts, value.Value, value.Quality, value.Text);
             }
+        }
         }
         var claim = "claim:" + Guid.NewGuid().ToString("N");
         batch.ProcessingError = claim;

@@ -99,6 +99,7 @@ public static class UserEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SessionRegistry sessions,
             TokenUserCache tokenCache,
+            KioskMonitorSessionStore kioskMonitors,
             CancellationToken cancellationToken) =>
         {
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -150,6 +151,7 @@ public static class UserEndpoints
             {
                 sessions.RevokeUser(user.Id);
                 tokenCache.Invalidate(user.Id);
+                kioskMonitors.LeaveUser(user.Id);
             }
 
             return Results.Ok(new
@@ -170,6 +172,7 @@ public static class UserEndpoints
             Microsoft.Extensions.Options.IOptions<Scada.Core.Options.ScadaSettings> settings,
             SessionRegistry sessions,
             TokenUserCache tokenCache,
+            KioskMonitorSessionStore kioskMonitors,
             CancellationToken cancellationToken) =>
         {
             if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
@@ -197,6 +200,7 @@ public static class UserEndpoints
             await runtime.SaveChangesAsync(cancellationToken);
             sessions.RevokeUser(user.Id);
             tokenCache.Invalidate(user.Id);
+            kioskMonitors.LeaveUser(user.Id);
             return Results.Ok(new { success = true });
         });
 
@@ -207,6 +211,7 @@ public static class UserEndpoints
             IDbContextFactory<ConfigDbContext> contextFactory, IDbContextFactory<RuntimeDbContext> runtimeFactory,
             SessionRegistry sessions,
             TokenUserCache tokenCache,
+            KioskMonitorSessionStore kioskMonitors,
             CancellationToken cancellationToken) =>
         {
             if (http.User.GetUserId() == id)
@@ -239,6 +244,7 @@ public static class UserEndpoints
             access.Invalidate();
             sessions.RevokeUser(id);
             tokenCache.Invalidate(id);
+            kioskMonitors.LeaveUser(id);
             return Results.NoContent();
         });
     }

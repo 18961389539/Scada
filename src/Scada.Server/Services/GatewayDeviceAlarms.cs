@@ -58,7 +58,8 @@ public sealed partial class GatewayCenterService
             // 不该开写事务。之前无条件先开两个库的写事务，空站点上等于每秒锁一次两个库，
             // 与请求写入（例如登录）抢 SQLite 的写锁，表现为偶发几十秒等待。
             var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
-            var remoteIds = devices.Values.Where(x => x.GatewayId != null).Select(x => x.Id).ToArray();
+            int? ActiveGatewayId(Device device) => _paths.Resolve(device).GatewayId;
+            var remoteIds = devices.Values.Where(x => ActiveGatewayId(x) != null).Select(x => x.Id).ToArray();
             var active = await runtime.AlarmEvents.Where(x => x.DeviceId != null && x.RuleId == null && x.TagId == null && x.EndTs == null
                 && (x.GatewayId != null || remoteIds.Contains(x.DeviceId.Value))).ToListAsync(ct);
             var hasHealth = await runtime.GatewayDeviceHealth.AnyAsync(ct);
@@ -75,13 +76,13 @@ public sealed partial class GatewayCenterService
             {
                 devices.TryGetValue(alarm.DeviceId!.Value, out var device);
                 if (device is null) Close(alarm, "设备已删除", false);
-                else if (device.GatewayId != alarm.GatewayId) Close(alarm, "采集位置已变更", false);
+                else if (ActiveGatewayId(device) != alarm.GatewayId) Close(alarm, "采集位置已变更", false);
                 else if (!device.Enabled) Close(alarm, "设备采集已停用", false);
                 else if (counts.GetValueOrDefault(device.Id) == 0) Close(alarm, "设备已无采集测点", false);
             }
             var activeByDevice = active.Where(x => x.EndTs is null).ToDictionary(x => x.DeviceId!.Value);
             var gateways = await db.Gateways.ToDictionaryAsync(x => x.Id, ct);
-            foreach (var group in devices.Values.Where(x => x.Enabled && x.GatewayId != null && counts.GetValueOrDefault(x.Id) > 0).GroupBy(x => x.GatewayId!.Value))
+            foreach (var group in devices.Values.Where(x => x.Enabled && ActiveGatewayId(x) != null && counts.GetValueOrDefault(x.Id) > 0).GroupBy(x => ActiveGatewayId(x)!.Value))
             {
                 var revision = (await BuildConfigurationAsync(db, group.Key, ct, recordRevision: false)).Revision;
                 var gateway = gateways[group.Key]; Remember(gateway);
@@ -120,7 +121,7 @@ public sealed partial class GatewayCenterService
                     runtime.AlarmEvents.Add(alarm); notifications.Add((alarm, "raise"));
                 }
             }
-            var removed = states.Where(x => !devices.TryGetValue(x.DeviceId, out var device) || !device.Enabled || device.GatewayId != x.GatewayId || counts.GetValueOrDefault(x.DeviceId) == 0).ToArray();
+            var removed = states.Where(x => !devices.TryGetValue(x.DeviceId, out var device) || !device.Enabled || ActiveGatewayId(device) != x.GatewayId || counts.GetValueOrDefault(x.DeviceId) == 0).ToArray();
             runtime.GatewayDeviceHealth.RemoveRange(removed);
             await runtime.SaveChangesAsync(ct); await runtimeTx.CommitAsync(ct);
             await db.SaveChangesAsync(ct); await tx.CommitAsync(ct);

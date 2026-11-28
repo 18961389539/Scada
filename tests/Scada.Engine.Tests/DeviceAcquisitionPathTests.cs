@@ -167,6 +167,73 @@ public sealed class DeviceAcquisitionPathTests
         Assert.True(DeviceAcquisitionPathService.IsSampleHealthy(1, 1));
     }
 
+
+    [Fact]
+    public void GatewayPrimaryCanUseALocalStandbyPath()
+    {
+        var device = Device(gateway: 1, standbyHost: "10.0.0.8", standbyPort: 502);
+        Assert.Null(DeviceAcquisitionRules.Validate(device));
+        var standby = DeviceAcquisitionRules.StandbyOf(device);
+        Assert.True(standby.IsLocal);
+        Assert.Null(standby.GatewayId);
+        Assert.Equal("10.0.0.8", standby.Host);
+        Assert.Equal(1, DeviceAcquisitionRules.PrimaryOf(device).GatewayId);
+    }
+
+    [Fact]
+    public void UnstampedStandbyChannelIsFilledWithoutOverwritingExistingFields()
+    {
+        var device = new Device
+        {
+            Id = 1, Name = "总线", Protocol = ProtocolType.ModbusRtu,
+            ChannelId = 1, SerialPort = "COM1", BaudRate = 9600, TimeoutMs = 3000,
+            StandbyChannelId = 2, FailoverHoldMs = 10_000, SwitchbackHoldMs = 30_000, Enabled = true
+        };
+        var standby = new AcquisitionChannel
+        {
+            Id = 2, Name = "备总线", Protocol = ProtocolType.ModbusRtu,
+            SerialPort = "COM8", BaudRate = 19200, DataBits = 8, TimeoutMs = 800
+        };
+        var channels = new Dictionary<int, AcquisitionChannel> { [2] = standby };
+        Assert.True(DeviceAcquisitionRules.NeedsStandbyChannelStamp(device, standby));
+        Assert.True(DeviceAcquisitionRules.TryStampUnstampedStandby(device, channels));
+        Assert.Equal("COM8", device.StandbySerialPort);
+        Assert.Equal(19200, device.StandbyBaudRate);
+        Assert.Equal(800, device.StandbyTimeoutMs);
+        Assert.False(DeviceAcquisitionRules.TryStampUnstampedStandby(device, channels));
+        device.StandbySerialPort = "COM9";
+        Assert.False(DeviceAcquisitionRules.TryStampUnstampedStandby(device, channels));
+        Assert.Equal("COM9", device.StandbySerialPort);
+    }
+
+    [Fact]
+    public async Task SwitchingPathMarksCachedValuesUncertainAndRaisesVersion()
+    {
+        using var connection = TestRuntime.Open();
+        var factory = TestRuntime.Factory(connection);
+        var device = Device();
+        var tag = new Tag { Id = 9, DeviceId = device.Id, Name = "F", DataType = TagDataType.Float };
+        var snapshot = new PathSnapshot(device) { Tags = [tag] };
+        var cache = new RecordingCache();
+        cache.Set(new TagValue(tag.Id, 12.5, TagQuality.Good, 1_000));
+        var service = new DeviceAcquisitionPathService(factory, snapshot, cache, NullLogger<DeviceAcquisitionPathService>.Instance, new MutableRole());
+        await service.LoadAsync(CancellationToken.None);
+        var version = service.Version;
+        var changed = 0;
+        service.PathChanged += (_, _, _) => changed++;
+
+        await service.SwitchManualAsync(device.Id, AcquisitionPathKind.Standby, "试验", "engineer", CancellationToken.None);
+
+        Assert.True(service.Version > version);
+        Assert.Equal(1, changed);
+        Assert.Equal(AcquisitionPathKind.Standby, service.Current(device.Id));
+        var value = cache.Get(tag.Id);
+        Assert.NotNull(value);
+        Assert.Equal(TagQuality.Uncertain, value!.Quality);
+        Assert.Equal(12.5, value.Value);
+        Assert.Contains("试验", value.Error);
+    }
+
     private sealed class MutableRole : INodeRole
     {
         public bool IsActive => true;
@@ -177,7 +244,8 @@ public sealed class DeviceAcquisitionPathTests
     private sealed class PathSnapshot(params Device[] devices) : IConfigSnapshot
     {
         public IReadOnlyList<Device> Devices { get; } = devices;
-        public IReadOnlyList<Tag> Tags { get; } = [];
+        public IReadOnlyList<Tag> Tags { get; set; } = [];
+        public IReadOnlyList<Tag> TagsOfDevice(int deviceId) => Tags.Where(x => x.DeviceId == deviceId).ToList();
         public IReadOnlyList<AlarmRule> AlarmRules { get; } = [];
         public int Version => 1;
         public long LoadedAt => 0;
@@ -196,5 +264,14 @@ public sealed class DeviceAcquisitionPathTests
         public TagValue? Get(int tagId) => null;
         public IReadOnlyList<TagValue> GetMany(IEnumerable<int> tagIds) => [];
         public IReadOnlyDictionary<int, TagValue> Snapshot() => new Dictionary<int, TagValue>();
+    }
+
+    private sealed class RecordingCache : IRealtimeCache
+    {
+        private readonly Dictionary<int, TagValue> _values = new();
+        public void Set(TagValue value) => _values[value.TagId] = value;
+        public TagValue? Get(int tagId) => _values.GetValueOrDefault(tagId);
+        public IReadOnlyList<TagValue> GetMany(IEnumerable<int> tagIds) => tagIds.Select(Get).OfType<TagValue>().ToList();
+        public IReadOnlyDictionary<int, TagValue> Snapshot() => new Dictionary<int, TagValue>(_values);
     }
 }

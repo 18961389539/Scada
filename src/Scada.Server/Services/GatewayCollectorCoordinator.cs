@@ -58,7 +58,7 @@ public sealed class GatewayCollectorCoordinator(ILocalCollector local, GatewayCe
     }
     public Task<CommandExecutionResult> WriteTextIdentifiedAsync(int deviceId, Tag tag, string text, CollectorCommandContext context, CancellationToken ct = default)
     {
-        if (config.TryGetDevice(deviceId, out var device) && device.GatewayId is not null)
+        if (config.TryGetDevice(deviceId, out var device) && _paths.Resolve(device).GatewayId is not null)
             return gateways.ExecuteTextCommandAsync(deviceId, tag.Id, text, context, ct);
         if (device is not null && !settings.Value.LocalCollectionEnabled)
             return Task.FromResult(new CommandExecutionResult(false, LocalCollection.DisabledMessage, Outcome: GatewayCommandOutcome.NotSent));

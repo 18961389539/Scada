@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Scada.Core.Acquisition;
 using Scada.Core.Entities;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -33,6 +34,8 @@ public sealed class HistoryWriterService : BackgroundService
     private readonly List<HistoryValue> _buffer = new();
     private Dictionary<int, Tag> _tags = new();
     private int _configVersion = -1;
+    private int _pathVersion = -1;
+    private readonly IDeviceAcquisitionPaths _paths;
 
     public HistoryWriterService(
         IRealtimeBus bus,
@@ -44,10 +47,13 @@ public sealed class HistoryWriterService : BackgroundService
         ILogger<HistoryWriterService> logger,
         LivenessRegistry? liveness = null,
         HistoryLossLog? lossLog = null,
-        INodeRole? role = null)
+        INodeRole? role = null,
+        IDeviceAcquisitionPaths? paths = null)
     {
         _liveness = liveness;
         _role = role ?? new StandaloneNodeRole();
+        _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance;
+        _paths.PathChanged += (_, _, _) => Interlocked.Increment(ref _pathVersion);
         _bus = bus;
         _cache = cache;
         _config = config;
@@ -308,13 +314,29 @@ public sealed class HistoryWriterService : BackgroundService
 
     private void ReloadConfigIfNeeded()
     {
-        if (_config.Version == _configVersion)
+        var pathVersion = _paths.Version + Volatile.Read(ref _pathVersion);
+        if (_config.Version == _configVersion && pathVersion == _loadedPathVersion)
         {
             return;
         }
 
         _tags = _config.Tags.Where(IsLocal).ToDictionary(x => x.Id);
         _configVersion = _config.Version;
+        _loadedPathVersion = pathVersion;
     }
-    private bool IsLocal(Tag tag) => tag.DeviceId is not int id || !_config.TryGetDevice(id, out var device) || device.GatewayId is null;
+    private int _loadedPathVersion = -1;
+    private bool IsLocal(Tag tag) => tag.DeviceId is not int id || !_config.TryGetDevice(id, out var device) || _paths.Resolve(device).IsLocal;
+
+    internal void ReloadMembershipForTests()
+    {
+        _configVersion = -1;
+        _loadedPathVersion = -1;
+        ReloadConfigIfNeeded();
+    }
+
+    internal IReadOnlyCollection<int> LocalTagIdsForTests()
+    {
+        ReloadConfigIfNeeded();
+        return _tags.Keys.ToArray();
+    }
 }

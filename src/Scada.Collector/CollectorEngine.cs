@@ -50,6 +50,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
     // 正在停机的设备。StopWorkerAsync 会先把任务从 _workerTasks 摘掉再等它退出，
     // 这期间不能报"已静止"：否则停机编排会以为旧 I/O 没了，提前释放安装租约或启动新任务。
     private readonly ConcurrentDictionary<int, byte> _stopping = new();
+    private readonly ConcurrentDictionary<int, byte> _pathChangeStops = new();
     private CancellationTokenSource? _workerCts;
     private int _loadedCollectionVersion = -1;
     private volatile bool _reloadRequested;
@@ -88,7 +89,11 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         _paths.PathChanged += OnAcquisitionPathChanged;
     }
 
-    private void OnAcquisitionPathChanged(int deviceId, AcquisitionPathKind path, string reason) => RequestReload();
+    private void OnAcquisitionPathChanged(int deviceId, AcquisitionPathKind path, string reason)
+    {
+        _pathChangeStops[deviceId] = 1;
+        RequestReload();
+    }
 
     public IReadOnlyList<CollectorDeviceStatus> GetStatuses() =>
         _statuses.Values.OrderBy(x => x.DeviceId).ToList();
@@ -351,6 +356,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
         // 先停掉不再需要采集的设备（已删除、已禁用、已交给网关）。
         foreach (var id in _workers.Keys.Where(id => !wanted.ContainsKey(id)).ToList())
         {
+            PreparePathChangeStop(id);
             await StopWorkerAsync(id);
         }
 
@@ -371,6 +377,7 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
                 continue;
             }
 
+            PreparePathChangeStop(deviceId);
             await StopWorkerAsync(deviceId);
             try
             {
@@ -449,6 +456,15 @@ public sealed class CollectorEngine : BackgroundService, ILocalCollector
             device.Id, device.Name, false, "等待连接", 0, 0, tags.Count, 0, 0);
         var workerToken = cts.Token;
         _workerTasks[device.Id] = Task.Run(() => worker.RunAsync(workerToken), CancellationToken.None);
+    }
+
+    private void PreparePathChangeStop(int deviceId)
+    {
+        var pathChange = _pathChangeStops.TryRemove(deviceId, out _);
+        if (!pathChange && _config.TryGetDevice(deviceId, out var device) && device.Enabled && _paths.Apply(device).GatewayId is not null)
+            pathChange = true;
+        if (pathChange && _workers.TryGetValue(deviceId, out var worker))
+            worker.SuppressPathChangeOnStop("采集路径已切换");
     }
 
     private async Task StopWorkerAsync(int deviceId)

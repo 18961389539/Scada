@@ -41,7 +41,7 @@ public sealed partial class GatewayCenterService
                 await using var tx = await db.Database.BeginTransactionAsync(ct);
                 var device = await db.Devices.SingleOrDefaultAsync(x => x.Id == deviceId, ct);
                 var tag = await db.Tags.SingleOrDefaultAsync(x => x.Id == tagId && x.DeviceId == deviceId, ct);
-                if (device?.GatewayId is not int gatewayId || tag is null || !actor.Service && !await AccessModelProvider.UserHasAsync(db, owner.Value, Scada.Core.Security.Permission.Control, device.AreaId, ct))
+                if (device is null || _paths.Resolve(device).GatewayId is not int gatewayId || tag is null || !actor.Service && !await AccessModelProvider.UserHasAsync(db, owner.Value, Scada.Core.Security.Permission.Control, device.AreaId, ct))
                     return new(false, "设备、测点或操作账户无效，命令未下发", Outcome: GatewayCommandOutcome.NotSent);
                 var gateway = await db.Gateways.SingleAsync(x => x.Id == gatewayId, ct);
                 var revision = (await BuildConfigurationAsync(db, gatewayId, ct, recordRevision: false)).Revision;
@@ -249,7 +249,7 @@ public sealed partial class GatewayCenterService
         finally { _mutations.Release(); }
     }
     private bool Ready(AcquisitionGateway gateway, Device device, string revision) => gateway.Enabled && gateway.SessionId is not null && gateway.LeaseUntilTs > Now
-        && gateway.LastSeenTs >= Now - 10000 && gateway.AppliedRevision == revision && device.GatewayId == gateway.Id && device.Enabled
+        && gateway.LastSeenTs >= Now - 10000 && gateway.AppliedRevision == revision && _paths.Resolve(device).GatewayId == gateway.Id && device.Enabled
         && _deviceHealth.TryGetValue(device.Id, out var status) && status.GatewayId == gateway.Id && status.SessionId == gateway.SessionId
         && status.ObservedRevision == revision && status.Online && Fresh(status.ReceivedTs, Now, _settings.LeaseSeconds * 1000L)
         && status.ObservedTs <= Now + 1000 && Fresh(status.LastPollTs, Now, SampleFreshness(device));

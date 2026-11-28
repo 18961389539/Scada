@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Microsoft.EntityFrameworkCore;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
+using Scada.Core.Acquisition;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
@@ -24,8 +25,10 @@ public sealed class McpAnalysisTools(
     IHistoryStore historyStore,
     AlarmAnalyticsService alarmAnalytics,
     ICollectorDiagnostics diagnostics,
-    McpQueryBudget queryBudget)
+    McpQueryBudget queryBudget,
+    IDeviceAcquisitionPaths? paths = null)
 {
+    private readonly IDeviceAcquisitionPaths _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance;
     [McpServerTool(Name = "analyze_alarms", ReadOnly = true, Destructive = false, OpenWorld = false, UseStructuredContent = true)]
     [Description("Read official alarm counts, priority distribution, frequent sources and hourly/daily trend for [from,to), at most 31 days. Simulated or drill alarms are excluded from these official KPI. Optional area/device filters. Truncated and rollup flags must be reported with conclusions; no thresholds or alarms are modified. Use query_alarms to view simulated alarms, which are flagged.")]
     public async Task<McpAlarmAnalysis> AnalyzeAlarms(long from, long to, CancellationToken cancellationToken,
@@ -137,7 +140,7 @@ public sealed class McpAnalysisTools(
         await using var db = await factory.CreateDbContextAsync(cancellationToken);
         var device = await db.Devices.AsNoTracking().SingleOrDefaultAsync(x => x.Id == deviceId, cancellationToken);
         if (device is null) throw new McpToolException(McpErrorCodes.NotFound, "Device does not exist.");
-        if (device.GatewayId is not null)
+        if (_paths.Resolve(device).GatewayId is not null)
             throw new McpToolException(McpErrorCodes.Unsupported,
                 "Remote gateway diagnostics are not cached locally. MCP will not issue gateway engineering commands.");
         var snapshot = diagnostics.GetDiagnostics(deviceId)
