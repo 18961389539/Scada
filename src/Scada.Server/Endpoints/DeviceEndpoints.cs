@@ -141,11 +141,16 @@ public static class DeviceEndpoints
         {
             var access = await http.GetAccessAsync();
             await using var db = await contextFactory.CreateDbContextAsync(cancellationToken);
+            var paths = http.RequestServices.GetService<IDeviceAcquisitionPaths>() ?? PrimaryDeviceAcquisitionPaths.Instance;
             // take 省略时保持原行为：一次返回调用方可见的全部设备，已有 list() 不用改。
             if (take is not int requestedTake)
             {
                 var devices = await db.Devices.AsNoTracking().OrderBy(x => x.Id).ToListAsync(cancellationToken);
-                return Results.Ok(devices.Where(x => access.Has(Permission.View, x.AreaId)).ToList());
+                var visible = devices.Where(x => access.Has(Permission.View, x.AreaId)).ToList();
+                if (gatewayId is int unpagedGateway)
+                    visible = visible.Where(x => paths.Resolve(x).GatewayId == unpagedGateway).ToList();
+                foreach (var device in visible) StampListRoute(device, paths, gatewayId);
+                return Results.Ok(visible);
             }
 
             var scoped = db.Devices.AsNoTracking().AsQueryable();
@@ -193,15 +198,29 @@ public static class DeviceEndpoints
                 else filtered = filtered.Where(_ => false);
             }
 
-            if (gatewayId is int gateway) filtered = filtered.Where(x => x.GatewayId == gateway);
+            if (gatewayId is int gateway)
+                filtered = filtered.Where(x => x.GatewayId == gateway || x.StandbyGatewayId == gateway);
 
-            var total = await filtered.CountAsync(cancellationToken);
+            IReadOnlyList<Device> page;
+            int total;
+            if (gatewayId is int activeGateway)
+            {
+                var matches = FilterByActiveGateway(await OrderDevices(filtered, sort, order).ToListAsync(cancellationToken), paths, activeGateway);
+                total = matches.Count;
+                var pageSize = Math.Clamp(requestedTake, 1, 500);
+                page = matches.Skip(Math.Max(0, skip ?? 0)).Take(pageSize).ToList();
+            }
+            else
+            {
+                total = await filtered.CountAsync(cancellationToken);
+                var pageSize = Math.Clamp(requestedTake, 1, 500);
+                page = await OrderDevices(filtered, sort, order)
+                    .Skip(Math.Max(0, skip ?? 0))
+                    .Take(pageSize)
+                    .ToListAsync(cancellationToken);
+                foreach (var device in page) StampListRoute(device, paths, null);
+            }
             http.Response.Headers["X-Total-Count"] = total.ToString();
-            var pageSize = Math.Clamp(requestedTake, 1, 500);
-            var page = await OrderDevices(filtered, sort, order)
-                .Skip(Math.Max(0, skip ?? 0))
-                .Take(pageSize)
-                .ToListAsync(cancellationToken);
             return Results.Ok(page);
         }).Produces<List<Device>>(StatusCodes.Status200OK);
 
@@ -477,6 +496,21 @@ public static class DeviceEndpoints
             "id" when descending => query.OrderByDescending(x => x.Id),
             _ => query.OrderBy(x => x.Id)
         };
+    }
+
+    internal static List<Device> FilterByActiveGateway(IEnumerable<Device> devices, IDeviceAcquisitionPaths paths, int gatewayId)
+    {
+        var matches = devices.Where(x => paths.Resolve(x).GatewayId == gatewayId).ToList();
+        foreach (var device in matches) StampListRoute(device, paths, gatewayId);
+        return matches;
+    }
+
+    private static void StampListRoute(Device device, IDeviceAcquisitionPaths paths, int? filteredGatewayId)
+    {
+        var route = paths.Resolve(device);
+        device.ActiveGatewayId = route.GatewayId;
+        device.ConfiguredStandby = filteredGatewayId is int gateway
+            && device.StandbyGatewayId == gateway && device.GatewayId != gateway;
     }
 
     private static DeviceAcquisitionInfo ToAcquisitionInfo(Device device, IDeviceAcquisitionPaths paths, DeviceAcquisitionState? state)

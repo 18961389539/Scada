@@ -21,7 +21,7 @@ public sealed record HaStatus(bool Enabled, string NodeId, string Role, long Ter
 
 // 主备协调：心跳 + 仲裁租约（带任期）防双主；只有持有有效租约的节点是主机。
 // 主机续租失败且本地租约期限已到 → 自我隔离降为备机；备机仅在租约过期（加时钟偏差余量）后才能接管。
-public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContributor
+public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContributor, IRuntimeReplicationStatus
 {
     private readonly HaOptions _options;
     private readonly IDbContextFactory<ConfigDbContext> _factory;
@@ -69,6 +69,9 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
     public bool IsActive => _primary;
     public long PromotedTs => Interlocked.Read(ref _promotedTs);
     public long Generation => Interlocked.Read(ref _generation);
+    public long RuntimeRowsBehind => _replication.RuntimeRowsBehind;
+    public bool RuntimeSessionsTrusted => !_options.Enabled || Volatile.Read(ref _runtimeSessionsTrusted) == 1;
+    private int _runtimeSessionsTrusted = 1;
     public string StandbyMessage => $"本节点（{_options.NodeId}）为备机，不采集、不下发控制" + (string.IsNullOrEmpty(_peer?.SelfUrl) ? "" : $"；主机：{_peer!.SelfUrl}");
     public string? PrimaryUrl => _primary ? _options.SelfUrl : _peer?.Role == "Primary" ? _peer.SelfUrl ?? _options.PeerUrl : null;
     public string StateDir => _stateDir;
@@ -265,7 +268,10 @@ public sealed class HaCoordinator : BackgroundService, INodeRole, IHealthContrib
         {
             var tables = _replication.RuntimeLag.Tables.Count == 0 ? "未知" : string.Join("、", _replication.RuntimeLag.Tables);
             Record("runtime-gap", $"主备接管时运行库未同步尾段 {_replication.RuntimeRowsBehind} 行（表：{tables}；{reason}）");
+            // 尾段未到齐时不能把监视会话重载标成成功，否则缺行的锁会变成可下发。
+            Volatile.Write(ref _runtimeSessionsTrusted, 0);
         }
+        else Volatile.Write(ref _runtimeSessionsTrusted, 1);
         if (!_replication.HistoryArtifactsImported && _replication.PeerSpool is { } spool && (spool.ApproxCount > 0 || spool.Bytes > 0))
         {
             var from = spool.From ?? ScadaTime.NowMs();

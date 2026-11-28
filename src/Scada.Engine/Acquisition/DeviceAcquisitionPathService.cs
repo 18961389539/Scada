@@ -2,8 +2,10 @@ using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Scada.Core.Acquisition;
 using Scada.Core;
+using Scada.Core.Options;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
@@ -20,9 +22,11 @@ public sealed class DeviceAcquisitionPathService(
     INodeRole? role = null,
     IDeviceDriverFactory? drivers = null,
     IReadPlanBuilder? plans = null,
-    IServiceProvider? services = null) : BackgroundService, IDeviceAcquisitionPaths
+    IServiceProvider? services = null,
+    IOptions<ScadaSettings>? settings = null) : BackgroundService, IDeviceAcquisitionPaths
 {
     private readonly INodeRole _role = role ?? new StandaloneNodeRole();
+    private readonly IOptions<ScadaSettings>? _settings = settings;
     private readonly ConcurrentDictionary<int, AcquisitionPathKind> _active = new();
     private readonly ConcurrentDictionary<int, PrimaryProbe> _probes = new();
     private readonly ConcurrentDictionary<int, byte> _probing = new();
@@ -154,24 +158,10 @@ public sealed class DeviceAcquisitionPathService(
         {
             await using var runtime = await runtimeFactory.CreateDbContextAsync(ct);
             var raised = new List<(int DeviceId, AcquisitionPathKind Path, string Reason)>();
-            foreach (var device in config.Devices.Where(x => x.Enabled && DeviceAcquisitionRules.HasStandby(x)))
-            {
-                var state = await runtime.DeviceAcquisitionStates.SingleOrDefaultAsync(x => x.DeviceId == device.Id, ct)
-                    ?? runtime.DeviceAcquisitionStates.Add(new DeviceAcquisitionState
-                    {
-                        DeviceId = device.Id, ActivePath = AcquisitionPathKind.Primary, ChangedTs = now, Reason = "默认主路径"
-                    }).Entity;
-                var current = state.ActivePath;
-                _active[device.Id] = current;
-                var activeHealthy = IsRouteHealthy(device, now);
-                if (current == AcquisitionPathKind.Standby)
-                    RequestPrimaryProbe(device, ct);
-                var primaryHealthy = current == AcquisitionPathKind.Primary ? activeHealthy : IsPrimaryHealthy(device, now);
-                var next = Evaluate(device, state, activeHealthy, primaryHealthy, now);
-                if (next is null) continue;
-                if (Switch(runtime, device, state, next.Value.Path, next.Value.Reason, "system", now))
-                    raised.Add((device.Id, next.Value.Path, next.Value.Reason));
-            }
+            var localCollectionEnabled = _settings?.Value.LocalCollectionEnabled ?? true;
+            var enabled = config.Devices.Where(x => x.Enabled).ToList();
+            foreach (var group in DeviceAcquisitionRules.SharedBusGroups(enabled))
+                await TickGroupAsync(runtime, group, raised, now, localCollectionEnabled, ct);
             await runtime.SaveChangesAsync(ct);
             Interlocked.Increment(ref _version);
             NotifyPathChanges(raised);
@@ -183,7 +173,8 @@ public sealed class DeviceAcquisitionPathService(
     }
 
     public static (AcquisitionPathKind Path, string Reason)? Evaluate(
-        Device device, DeviceAcquisitionState state, bool activeHealthy, bool primaryHealthy, long now)
+        Device device, DeviceAcquisitionState state, bool activeHealthy, bool primaryHealthy, long now,
+        bool localCollectionEnabled = true)
     {
         if (!DeviceAcquisitionRules.HasStandby(device)) return null;
         var failover = Math.Clamp(device.FailoverHoldMs <= 0 ? DeviceAcquisitionRules.DefaultFailoverHoldMs : device.FailoverHoldMs,
@@ -196,18 +187,20 @@ public sealed class DeviceAcquisitionPathService(
         if (state.ActivePath == AcquisitionPathKind.Standby && primaryHealthy) state.PrimaryHealthySince ??= now;
         else if (!primaryHealthy) state.PrimaryHealthySince = null;
 
+        (AcquisitionPathKind Path, string Reason)? next = null;
         if (state.ActivePath == AcquisitionPathKind.Primary
             && state.ActiveUnhealthySince is long badSince
             && now - badSince >= failover)
-            return (AcquisitionPathKind.Standby, $"主路径持续离线或坏品质超过 {failover} 毫秒，切到备路径");
-
-        if (state.ActivePath == AcquisitionPathKind.Standby
+            next = (AcquisitionPathKind.Standby, $"主路径持续离线或坏品质超过 {failover} 毫秒，切到备路径");
+        else if (state.ActivePath == AcquisitionPathKind.Standby
             && !state.ManualLock
             && state.PrimaryHealthySince is long goodSince
             && now - goodSince >= switchback)
-            return (AcquisitionPathKind.Primary, $"主路径恢复并保持 {switchback} 毫秒，自动切回");
+            next = (AcquisitionPathKind.Primary, $"主路径恢复并保持 {switchback} 毫秒，自动切回");
 
-        return null;
+        if (next is not null && !localCollectionEnabled && DeviceAcquisitionRules.RouteIsLocal(device, next.Value.Path))
+            return null;
+        return next;
     }
 
     public async Task SwitchManualAsync(int deviceId, AcquisitionPathKind path, string reason, string user, CancellationToken ct)
@@ -219,17 +212,31 @@ public sealed class DeviceAcquisitionPathService(
             throw new InvalidOperationException("该设备未配置采集备路径");
         if (device.SimulationEnabled)
             throw new InvalidOperationException("仿真设备不能切换采集路径");
-        var state = await runtime.DeviceAcquisitionStates.SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct)
-            ?? runtime.DeviceAcquisitionStates.Add(new DeviceAcquisitionState { DeviceId = deviceId }).Entity;
         if (!_role.IsActive)
             throw new InvalidOperationException("备机不能切换采集路径");
+        var localCollectionEnabled = _settings?.Value.LocalCollectionEnabled ?? true;
+        if (path == AcquisitionPathKind.Standby && !localCollectionEnabled && DeviceAcquisitionRules.RouteIsLocal(device, path))
+            throw new InvalidOperationException("本机采集已关闭，不能切到本机备路径");
+        var peers = BusPeers(device);
+        if (peers.Any(peer => peer.Id != device.Id && !DeviceAcquisitionRules.SameStandbyRoute(device, peer)))
+            throw new InvalidOperationException(DeviceAcquisitionRules.SharedBusStandbyMismatch);
         var now = ScadaTime.NowMs();
-        var changed = Switch(runtime, device, state, path, string.IsNullOrWhiteSpace(reason) ? "人工切换" : reason, user, now);
+        var text = string.IsNullOrWhiteSpace(reason) ? "人工切换" : reason;
+        var raised = new List<(int DeviceId, AcquisitionPathKind Path, string Reason)>();
+        foreach (var peer in peers)
+        {
+            if (path == AcquisitionPathKind.Standby && !DeviceAcquisitionRules.HasStandby(peer))
+                throw new InvalidOperationException("共享通道上仍有设备未配置相同备路径，不能单独切换");
+            var state = await LoadStateAsync(runtime, peer, now, ct);
+            var reasonText = peer.Id == device.Id ? text : text + "（共享通道一并切换）";
+            if (Switch(runtime, peer, state, path, reasonText, user, now))
+                raised.Add((peer.Id, path, state.Reason ?? reasonText));
+        }
         await runtime.SaveChangesAsync(ct);
-        if (changed)
+        if (raised.Count > 0)
         {
             Interlocked.Increment(ref _version);
-            NotifyPathChanges([(device.Id, path, state.Reason ?? reason)]);
+            NotifyPathChanges(raised);
         }
     }
 
@@ -240,23 +247,91 @@ public sealed class DeviceAcquisitionPathService(
             throw new InvalidOperationException("设备不存在");
         if (!_role.IsActive)
             throw new InvalidOperationException("备机不能切换采集路径");
-        var state = await runtime.DeviceAcquisitionStates.SingleOrDefaultAsync(x => x.DeviceId == deviceId, ct)
-            ?? runtime.DeviceAcquisitionStates.Add(new DeviceAcquisitionState { DeviceId = deviceId }).Entity;
-        if (!state.ManualLock) return;
         var now = ScadaTime.NowMs();
-        state.ManualLock = false;
-        state.PrimaryHealthySince = null;
-        state.ChangedTs = now;
-        state.ChangedBy = user;
-        state.Reason = "恢复自动回切";
-        runtime.OperationLogs.Add(new OperationLog
+        var unlocked = false;
+        foreach (var peer in BusPeers(device))
         {
-            UserName = user, Ts = now,
-            Action = $"设备 {device.Name} 采集路径恢复自动回切",
-            Result = state.Reason, TargetType = "DeviceAcquisition", TargetId = device.Id.ToString()
-        });
-        await runtime.SaveChangesAsync(ct);
-        logger.LogInformation("设备 {Device} 采集路径恢复自动回切", device.Name);
+            var state = await LoadStateAsync(runtime, peer, now, ct);
+            if (!state.ManualLock) continue;
+            state.ManualLock = false;
+            state.PrimaryHealthySince = null;
+            state.ChangedTs = now;
+            state.ChangedBy = user;
+            state.Reason = peer.Id == device.Id ? "恢复自动回切" : "恢复自动回切（共享通道一并解锁）";
+            runtime.OperationLogs.Add(new OperationLog
+            {
+                UserName = user, Ts = now,
+                Action = $"设备 {peer.Name} 采集路径恢复自动回切",
+                Result = state.Reason, TargetType = "DeviceAcquisition", TargetId = peer.Id.ToString()
+            });
+            logger.LogInformation("设备 {Device} 采集路径恢复自动回切", peer.Name);
+            unlocked = true;
+        }
+        if (unlocked) await runtime.SaveChangesAsync(ct);
+    }
+
+    private IReadOnlyList<Device> BusPeers(Device device) =>
+        config.Devices.Where(x => x.Enabled && (x.Id == device.Id || DeviceAcquisitionRules.SharesBusWith(device, x))).ToList();
+
+    private async Task<DeviceAcquisitionState> LoadStateAsync(RuntimeDbContext runtime, Device device, long now, CancellationToken ct) =>
+        await runtime.DeviceAcquisitionStates.SingleOrDefaultAsync(x => x.DeviceId == device.Id, ct)
+        ?? runtime.DeviceAcquisitionStates.Add(new DeviceAcquisitionState
+        {
+            DeviceId = device.Id, ActivePath = AcquisitionPathKind.Primary, ChangedTs = now, Reason = "默认主路径"
+        }).Entity;
+
+    private async Task TickGroupAsync(RuntimeDbContext runtime, List<Device> group,
+        List<(int DeviceId, AcquisitionPathKind Path, string Reason)> raised, long now, bool localCollectionEnabled, CancellationToken ct)
+    {
+        var members = group.Where(DeviceAcquisitionRules.HasStandby).ToList();
+        if (members.Count == 0) return;
+        var shared = group.Count > 1;
+        if (shared && group.Any(x => !DeviceAcquisitionRules.SameStandbyRoute(members[0], x)))
+            return;
+
+        var decisions = new List<(Device Device, DeviceAcquisitionState State, (AcquisitionPathKind Path, string Reason)? Next)>();
+        foreach (var device in members)
+        {
+            var state = await LoadStateAsync(runtime, device, now, ct);
+            var current = state.ActivePath;
+            _active[device.Id] = current;
+            var activeHealthy = IsRouteHealthy(device, now);
+            if (current == AcquisitionPathKind.Standby)
+                RequestPrimaryProbe(device, ct);
+            var primaryHealthy = current == AcquisitionPathKind.Primary ? activeHealthy : IsPrimaryHealthy(device, now);
+            var next = Evaluate(device, state, activeHealthy, primaryHealthy, now, localCollectionEnabled);
+            decisions.Add((device, state, next));
+        }
+
+        if (!shared)
+        {
+            foreach (var (device, state, next) in decisions)
+            {
+                if (next is null) continue;
+                if (Switch(runtime, device, state, next.Value.Path, next.Value.Reason, "system", now))
+                    raised.Add((device.Id, next.Value.Path, next.Value.Reason));
+            }
+            return;
+        }
+
+        if (decisions.Any(x => x.State.ManualLock)) return;
+        var failover = decisions.FirstOrDefault(x => x.Next is { Path: AcquisitionPathKind.Standby });
+        if (failover.Device is not null)
+        {
+            var reason = failover.Next!.Value.Reason + "（共享通道一并切换）";
+            foreach (var (device, state, _) in decisions)
+                if (Switch(runtime, device, state, AcquisitionPathKind.Standby, reason, "system", now))
+                    raised.Add((device.Id, AcquisitionPathKind.Standby, reason));
+            return;
+        }
+
+        if (decisions.All(x => x.Next is { Path: AcquisitionPathKind.Primary }))
+        {
+            var reason = decisions[0].Next!.Value.Reason + "（共享通道一并切换）";
+            foreach (var (device, state, _) in decisions)
+                if (Switch(runtime, device, state, AcquisitionPathKind.Primary, reason, "system", now))
+                    raised.Add((device.Id, AcquisitionPathKind.Primary, reason));
+        }
     }
 
     private bool Switch(RuntimeDbContext runtime, Device device, DeviceAcquisitionState state, AcquisitionPathKind path, string reason, string user, long now)

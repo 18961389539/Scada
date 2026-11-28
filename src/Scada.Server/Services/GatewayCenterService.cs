@@ -51,6 +51,7 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
     private readonly IAlarmNotifier? _alarmNotifier;
     private readonly INodeRole? _role;
     private readonly IDeviceAcquisitionPaths _paths;
+    private readonly bool _localCollectionEnabled;
     private readonly SemaphoreSlim _mutations = new(1, 1);
     private readonly ConcurrentDictionary<int, (Guid? SessionId, long Until, bool Enabled, string? Applied)> _leases = new();
     private readonly ConcurrentDictionary<int, (int Version, string Hash)> _revisions = new();
@@ -59,15 +60,18 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
 
     public GatewayCenterService(IDbContextFactory<ConfigDbContext> factory, IDbContextFactory<RuntimeDbContext> runtimeFactory, IDeviceCredentials credentials, IConfigSnapshot config,
         IRealtimeCache cache, IRealtimeBus bus, IGatewayHistoryWriter history, ILocalCollector local, IOptions<GatewaySettings> settings,
-        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null, IDeviceAcquisitionPaths? paths = null)
+        ILogger<GatewayCenterService> logger, TimeProvider? clock = null, IAlarmNotifier? alarmNotifier = null, INodeRole? role = null, IDeviceAcquisitionPaths? paths = null,
+        IOptions<ScadaSettings>? scadaSettings = null)
     { _role = role; _paths = paths ?? PrimaryDeviceAcquisitionPaths.Instance; _factory = factory; _deadLetters = new GatewayDeadLetterService(factory, runtimeFactory);
         _runtime = runtimeFactory; _credentials = credentials; _config = config; _cache = cache; _bus = bus; _history = history; _local = local; _settings = settings.Value; _logger = logger; _clock = clock ?? TimeProvider.System; _alarmNotifier = alarmNotifier;
+        _localCollectionEnabled = scadaSettings?.Value.LocalCollectionEnabled ?? true;
         _paths.PathChanged += OnAcquisitionPathChanged; }
     private void OnAcquisitionPathChanged(int deviceId, AcquisitionPathKind path, string reason)
     {
         _local.RequestReload();
         _ = RefreshAcquisitionAssignmentsAsync(deviceId);
         _ = SettleCommandsAfterPathChangeAsync(deviceId);
+        _ = SettleEngineeringAfterPathChangeAsync(deviceId);
     }
     public async Task RefreshAcquisitionAssignmentsAsync(int deviceId, CancellationToken ct = default)
     {
@@ -598,11 +602,13 @@ public sealed partial class GatewayCenterService : BackgroundService, IGatewaySe
     private async Task<string?> AssignmentBlockAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.Enabled || !_local.IsDeviceQuiescent(device.Id)) return "请先停用设备并等待原采集任务完全退出，再切换采集位置";
-        if (device.GatewayId is not int oldId) return null;
-        var old = await db.Gateways.AsNoTracking().SingleAsync(x => x.Id == oldId, ct);
-        var applied = old.AppliedRevision is null ? null : await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == oldId && x.Revision == old.AppliedRevision, ct);
+        // 停用确认看当前活动采集方，配置主网关只表示主路径偏好。
+        if (_paths.Resolve(device).GatewayId is not int activeId) return null;
+        var active = await db.Gateways.AsNoTracking().SingleAsync(x => x.Id == activeId, ct);
+        var applied = active.AppliedRevision is null ? null : await db.GatewayConfigurations.AsNoTracking().SingleOrDefaultAsync(x => x.GatewayId == activeId && x.Revision == active.AppliedRevision, ct);
         var metadata = applied is null ? null : JsonSerializer.Deserialize<GatewayConfiguration>(applied.SnapshotJson, GatewayProtocol.Json);
-        return old.LastSeenTs < device.DisabledSinceTs || metadata?.Devices.Any(x => x.Device.Id == device.Id && !x.Device.Enabled) != true ? "原网关尚未确认停用配置，暂不能迁移设备" : null;
+        return active.LastSeenTs < device.DisabledSinceTs || metadata?.Devices.Any(x => x.Device.Id == device.Id && !x.Device.Enabled) != true
+            ? "当前活动采集网关尚未确认停用配置，暂不能迁移设备" : null;
     }
     public async Task<GatewayAssignmentInfo> AssignmentInfoAsync(int deviceId, CancellationToken ct)
     {

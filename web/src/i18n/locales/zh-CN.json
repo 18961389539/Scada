@@ -1144,6 +1144,7 @@
     "activePath": "活动采集路径",
     "pathPrimary": "主路径",
     "pathStandby": "备路径",
+    "configuredStandby": "备用路径",
     "pathLocal": "本机",
     "switchToPrimary": "切回主路径",
     "switchToStandby": "切到备路径",

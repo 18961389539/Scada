@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.EntityFrameworkCore;
+using Scada.Core;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Data;
@@ -63,10 +64,11 @@ public sealed partial class GatewayCenterService
             var devices = await db.Devices.AsNoTracking().ToDictionaryAsync(x => x.Id, ct);
             int? ActiveGatewayId(Device device) => _paths.Resolve(device).GatewayId;
             var remoteIds = devices.Values.Where(x => ActiveGatewayId(x) != null).Select(x => x.Id).ToArray();
+            var hasLocalOff = !_localCollectionEnabled && devices.Values.Any(x => x.Enabled && ActiveGatewayId(x) is null);
             var active = await runtime.AlarmEvents.Where(x => x.DeviceId != null && x.RuleId == null && x.TagId == null && x.EndTs == null
-                && (x.GatewayId != null || remoteIds.Contains(x.DeviceId.Value))).ToListAsync(ct);
+                && (x.GatewayId != null || remoteIds.Contains(x.DeviceId.Value) || hasLocalOff || x.Message.Contains(LocalCollection.ActiveLocalOfflineReason))).ToListAsync(ct);
             var hasHealth = await runtime.GatewayDeviceHealth.AnyAsync(ct);
-            if (remoteIds.Length == 0 && active.Count == 0 && !hasHealth) return 0;
+            if (remoteIds.Length == 0 && active.Count == 0 && !hasHealth && !hasLocalOff) return 0;
 
             await using var tx = await db.Database.BeginTransactionAsync(ct);
             await using var runtimeTx = await runtime.Database.BeginTransactionAsync(ct);
@@ -82,6 +84,8 @@ public sealed partial class GatewayCenterService
                 else if (ActiveGatewayId(device) != alarm.GatewayId) Close(alarm, "采集位置已变更", false);
                 else if (!device.Enabled) Close(alarm, "设备采集已停用", false);
                 else if (counts.GetValueOrDefault(device.Id) == 0) Close(alarm, "设备已无采集测点", false);
+                else if (alarm.GatewayId is null && _localCollectionEnabled && alarm.Message.Contains(LocalCollection.ActiveLocalOfflineReason))
+                    Close(alarm, "本机采集已恢复", true);
             }
             var activeByDevice = active.Where(x => x.EndTs is null).ToDictionary(x => x.DeviceId!.Value);
             var gateways = await db.Gateways.ToDictionaryAsync(x => x.Id, ct);
@@ -96,9 +100,6 @@ public sealed partial class GatewayCenterService
                     activeByDevice.TryGetValue(device.Id, out var alarm);
                     var connected = gateway.Enabled && gateway.SessionId != null && gateway.LeaseUntilTs > Now;
                     var ready = connected && gateway.AppliedRevision == revision;
-                    // 路径刚切过来、尚无本网关观察、且配置未确认时，抑制离线报警，并把宽限推迟到配置就绪之后。
-                    if (!ready && connected && state.ReceivedTs == 0 && state.LastPollTs == 0)
-                    { state.OfflineSinceTs = null; state.MonitoringSinceTs = Now; continue; }
                     var observed = ready && CurrentObservation(state, gateway, revision);
                     if (observed && Healthy(state, device))
                     { state.OfflineSinceTs = null; if (alarm is not null) Close(alarm, "当前网关已确认设备通信恢复", true); continue; }
@@ -125,6 +126,23 @@ public sealed partial class GatewayCenterService
                         Message = $"设备离线：{device.Name}（网关：{gateway.Name}）：{reason}",
                         MessageEn = Scada.Engine.Alarms.AlarmMessageBuilder.DeviceOfflineEn(device, reason) };
                     runtime.AlarmEvents.Add(alarm); notifications.Add((alarm, "raise"));
+                }
+            }
+            if (!_localCollectionEnabled)
+            {
+                foreach (var device in devices.Values.Where(x => x.Enabled && ActiveGatewayId(x) is null && counts.GetValueOrDefault(x.Id) > 0))
+                {
+                    if (activeByDevice.ContainsKey(device.Id)) continue;
+                    var alarm = new AlarmEvent
+                    {
+                        DeviceId = device.Id, GatewayId = null, Level = AlarmLevel.Warning, StartTs = Now,
+                        Category = AlarmCategory.Diagnostic, Consequence = AlarmConsequence.Minor,
+                        Message = Scada.Engine.Alarms.AlarmMessageBuilder.DeviceOffline(device, LocalCollection.ActiveLocalOfflineReason),
+                        MessageEn = Scada.Engine.Alarms.AlarmMessageBuilder.DeviceOfflineEn(device, LocalCollection.ActiveLocalOfflineReason)
+                    };
+                    runtime.AlarmEvents.Add(alarm);
+                    notifications.Add((alarm, "raise"));
+                    activeByDevice[device.Id] = alarm;
                 }
             }
             var removed = states.Where(x => !devices.TryGetValue(x.DeviceId, out var device) || !device.Enabled || ActiveGatewayId(device) != x.GatewayId || counts.GetValueOrDefault(x.DeviceId) == 0).ToArray();

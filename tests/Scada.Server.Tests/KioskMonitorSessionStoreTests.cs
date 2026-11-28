@@ -73,6 +73,26 @@ public sealed class KioskMonitorSessionStoreTests
     }
 
     [Fact]
+    public async Task RuntimeLagDeniesControlUntilTheReplicaIsTrusted()
+    {
+        await using var connection = TestRuntime.Open();
+        var factory = TestRuntime.Factory(connection);
+        var role = new MutableRole();
+        var lag = new MutableReplication { Trusted = false };
+        var store = new KioskMonitorSessionStore(factory, role, replication: lag);
+        var session = Http(3, "wall", DateTimeOffset.UtcNow.AddHours(1));
+        var other = Http(4, "engineer", DateTimeOffset.UtcNow.AddHours(1));
+        store.Enter(session, 11);
+        role.Bump();
+        Assert.True(store.IsLocked(session), "运行库未追平时按失败关闭，不能把缺行的锁当成可下发");
+        Assert.True(store.IsLocked(other), "运行库未追平时在对齐完成前拒绝所有下发");
+
+        lag.Trusted = true;
+        Assert.True(store.IsLocked(session));
+        Assert.False(store.IsLocked(other));
+    }
+
+    [Fact]
     public async Task ReloadFailureDeniesControlUntilASuccessfulReload()
     {
         await using var connection = TestRuntime.Open();
@@ -107,6 +127,13 @@ public sealed class KioskMonitorSessionStoreTests
         ], "Bearer");
         http.User = new ClaimsPrincipal(identity);
         return http;
+    }
+
+    private sealed class MutableReplication : IRuntimeReplicationStatus
+    {
+        public long RuntimeRowsBehind => Trusted ? 0 : 3;
+        public bool Trusted { get; set; } = true;
+        public bool RuntimeSessionsTrusted => Trusted;
     }
 
     private sealed class MutableRole : INodeRole

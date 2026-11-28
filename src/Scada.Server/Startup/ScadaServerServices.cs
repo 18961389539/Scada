@@ -40,6 +40,7 @@ internal static class ScadaServerServices
         builder.Services.AddSingleton<Scada.Server.Ha.HaReplication>();
         builder.Services.AddSingleton<Scada.Server.Ha.HaCoordinator>();
         builder.Services.AddSingleton<INodeRole>(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
+        builder.Services.AddSingleton<IRuntimeReplicationStatus>(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
         builder.Services.AddHostedService(sp => sp.GetRequiredService<Scada.Server.Ha.HaCoordinator>());
         builder.Services.AddScadaCollector(builder.Configuration);
         builder.Services.AddSingleton<OpcCatalogService>();

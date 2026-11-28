@@ -56,6 +56,57 @@ public static class DeviceAcquisitionRules
         return null;
     }
 
+    public const string SharedBusStandbyMismatch = "共享通道上的设备必须使用相同的备路径，否则切换时会把同一条总线拆到两个采集进程";
+
+    public static bool SharesBusWith(Device left, Device right)
+    {
+        if (left.Id == right.Id) return false;
+        if (left.ChannelId is int channel && channel == right.ChannelId) return true;
+        return left.StandbyChannelId is int standby && standby == right.StandbyChannelId;
+    }
+
+    public static bool SameStandbyRoute(Device left, Device right)
+    {
+        if (!HasStandby(left) && !HasStandby(right)) return true;
+        if (HasStandby(left) != HasStandby(right)) return false;
+        var a = StandbyOf(left); var b = StandbyOf(right);
+        if (a.GatewayId != b.GatewayId || a.ChannelId != b.ChannelId || a.Port != b.Port) return false;
+        if (!string.Equals(a.Host ?? "", b.Host ?? "", StringComparison.OrdinalIgnoreCase)) return false;
+        var aSerial = left.StandbySerialPort ?? "";
+        var bSerial = right.StandbySerialPort ?? "";
+        if (aSerial.Length == 0 && bSerial.Length == 0) return true;
+        return string.Equals(aSerial, bSerial, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+    }
+
+    public static string? ValidateSharedBusStandby(Device device, IEnumerable<Device> peers)
+    {
+        if (!device.Enabled) return null;
+        foreach (var peer in peers)
+        {
+            if (!peer.Enabled || !SharesBusWith(device, peer)) continue;
+            if (!SameStandbyRoute(device, peer)) return SharedBusStandbyMismatch;
+        }
+        return null;
+    }
+
+    public static bool RouteIsLocal(Device device, AcquisitionPathKind path) =>
+        path == AcquisitionPathKind.Standby ? StandbyOf(device).IsLocal : PrimaryOf(device).IsLocal;
+
+    public static List<List<Device>> SharedBusGroups(IEnumerable<Device> devices)
+    {
+        var list = devices.ToList();
+        var parent = Enumerable.Range(0, list.Count).ToArray();
+        int Find(int i) { while (parent[i] != i) i = parent[i] = parent[parent[i]]; return i; }
+        void Union(int a, int b) { a = Find(a); b = Find(b); if (a != b) parent[b] = a; }
+        for (var i = 0; i < list.Count; i++)
+            for (var j = i + 1; j < list.Count; j++)
+                if (SharesBusWith(list[i], list[j])) Union(i, j);
+        return list.Select((device, i) => (device, root: Find(i)))
+            .GroupBy(x => x.root)
+            .Select(g => g.Select(x => x.device).ToList())
+            .ToList();
+    }
+
     public static bool SameAsPrimary(Device device)
     {
         if (!HasStandby(device)) return false;

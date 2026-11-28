@@ -21,6 +21,7 @@ public sealed class KioskMonitorSessionStore
     private readonly object _loadLock = new();
     private readonly IDbContextFactory<RuntimeDbContext>? _runtime;
     private readonly INodeRole _role;
+    private readonly IRuntimeReplicationStatus _replication;
     private readonly TimeProvider _clock;
     private long _loadedGeneration = long.MinValue;
     private bool _loadSucceeded;
@@ -28,11 +29,13 @@ public sealed class KioskMonitorSessionStore
     public KioskMonitorSessionStore(
         IDbContextFactory<RuntimeDbContext>? runtime = null,
         INodeRole? role = null,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null,
+        IRuntimeReplicationStatus? replication = null)
     {
         _runtime = runtime;
         _role = role ?? new StandaloneNodeRole();
         _clock = clock ?? TimeProvider.System;
+        _replication = replication ?? TrustedRuntimeReplication.Instance;
     }
 
     private readonly record struct Entry(int UserId, int PlaylistId, long ExpiresTs);
@@ -141,6 +144,12 @@ public sealed class KioskMonitorSessionStore
 
     private bool TryReload()
     {
+        if (!_replication.RuntimeSessionsTrusted)
+        {
+            // 运行库未追平或本任期还不能证明会话表完整：读到的行可能缺锁，不能标成已对齐。
+            _loadSucceeded = false;
+            return false;
+        }
         if (_runtime is null)
         {
             _loadedGeneration = _role.Generation;

@@ -1144,6 +1144,7 @@
     "activePath": "Active collection path",
     "pathPrimary": "Primary",
     "pathStandby": "Standby",
+    "configuredStandby": "Standby path",
     "pathLocal": "Local",
     "switchToPrimary": "Switch to primary",
     "switchToStandby": "Switch to standby",

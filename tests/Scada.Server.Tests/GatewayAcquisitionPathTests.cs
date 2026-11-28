@@ -1,8 +1,14 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Scada.Core;
 using Scada.Core.Acquisition;
 using Scada.Core.Entities;
+using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Options;
+using Scada.Server.Endpoints;
 using Scada.Server.Services;
 
 namespace Scada.Server.Tests;
@@ -94,16 +100,27 @@ public partial class GatewayCenterTests
         await rig.Service.HeartbeatAsync(standbyCaller!, session.SessionId, new(configuration.Revision, 0, 0, null, null), default);
 
         var alarm = await RaiseRemoteOfflineAsync(rig);
+        // 切路径前先续租，避免窗口加上离线延时后租约先到期，改报「租约已过期」。
+        await rig.Service.HeartbeatAsync(standbyCaller!, session.SessionId, new(configuration.Revision, 0, 0, null, null), default);
         paths.NotifyDeviceId = rig.DeviceId;
         paths.Path = AcquisitionPathKind.Standby;
         await rig.Service.ReconcileDeviceAlarmsAsync(default);
         Assert.All(await DeviceAlarmsAsync(rig), x => Assert.NotNull(x.EndTs));
 
-        await rig.Service.HeartbeatAsync(standbyCaller!, session.SessionId, new(configuration.Revision, 0, 0, null, null), default);
+        // 宽限窗口内仍不新升起离线。
+        rig.Clock.Now += 5_000;
+        await rig.Service.ReconcileDeviceAlarmsAsync(default);
+        Assert.DoesNotContain(await DeviceAlarmsAsync(rig), x => x.EndTs is null);
+
+        // 窗口过后先记下离线起点，再经过默认延时，配置仍未确认时必须按「尚未确认最新配置」报警。
         rig.Clock.Now += 20_000;
         await rig.Service.ReconcileDeviceAlarmsAsync(default);
         Assert.DoesNotContain(await DeviceAlarmsAsync(rig), x => x.EndTs is null);
-        Assert.Equal(alarm.Id, Assert.Single(await DeviceAlarmsAsync(rig)).Id);
+        rig.Clock.Now += 3_000;
+        await rig.Service.ReconcileDeviceAlarmsAsync(default);
+        var open = Assert.Single(await DeviceAlarmsAsync(rig), x => x.EndTs is null);
+        Assert.NotEqual(alarm.Id, open.Id);
+        Assert.Contains("尚未确认最新采集配置", open.Message);
     }
 
     [Fact]
@@ -192,6 +209,141 @@ public partial class GatewayCenterTests
         var standby = Assert.Single(await rig.Service.ManagedDevicesAsync(standbyId, default));
         Assert.Equal(rig.DeviceId, standby.Id);
         Assert.True(standby.ConfiguredStandby);
+    }
+
+    [Fact]
+    public async Task AssignmentBlockWaitsForTheActiveStandbyGatewayNotTheConfiguredPrimary()
+    {
+        var paths = new MutablePaths();
+        GatewayCaller? standbyCaller = null;
+        await using var rig = await Rig.CreateAsync(paths: paths, configure: async r =>
+        {
+            var identity = await r.Service.CreateAsync("standby-edge", 1, "test", default);
+            standbyCaller = new GatewayCaller(identity.Id, GatewayCenterService.TokenHash(identity.Token));
+            await using var db = r.Factory.CreateDbContext();
+            var device = await db.Devices.SingleAsync(x => x.Id == r.DeviceId);
+            device.StandbyGatewayId = identity.Id;
+            device.StandbyHost = "10.0.0.8";
+            device.StandbyPort = 502;
+            await db.SaveChangesAsync();
+        });
+        Assert.NotNull(standbyCaller);
+        var session = await rig.Service.HelloAsync(standbyCaller!, new(1, Guid.NewGuid(), Guid.NewGuid(), "standby"), default);
+        paths.NotifyDeviceId = rig.DeviceId;
+        paths.Path = AcquisitionPathKind.Standby;
+
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            var device = await db.Devices.SingleAsync(x => x.Id == rig.DeviceId);
+            device.Enabled = false;
+            device.DisabledSinceTs = rig.Clock.Now;
+            await db.SaveChangesAsync();
+        }
+
+        var waiting = await rig.Service.AssignmentInfoAsync(rig.DeviceId, default);
+        Assert.False(waiting.CanMove);
+        Assert.Contains("当前活动采集网关", waiting.BlockReason!);
+        Assert.Equal(rig.Caller.Id, waiting.GatewayId);
+
+        var primaryStopped = await rig.Service.ConfigurationAsync(rig.Caller, rig.Session.SessionId, default);
+        await rig.Service.HeartbeatAsync(rig.Caller, rig.Session.SessionId, new(primaryStopped.Revision, 0, 0, null, null), default);
+        waiting = await rig.Service.AssignmentInfoAsync(rig.DeviceId, default);
+        Assert.False(waiting.CanMove);
+
+        var standbyStopped = await rig.Service.ConfigurationAsync(standbyCaller!, session.SessionId, default);
+        await rig.Service.HeartbeatAsync(standbyCaller!, session.SessionId, new(standbyStopped.Revision, 0, 0, null, null), default);
+        var ready = await rig.Service.AssignmentInfoAsync(rig.DeviceId, default);
+        Assert.True(ready.CanMove);
+        Assert.Equal(rig.Caller.Id, ready.GatewayId);
+        await rig.Service.AssignAsync(rig.DeviceId, null, 1, "test", default, new(ready.GatewayId, ready.DisabledSinceTs));
+        Assert.Null((await rig.Service.AssignmentInfoAsync(rig.DeviceId, default)).GatewayId);
+    }
+
+    [Fact]
+    public async Task PathChangeSettlesUnsentEngineeringAndMarksOfferedEngineeringUnknown()
+    {
+        var paths = new MutablePaths();
+        await using var rig = await Rig.CreateAsync(paths: paths, configure: async r =>
+        {
+            var identity = await r.Service.CreateAsync("standby-edge", 1, "test", default);
+            await using var db = r.Factory.CreateDbContext();
+            var device = await db.Devices.SingleAsync(x => x.Id == r.DeviceId);
+            device.StandbyGatewayId = identity.Id;
+            device.StandbyHost = "10.0.0.8";
+            device.StandbyPort = 502;
+            await db.SaveChangesAsync();
+        });
+        await rig.Service.HelloAsync(rig.Caller, new(1, rig.Instance, rig.Stream, "engineering-test", [GatewayProtocol.EngineeringCapability]), default);
+        int userId;
+        await using (var db = rig.Factory.CreateDbContext())
+        {
+            var user = new User { UserName = "path-engineer", Role = UserRole.Admin, PasswordHash = "test-only" };
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+            userId = user.Id;
+        }
+
+        var queued = rig.Service.EngineerAsync<JsonElement>(rig.DeviceId, GatewayEngineeringOperation.Diagnostics, new { }, userId, default);
+        paths.NotifyDeviceId = rig.DeviceId;
+        paths.Path = AcquisitionPathKind.Standby;
+        await rig.Service.SettleEngineeringAfterPathChangeAsync(rig.DeviceId);
+        var queuedEx = await Assert.ThrowsAsync<GatewayRequestException>(() => queued.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(409, queuedEx.StatusCode);
+        Assert.Contains("未下发", queuedEx.Message);
+
+        paths.Path = AcquisitionPathKind.Primary;
+        var offered = rig.Service.EngineerAsync<JsonElement>(rig.DeviceId, GatewayEngineeringOperation.Diagnostics, new { page = 1 }, userId, default);
+        var offer = await rig.Service.EngineeringOfferAsync(rig.Caller, rig.Session.SessionId, null, default);
+        Assert.NotNull(offer.Request);
+        paths.Path = AcquisitionPathKind.Standby;
+        await rig.Service.SettleEngineeringAfterPathChangeAsync(rig.DeviceId);
+        var offeredEx = await Assert.ThrowsAsync<GatewayRequestException>(() => offered.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(409, offeredEx.StatusCode);
+        Assert.Contains("结果未知", offeredEx.Message);
+        Assert.Null((await rig.Service.EngineeringOfferAsync(rig.Caller, rig.Session.SessionId, null, default)).Request);
+    }
+
+    [Fact]
+    public async Task LocalActivePathRaisesOfficialOfflineWhenLocalCollectionIsDisabled()
+    {
+        var paths = new MutablePaths();
+        await using var rig = await Rig.CreateAsync(paths: paths, scadaSettings: Options.Create(new ScadaSettings { LocalCollectionEnabled = false }), configure: async r =>
+        {
+            await using var db = r.Factory.CreateDbContext();
+            var device = await db.Devices.SingleAsync(x => x.Id == r.DeviceId);
+            device.StandbyHost = "10.0.0.8";
+            device.StandbyPort = 502;
+            await db.SaveChangesAsync();
+        });
+        paths.NotifyDeviceId = rig.DeviceId;
+        paths.Path = AcquisitionPathKind.Standby;
+        await using (var config = rig.Factory.CreateDbContext())
+            Assert.True(paths.Resolve(await config.Devices.SingleAsync(x => x.Id == rig.DeviceId)).IsLocal);
+        Assert.Equal(1, await rig.Service.ReconcileDeviceAlarmsAsync(default));
+        // DeviceAlarmsAsync 只看网关设备离线；本机活动路径的官方离线 GatewayId 为空。
+        await using var runtime = rig.Runtime.CreateDbContext();
+        var open = Assert.Single(await runtime.AlarmEvents.AsNoTracking().Where(x => x.DeviceId == rig.DeviceId && x.EndTs == null).ToListAsync());
+        Assert.Null(open.GatewayId);
+        Assert.Contains(LocalCollection.ActiveLocalOfflineReason, open.Message);
+    }
+
+    [Fact]
+    public void DeviceListFilterUsesTheActivePathAndMarksConfiguredStandby()
+    {
+        var paths = new MutablePaths();
+        var primary = new Device { Id = 1, Name = "主", GatewayId = 10, StandbyGatewayId = 20, StandbyHost = "10.0.0.8", StandbyPort = 502 };
+        var onlyStandby = new Device { Id = 2, Name = "备", GatewayId = 11, StandbyGatewayId = 10, StandbyHost = "10.0.0.9", StandbyPort = 502 };
+        var onPrimary = DeviceEndpoints.FilterByActiveGateway([primary, onlyStandby], paths, 10);
+        Assert.Equal(primary.Id, Assert.Single(onPrimary).Id);
+        Assert.False(onPrimary[0].ConfiguredStandby);
+        Assert.Equal(10, onPrimary[0].ActiveGatewayId);
+
+        paths.Path = AcquisitionPathKind.Standby;
+        var onStandby = DeviceEndpoints.FilterByActiveGateway([primary, onlyStandby], paths, 10);
+        var marked = Assert.Single(onStandby);
+        Assert.Equal(onlyStandby.Id, marked.Id);
+        Assert.True(marked.ConfiguredStandby);
+        Assert.Equal(10, marked.ActiveGatewayId);
     }
 
     private sealed class MutablePaths : IDeviceAcquisitionPaths

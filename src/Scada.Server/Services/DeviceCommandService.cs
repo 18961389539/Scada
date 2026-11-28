@@ -250,6 +250,7 @@ public sealed class DeviceCommandService(
             return [new ValidationIssue("device.standby.invalid", nameof(Device.StandbyHost), pathError)];
         if (await ValidateStandbyGatewayAsync(db, device, cancellationToken) is { } standbyGateway) return [standbyGateway];
         if (await ValidateStandbyChannelAsync(db, device, cancellationToken) is { } standbyChannel) return [standbyChannel];
+        if (await ValidateSharedBusStandbyAsync(db, device, excludeDeviceId, cancellationToken) is { } sharedBus) return [sharedBus];
 
         var duplicate = excludeDeviceId is int exclude
             ? await db.Devices.AnyAsync(x => x.Id != exclude && x.Name == device.Name, cancellationToken)
@@ -350,6 +351,19 @@ public sealed class DeviceCommandService(
     }
 
     // 同一通道上的站号必须唯一：否则两台设备的请求会打到同一个从站，读数互相覆盖。
+    private static async Task<ValidationIssue?> ValidateSharedBusStandbyAsync(ConfigDbContext db, Device device, int? excludeDeviceId, CancellationToken ct)
+    {
+        if (!device.Enabled || (device.ChannelId is null && device.StandbyChannelId is null)) return null;
+        var peers = await db.Devices.AsNoTracking()
+            .Where(x => x.Enabled && (excludeDeviceId == null || x.Id != excludeDeviceId) && x.Id != device.Id
+                && (device.ChannelId != null && x.ChannelId == device.ChannelId
+                    || device.StandbyChannelId != null && x.StandbyChannelId == device.StandbyChannelId))
+            .ToListAsync(ct);
+        return DeviceAcquisitionRules.ValidateSharedBusStandby(device, peers) is string message
+            ? new ValidationIssue("device.standby.sharedBus", nameof(Device.StandbyChannelId), message)
+            : null;
+    }
+
     private static async Task<ValidationIssue?> ValidateStandbyGatewayAsync(ConfigDbContext db, Device device, CancellationToken ct)
     {
         if (device.StandbyGatewayId is not int gatewayId) return null;

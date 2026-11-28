@@ -14,7 +14,7 @@ public sealed partial class GatewayCenterService
     private sealed class EngineeringPending(int gatewayId, Guid sessionId, GatewayEngineeringRequest request, long deadline)
     {
         public int GatewayId = gatewayId; public Guid SessionId = sessionId; public GatewayEngineeringRequest Request = request;
-        public long Deadline = deadline; public TaskCompletionSource<GatewayEngineeringReply> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public long Deadline = deadline; public bool Offered; public TaskCompletionSource<GatewayEngineeringReply> Completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
     private readonly ConcurrentDictionary<Guid, EngineeringPending> _engineering = new();
     public Task<T> EngineerAsync<T>(int deviceId, GatewayEngineeringOperation operation, object payload, int userId, CancellationToken ct, int? expectedGatewayId = null)
@@ -151,6 +151,7 @@ public sealed partial class GatewayCenterService
                 if (pending.SessionId != session || Environment.TickCount64 >= pending.Deadline || pending.Request.ExpiresTs <= Now || device is null || _paths.Resolve(device).GatewayId != caller.Id
                     || gateway.AppliedRevision != revision || pending.Request.ConfigurationRevision != revision || !allowed)
                 { pending.Completion.TrySetResult(new(pending.Request.Id, 409, null, "工程请求的会话、配置、权限或期限已变化；修改结果须核查")); continue; }
+                pending.Offered = true;
                 return new(Now, pending.Request);
             }
             return new(Now, null, active);
@@ -190,6 +191,28 @@ public sealed partial class GatewayCenterService
         var capabilities = JsonSerializer.Deserialize<string[]>(gateway.CapabilitiesJson, GatewayProtocol.Json);
         return capabilities?.Contains(GatewayProtocol.EngineeringCapability) == true && capabilities.Contains(GatewayProtocol.ImmediateReadCapability);
     }
+    internal async Task SettleEngineeringAfterPathChangeAsync(int deviceId, CancellationToken ct = default)
+    {
+        try
+        {
+            await _mutations.WaitAsync(ct);
+            try
+            {
+                foreach (var pending in _engineering.Values.Where(x => x.Request.DeviceId == deviceId && !x.Completion.Task.IsCompleted))
+                {
+                    pending.Completion.TrySetResult(pending.Offered
+                        ? new(pending.Request.Id, 409, null, "采集路径已变更，工程操作结果未知；请查询实际状态，不会自动重发")
+                        : new(pending.Request.Id, 409, null, "采集路径已变更，工程请求未下发"));
+                }
+            }
+            finally { _mutations.Release(); }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "采集路径切换后收口设备 {DeviceId} 的未完成工程请求失败", deviceId);
+        }
+    }
+
     // 执行时复核：探测需要设备所在区域的控制权，其余工程操作需要配置权。
     private static Task<bool> EngineeringPermissionAsync(Scada.Data.ConfigDbContext db, int id, int deviceId, GatewayEngineeringOperation operation, CancellationToken ct) =>
         Scada.Data.AccessModelProvider.UserHasForDeviceAsync(db, id,

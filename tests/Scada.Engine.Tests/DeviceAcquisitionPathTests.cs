@@ -1,11 +1,13 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Scada.Core.Acquisition;
 using Scada.Core.Entities;
 using Scada.Core.Enums;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
+using Scada.Core.Options;
 using Scada.Engine.Acquisition;
 
 namespace Scada.Engine.Tests;
@@ -204,6 +206,71 @@ public sealed class DeviceAcquisitionPathTests
         device.StandbySerialPort = "COM9";
         Assert.False(DeviceAcquisitionRules.TryStampUnstampedStandby(device, channels));
         Assert.Equal("COM9", device.StandbySerialPort);
+    }
+
+    [Fact]
+    public void EvaluateDoesNotAutoSwitchOntoALocalPathWhenLocalCollectionIsDisabled()
+    {
+        var device = Device(gateway: 2, standbyGateway: null, standbyHost: "10.0.0.2", standbyPort: 502);
+        Assert.True(DeviceAcquisitionRules.StandbyOf(device).IsLocal);
+        var state = new DeviceAcquisitionState { DeviceId = 1, ActivePath = AcquisitionPathKind.Primary, ActiveUnhealthySince = 1_000 };
+        Assert.NotNull(DeviceAcquisitionPathService.Evaluate(device, state, false, false, 12_000, localCollectionEnabled: true));
+        Assert.Null(DeviceAcquisitionPathService.Evaluate(device, state, false, false, 12_000, localCollectionEnabled: false));
+    }
+
+    [Fact]
+    public void SharedBusDevicesMustUseTheSameStandbyRoute()
+    {
+        Device Bus(int id, int? standbyChannel) => new()
+        {
+            Id = id, Name = $"bus-{id}", Protocol = ProtocolType.ModbusRtu, Enabled = true,
+            ChannelId = 7, SerialPort = "COM1",
+            StandbyChannelId = standbyChannel, StandbySerialPort = standbyChannel is null ? null : "COM8",
+            FailoverHoldMs = 10_000, SwitchbackHoldMs = 30_000
+        };
+        var left = Bus(1, 8);
+        var right = Bus(2, 8);
+        Assert.True(DeviceAcquisitionRules.SharesBusWith(left, right));
+        Assert.Null(DeviceAcquisitionRules.ValidateSharedBusStandby(left, [right]));
+        right.StandbyChannelId = 9;
+        right.StandbySerialPort = "COM9";
+        Assert.Equal(DeviceAcquisitionRules.SharedBusStandbyMismatch, DeviceAcquisitionRules.ValidateSharedBusStandby(left, [right]));
+    }
+
+    [Fact]
+    public async Task ManualSwitchMovesSharedChannelPeersTogether()
+    {
+        using var connection = TestRuntime.Open();
+        var factory = TestRuntime.Factory(connection);
+        Device Bus(int id) => new()
+        {
+            Id = id, Name = $"bus-{id}", Protocol = ProtocolType.ModbusRtu, Enabled = true,
+            ChannelId = 7, SerialPort = "COM1",
+            StandbyChannelId = 8, StandbySerialPort = "COM8",
+            FailoverHoldMs = 10_000, SwitchbackHoldMs = 30_000
+        };
+        var first = Bus(1);
+        var second = Bus(2);
+        var service = new DeviceAcquisitionPathService(factory, new PathSnapshot(first, second), new EmptyCache(), NullLogger<DeviceAcquisitionPathService>.Instance, new MutableRole());
+        await service.LoadAsync(CancellationToken.None);
+        await service.SwitchManualAsync(first.Id, AcquisitionPathKind.Standby, "试验", "engineer", CancellationToken.None);
+        Assert.Equal(AcquisitionPathKind.Standby, service.Current(first.Id));
+        Assert.Equal(AcquisitionPathKind.Standby, service.Current(second.Id));
+    }
+
+    [Fact]
+    public async Task ManualSwitchToLocalStandbyIsRejectedWhenLocalCollectionIsDisabled()
+    {
+        using var connection = TestRuntime.Open();
+        var factory = TestRuntime.Factory(connection);
+        var device = Device(gateway: 2, standbyGateway: null, standbyHost: "10.0.0.2", standbyPort: 502);
+        var settings = Options.Create(new ScadaSettings { LocalCollectionEnabled = false });
+        var service = new DeviceAcquisitionPathService(factory, new PathSnapshot(device), new EmptyCache(), NullLogger<DeviceAcquisitionPathService>.Instance, new MutableRole(), settings: settings);
+        await service.LoadAsync(CancellationToken.None);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.SwitchManualAsync(device.Id, AcquisitionPathKind.Standby, "试验", "engineer", CancellationToken.None));
+        Assert.Contains("本机采集已关闭", ex.Message);
+        Assert.Equal(AcquisitionPathKind.Primary, service.Current(device.Id));
     }
 
     [Fact]

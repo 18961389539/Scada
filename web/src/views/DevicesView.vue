@@ -84,8 +84,9 @@
         </el-table-column>
         <el-table-column :label="$t('devicesView.k17fc93')" width="110" show-overflow-tooltip><template #default="{ row }">{{ areaName(row.areaId) }}</template></el-table-column>
         <el-table-column :label="$t('devicesView.kb0c431')" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ protocolLabel(row.protocol) }}</template></el-table-column>
-        <el-table-column v-if="showEngineering" :label="$t('devicesView.k5dfe3e')" width="135" show-overflow-tooltip><template #default="{ row }">
-          <router-link v-if="row.gatewayId !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(row.gatewayId) } }">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</router-link><span v-else-if="row.gatewayId !== null">{{ $t('devicesView.k38b4cc', [row.gatewayId]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
+        <el-table-column v-if="showEngineering" :label="$t('devicesView.k5dfe3e')" width="160" show-overflow-tooltip><template #default="{ row }">
+          <router-link v-if="displayGatewayId(row) !== null && globalConfigure" :to="{ path: '/config/gateways', query: { gatewayId: String(displayGatewayId(row)) } }">{{ $t('devicesView.k38b4cc', [displayGatewayId(row)]) }}</router-link><span v-else-if="displayGatewayId(row) !== null">{{ $t('devicesView.k38b4cc', [displayGatewayId(row)]) }}</span><span v-else>{{ $t('devicesView.k3963d7') }}</span>
+          <el-tag v-if="row.configuredStandby || isConfiguredStandby(row)" size="small" type="warning" style="margin-left: 4px">{{ $t('devicesView.configuredStandby') }}</el-tag>
         </template></el-table-column>
         <el-table-column :label="$t('devicesView.k67d2d7')" min-width="190" show-overflow-tooltip>
           <template #default="{ row }">{{ endpointText(row) }}</template>
@@ -198,6 +199,14 @@ function canConfigureDevice(row: Device): boolean { return can(auth.user, 'Confi
 const certificateDevices = computed(() => certificateList.value.filter(d => can(auth.user, 'Configure', d.areaId)))
 function areaName(id?: number): string { return areas.value.find(a => a.id === id)?.name ?? (id ? `#${id}` : '-') }
 const gatewayFilter = computed(() => typeof route.query.gatewayId === 'string' && /^[1-9]\d*$/.test(route.query.gatewayId) ? Number(route.query.gatewayId) : null)
+function displayGatewayId(device: Device): number | null {
+  if (device.activeGatewayId !== undefined) return device.activeGatewayId
+  return acquisitionByDevice.value[device.id]?.activeGatewayId ?? device.gatewayId
+}
+function isConfiguredStandby(device: Device): boolean {
+  if (gatewayFilter.value == null) return !!device.configuredStandby
+  return displayGatewayId(device) === gatewayFilter.value && device.gatewayId !== gatewayFilter.value
+}
 const catalog = useCatalogQuery({ search: '', protocol: 'all', enabled: 'all' })
 const { search, protocol: filterProtocol, enabled: filterEnabled } = toRefs(catalog.draft)
 const filterHealth = ref<'all' | DeviceRuntimeKind>('all')
@@ -384,7 +393,7 @@ async function loadHealth(): Promise<void> {
 }
 function matchesCatalogFilters(device: Device): boolean {
   const applied = catalog.applied.value
-  if (gatewayFilter.value != null && device.gatewayId !== gatewayFilter.value) return false
+  if (gatewayFilter.value != null && displayGatewayId(device) !== gatewayFilter.value) return false
   if (applied.protocol !== 'all' && device.protocol !== applied.protocol) return false
   if (applied.enabled === 'enabled' && !device.enabled) return false
   if (applied.enabled === 'disabled' && device.enabled) return false

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Scada.Core;
+using Scada.Core.Acquisition;
 using Scada.Core.Interfaces;
 using Scada.Core.Models;
 using Scada.Core.Options;
@@ -33,7 +34,8 @@ public sealed class SystemWatch(
     Func<string, DiskCapacity>? diskProbe = null,
     IHistoryBackend? history = null,
     IDbContextFactory<RuntimeDbContext>? runtime = null,
-    IConfigSnapshot? config = null) : BackgroundService
+    IConfigSnapshot? config = null,
+    IDeviceAcquisitionPaths? paths = null) : BackgroundService
 {
     public static readonly TimeSpan Interval = TimeSpan.FromSeconds(30);
     private const double BytesPerGb = 1024d * 1024 * 1024;
@@ -85,7 +87,7 @@ public sealed class SystemWatch(
             warnings.Add(new(LocalCollection.DisabledHealthCode, LocalCollection.DisabledHealthMessage));
             if (config is not null)
             {
-                var unassigned = config.Devices.Count(LocalCollection.IsUnassignedEnabled);
+                var unassigned = config.Devices.Count(x => LocalCollection.IsActiveLocalEnabled(x, paths));
                 if (unassigned > 0)
                     warnings.Add(new(LocalCollection.UnassignedHealthCode, LocalCollection.UnassignedHealthMessage(unassigned)));
             }

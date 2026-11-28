@@ -1,5 +1,6 @@
 ﻿using Scada.Core.Enums;
 using Scada.Core.Security;
+using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
 
 namespace Scada.Core.Entities;
@@ -56,6 +57,10 @@ public class Device : IAuditedEntity
     // 组态并发令牌。省略修订号的旧客户端仍可保存；带上则必须与当前值一致。
     public long Revision { get; set; } = 1;
     public bool HasOpcPassword => !string.IsNullOrEmpty(OpcPasswordProtected);
+
+    // 列表接口叠加的运行时字段，不入库。
+    [NotMapped] public int? ActiveGatewayId { get; set; }
+    [NotMapped] public bool ConfiguredStandby { get; set; }
 
     public Device Clone() => (Device)MemberwiseClone();
 

@@ -40,5 +40,7 @@ public sealed class DeviceConfiguration : IEntityTypeConfiguration<Device>
         entity.Property(x => x.FailoverHoldMs).HasDefaultValue(10_000);
         entity.Property(x => x.SwitchbackHoldMs).HasDefaultValue(30_000);
         entity.Property(x => x.Revision).HasDefaultValue(1L).IsConcurrencyToken();
+        entity.Ignore(x => x.ActiveGatewayId);
+        entity.Ignore(x => x.ConfiguredStandby);
     }
 }

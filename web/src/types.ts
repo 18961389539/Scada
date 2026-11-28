@@ -108,6 +108,8 @@ export interface Device {
   standbyPort?: number | null
   failoverHoldMs?: number
   switchbackHoldMs?: number
+  activeGatewayId?: number | null
+  configuredStandby?: boolean
 }
 
 export type AcquisitionPathKind = 'Primary' | 'Standby'

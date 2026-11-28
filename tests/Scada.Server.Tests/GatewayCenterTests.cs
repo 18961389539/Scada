@@ -323,7 +323,7 @@ public partial class GatewayCenterTests
             await Config.ReloadAsync(); Revision = (await Service.ConfigurationAsync(Caller, Session.SessionId, default)).Revision;
             await Service.HeartbeatAsync(Caller, Session.SessionId, new(Revision, 0, 0, null, null, [new(DeviceId, "remote", true, null, Clock.Now, 1, 1, 0, 0)]), default);
         }
-        public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024, int maxAttempts = 10, int retryBaseMs = 1000, int retryMaxMs = 60000, bool includeText = false, IDeviceAcquisitionPaths? paths = null, Func<Rig, Task>? configure = null)
+        public static async Task<Rig> CreateAsync(long maxInboxBytes = 1024 * 1024, int maxAttempts = 10, int retryBaseMs = 1000, int retryMaxMs = 60000, bool includeText = false, IDeviceAcquisitionPaths? paths = null, Func<Rig, Task>? configure = null, IOptions<ScadaSettings>? scadaSettings = null)
         {
             var rig = new Rig(); Directory.CreateDirectory(rig._root);
             var configPath = Path.Combine(rig._root, "config.db");
@@ -340,7 +340,7 @@ public partial class GatewayCenterTests
             rig.History = new HistoryStore(new HistoryFactory(rig._root));
             rig._credentials = new DeviceCredentials(new EphemeralDataProtectionProvider());
             rig._local = new CollectorEngine(rig.Config, new NoDriver(), new ReadPlanBuilder(), rig.Cache, rig.Bus, new Sink(), Options.Create(new ScadaSettings()), NullLogger<CollectorEngine>.Instance);
-            rig.Service = rig.MakeService(rig.History, paths: paths);
+            rig.Service = rig.MakeService(rig.History, paths: paths, scadaSettings: scadaSettings);
             var identity = await rig.Service.CreateAsync("edge", 1, "test", default); rig.Caller = new(identity.Id, GatewayCenterService.TokenHash(identity.Token));
             await using (var db = rig.Factory.CreateDbContext())
             {
@@ -357,7 +357,7 @@ public partial class GatewayCenterTests
             var configuration = await rig.Service.ConfigurationAsync(rig.Caller, rig.Session.SessionId, default); rig.Revision = configuration.Revision;
             await rig.Service.HeartbeatAsync(rig.Caller, rig.Session.SessionId, new(rig.Revision, 0, 0, null, null), default); return rig;
         }
-        public GatewayCenterService MakeService(IGatewayHistoryWriter history, INodeRole? role = null, IDeviceAcquisitionPaths? paths = null) => new(Factory, Runtime, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock, Notifications, role, paths);
+        public GatewayCenterService MakeService(IGatewayHistoryWriter history, INodeRole? role = null, IDeviceAcquisitionPaths? paths = null, IOptions<ScadaSettings>? scadaSettings = null) => new(Factory, Runtime, _credentials, Config, Cache, Bus, history, _local, Options.Create(_settings), NullLogger<GatewayCenterService>.Instance, Clock, Notifications, role, paths, scadaSettings);
         public GatewayTelemetry Packet(long sequence, double value, long? timestamp = null) => new(1, Stream, sequence, DeviceId, Revision, Clock.Now, [new(TagId, value, TagQuality.Good, timestamp ?? Clock.Now)]);
         public GatewayTelemetry TextPacket(long sequence, string text, long? timestamp = null) => new(1, Stream, sequence, DeviceId, Revision, Clock.Now, [new(TextTagId, 0, TagQuality.Good, timestamp ?? Clock.Now, Text: text)]);
         public Task<GatewayAcknowledgement> AcceptAsync(GatewayTelemetry packet)
